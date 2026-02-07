@@ -246,15 +246,26 @@ function updateAdminUI() {
 // --- 데이터 동기화 로직 통합 (v3.1) ---
 // (기존 중복 saveToCloud 함수 제거됨)
 
-// --- 개선된 신청 로직 (비회원도 가능) ---
+// --- 개선된 신청 로직 (비회원도 가능, 멤버 등록은 경기 후) ---
 async function addPlayer() {
     const nameInput = document.getElementById('playerName');
     const name = nameInput.value.trim(); if (!name) return;
 
-    let m = members.find(x => x.name === name);
-    if (!m) { m = { id: Date.now() + Math.random(), name, rating: ELO_INITIAL, matchCount: 0, wins: 0, losses: 0, draws: 0, scoreDiff: 0, participationArr: [] }; members.push(m); }
-    if (!applicants.find(a => a.id === m.id)) {
-        applicants.push(m);
+    // 이미 멤버에 있는지 확인
+    let existingMember = members.find(x => x.name === name);
+    let applicantData;
+
+    if (existingMember) {
+        // 이미 멤버라면 기존 데이터 활용
+        applicantData = existingMember;
+    } else {
+        // 신규라면 임시 객체 생성 (members에는 아직 안 넣음)
+        applicantData = { id: Date.now() + Math.random(), name, rating: ELO_INITIAL, matchCount: 0, wins: 0, losses: 0, draws: 0, scoreDiff: 0, participationArr: [] };
+    }
+
+    // 신청 명단에 없으면 추가
+    if (!applicants.find(a => a.name === name)) {
+        applicants.push(applicantData);
     }
 
     nameInput.value = '';
@@ -470,10 +481,18 @@ window.updateLiveScore = async (id, team, val) => {
 async function commitSession() {
     if (!isAdmin || !confirm('결과를 기록하고 랭킹을 누적하시겠습니까?')) return;
     const sessionNum = currentSchedule[0].sessionNum, date = new Date().toLocaleDateString();
-    currentSchedule.forEach(m => { matchHistory.push({ id: Date.now() + Math.random(), date, sessionNum, t1_ids: m.t1.map(p => p.id), t2_ids: m.t2.map(p => p.id), t1_names: m.t1.map(p => p.name), t2_names: m.t2.map(p => p.name), score1: m.s1, score2: m.s2 }); });
+    // 랭킹전 종료 시 신규 멤버 등록
+    currentSchedule.forEach(m => {
+        [...m.t1, ...m.t2].forEach(p => {
+            if (!members.find(existing => existing.id === p.id)) {
+                members.push(p);
+            }
+        });
+        matchHistory.push({ id: Date.now() + Math.random(), date, sessionNum, t1_ids: m.t1.map(p => p.id), t2_ids: m.t2.map(p => p.id), t1_names: m.t1.map(p => p.name), t2_names: m.t2.map(p => p.name), score1: m.s1, score2: m.s2 });
+    });
     currentSchedule = []; applicants = [];
     await window.saveToCloud();
-    switchTab('rank'); alert('랭킹전이 확정되었습니다!');
+    switchTab('rank'); alert('랭킹전이 확정되었습니다! (신규 참여자 멤버 등록 완료)');
 }
 
 function renderHistory() {
