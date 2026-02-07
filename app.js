@@ -202,14 +202,20 @@ window.closeHelpModal = () => document.getElementById('helpModal').classList.add
 
 function tryAdminLogin() {
     const pw = document.getElementById('adminPassword').value;
-    if (pw === systemSettings.admin_pw) {
+    // 디버깅: 비밀번호 로드 상태 확인
+    if (!systemSettings || !systemSettings.admin_pw) {
+        console.warn("System settings not loaded yet. Using default.");
+    }
+    const correctPw = systemSettings?.admin_pw || "ace_admin"; // 로드 실패 시 기본값
+
+    if (pw === correctPw) {
         isAdmin = true;
         localStorage.setItem('ace_admin', 'true');
         closeAdminModal();
         updateAdminUI();
         alert('관리자 모드가 활성화되었습니다.');
     } else {
-        alert('비밀번호가 틀렸습니다.');
+        alert(`비밀번호가 틀렸습니다. (입력: ${pw})`);
     }
     document.getElementById('adminPassword').value = '';
 }
@@ -297,9 +303,12 @@ function updateApplyButtonState() {
 
 function recalculateAll() {
     try {
+        // 멤버 룩업 맵 생성 (성능 및 정확도 향상)
+        const memberMap = new Map();
         members.forEach(m => {
             m.rating = ELO_INITIAL; m.matchCount = 0; m.wins = 0; m.losses = 0; m.draws = 0; m.scoreDiff = 0;
             m.participationArr = [];
+            memberMap.set(String(m.id), m); // ID를 문자열로 통일하여 매칭
         });
 
         const sessionIds = [...new Set(matchHistory.map(h => (h.sessionNum || '').toString()))].filter(Boolean).sort((a, b) => parseInt(a) - parseInt(b));
@@ -309,9 +318,12 @@ function recalculateAll() {
             members.forEach(m => { ratingSnapshot[m.id] = m.rating; });
 
             sessionMatches.forEach(h => {
-                const team1 = h.t1_ids.map(id => members.find(m => m.id === id)).filter(Boolean);
-                const team2 = h.t2_ids.map(id => members.find(m => m.id === id)).filter(Boolean);
-                if (team1.length < 2 || team2.length < 2) return;
+                const team1 = h.t1_ids.map(id => memberMap.get(String(id))).filter(Boolean);
+                const team2 = h.t2_ids.map(id => memberMap.get(String(id))).filter(Boolean);
+                if (team1.length < 2 || team2.length < 2) {
+                    console.warn(`Match ${h.id} skipped: Missing players in members list.`);
+                    return;
+                }
                 const avg1 = ((ratingSnapshot[team1[0].id] || ELO_INITIAL) + (ratingSnapshot[team1[1].id] || ELO_INITIAL)) / 2;
                 const avg2 = ((ratingSnapshot[team2[0].id] || ELO_INITIAL) + (ratingSnapshot[team2[1].id] || ELO_INITIAL)) / 2;
                 const expected = 1 / (1 + Math.pow(10, (avg2 - avg1) / 400));
@@ -480,19 +492,47 @@ window.updateLiveScore = async (id, team, val) => {
 
 async function commitSession() {
     if (!isAdmin || !confirm('결과를 기록하고 랭킹을 누적하시겠습니까?')) return;
-    const sessionNum = currentSchedule[0].sessionNum, date = new Date().toLocaleDateString();
-    // 랭킹전 종료 시 신규 멤버 등록
-    currentSchedule.forEach(m => {
-        [...m.t1, ...m.t2].forEach(p => {
-            if (!members.find(existing => existing.id === p.id)) {
-                members.push(p);
-            }
+    try {
+        const sessionNum = currentSchedule[0].sessionNum, date = new Date().toLocaleDateString();
+        let newMemberCount = 0;
+
+        // 랭킹전 종료 시 신규 멤버 등록
+        currentSchedule.forEach(m => {
+            // 선수 객체 검증
+            const allPlayers = [...m.t1, ...m.t2];
+            allPlayers.forEach(p => {
+                if (!p || !p.id) {
+                    console.error("Invalid player object in schedule:", p);
+                    return;
+                }
+                // ID 타입 안전 비교
+                if (!members.find(existing => String(existing.id) === String(p.id))) {
+                    members.push(p);
+                    newMemberCount++;
+                }
+            });
+
+            matchHistory.push({
+                id: Date.now() + Math.random(),
+                date,
+                sessionNum,
+                t1_ids: m.t1.map(p => p.id),
+                t2_ids: m.t2.map(p => p.id),
+                t1_names: m.t1.map(p => p.name),
+                t2_names: m.t2.map(p => p.name),
+                score1: parseInt(m.s1) || 0,
+                score2: parseInt(m.s2) || 0
+            });
         });
-        matchHistory.push({ id: Date.now() + Math.random(), date, sessionNum, t1_ids: m.t1.map(p => p.id), t2_ids: m.t2.map(p => p.id), t1_names: m.t1.map(p => p.name), t2_names: m.t2.map(p => p.name), score1: m.s1, score2: m.s2 });
-    });
-    currentSchedule = []; applicants = [];
-    await window.saveToCloud();
-    switchTab('rank'); alert('랭킹전이 확정되었습니다! (신규 참여자 멤버 등록 완료)');
+
+        currentSchedule = []; applicants = [];
+        await window.saveToCloud();
+        switchTab('rank');
+        alert(`랭킹전이 확정되었습니다!\n(신규 멤버 ${newMemberCount}명 등록됨)`);
+    } catch (e) {
+        console.error("Commit Session Error:", e);
+        alert("오류가 발생했습니다. 콘솔을 확인해주세요.");
+    }
 }
 
 function renderHistory() {
