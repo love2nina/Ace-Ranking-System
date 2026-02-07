@@ -478,6 +478,21 @@ function renderCurrentMatches() {
             container.appendChild(div);
         });
     });
+
+    // 모든 경기 점수가 입력되었는지 확인 및 종료 버튼 표시
+    const finishedCount = currentSchedule.filter(m => (parseInt(m.s1) + parseInt(m.s2)) > 0).length;
+
+    if (finishedCount === currentSchedule.length && currentSchedule.length > 0) {
+        const btnDiv = document.createElement('div');
+        btnDiv.style.textAlign = 'center'; btnDiv.style.marginTop = '30px';
+        btnDiv.innerHTML = `<button id="updateEloBtn" class="primary" onclick="commitSession()">🏆 랭킹전 종료 및 결과 확정</button>`;
+        container.appendChild(btnDiv);
+    } else if (currentSchedule.length > 0) {
+        const infoDiv = document.createElement('div');
+        infoDiv.style.textAlign = 'center'; infoDiv.style.marginTop = '30px'; infoDiv.style.color = 'var(--text-secondary)';
+        infoDiv.innerHTML = `<p>⚠️ 모든 경기의 점수를 입력하면 [종료] 버튼이 나타납니다. (${finishedCount}/${currentSchedule.length} 완료)</p>`;
+        container.appendChild(infoDiv);
+    }
 }
 
 window.updateLiveScore = async (id, team, val) => {
@@ -724,8 +739,13 @@ function renderEloChart() {
 
 function updatePlayerSelect() {
     const select = document.getElementById('playerSelect');
-    if (!select || select.options.length > 1) return;
+    if (!select) return;
 
+    // 기존 옵션 유지 (첫번째 '선수 선택' 등) 하되, 목록 갱신
+    // 여기서는 싹 비우고 다시 채움
+    select.innerHTML = '<option value="" disabled selected>선수 선택 (랭킹 추이)</option>';
+
+    // 랭킹 보드에 있는 멤버들만 표시 (이름순 정렬)
     [...members].sort((a, b) => a.name.localeCompare(b.name)).forEach(m => {
         const opt = document.createElement('option');
         opt.value = m.id;
