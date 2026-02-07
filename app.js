@@ -86,7 +86,7 @@ function initFirebase() {
             console.log("System Settings Loaded:", systemSettings);
         } else {
             // 초기 설정이 없으면 생성
-            setDoc(settingsRef, { admin_pw: "ace_admin" });
+            setDoc(settingsRef, { admin_pw: "1234" });
         }
     });
 
@@ -425,7 +425,7 @@ async function generateSchedule() {
             let roundNum = Math.floor(matchIdx / (g.length === 8 ? 2 : 1)) + 1;
             currentSchedule.push({
                 id: Math.random().toString(36).substr(2, 9), sessionNum, group: gLabel, groupRound: roundNum,
-                t1: [g[m[0][0]], g[m[0][1]]], t2: [g[m[1][0]], g[m[1][1]]], s1: 0, s2: 0
+                t1: [g[m[0][0]], g[m[0][1]]], t2: [g[m[1][0]], g[m[1][1]]], s1: null, s2: null
             });
         });
     });
@@ -469,9 +469,9 @@ function renderCurrentMatches() {
             div.innerHTML = `
                 <div style="flex:1"><strong>${m.t1[0].name}, ${m.t1[1].name}</strong></div>
                 <div class="vs">
-                    <input type="number" class="score-input" value="${m.s1}" min="0" max="6" onchange="updateLiveScore('${m.id}',1,this.value)"> 
+                    <input type="number" class="score-input" value="${m.s1 !== null ? m.s1 : ''}" placeholder="-" min="0" max="6" onchange="updateLiveScore('${m.id}',1,this.value)"> 
                     : 
-                    <input type="number" class="score-input" value="${m.s2}" min="0" max="6" onchange="updateLiveScore('${m.id}',2,this.value)">
+                    <input type="number" class="score-input" value="${m.s2 !== null ? m.s2 : ''}" placeholder="-" min="0" max="6" onchange="updateLiveScore('${m.id}',2,this.value)">
                 </div>
                 <div style="flex:1; text-align:right"><strong>${m.t2[0].name}, ${m.t2[1].name}</strong></div>
             `;
@@ -479,8 +479,8 @@ function renderCurrentMatches() {
         });
     });
 
-    // 모든 경기 점수가 입력되었는지 확인 및 종료 버튼 표시
-    const finishedCount = currentSchedule.filter(m => (parseInt(m.s1) + parseInt(m.s2)) > 0).length;
+    // 모든 경기 점수가 입력되었는지 확인 및 종료 버튼 표시 (null이 아니어야 함)
+    const finishedCount = currentSchedule.filter(m => m.s1 !== null && m.s2 !== null).length;
 
     if (finishedCount === currentSchedule.length && currentSchedule.length > 0) {
         const btnDiv = document.createElement('div');
@@ -488,6 +488,10 @@ function renderCurrentMatches() {
         btnDiv.innerHTML = `<button id="updateEloBtn" class="primary" onclick="commitSession()">🏆 랭킹전 종료 및 결과 확정</button>`;
         container.appendChild(btnDiv);
     } else if (currentSchedule.length > 0) {
+        const btnDiv = document.createElement('div');
+        btnDiv.style.textAlign = 'center'; btnDiv.style.marginTop = '30px';
+        // 아직 완료되지 않았을 때는 회색 버튼(비활성)으로 보여주는 것이 더 직관적일 수 있음
+        // 하지만 요청은 "생기게 해달라(숨김->표시)" 였으므로 안내 문구 유지
         const infoDiv = document.createElement('div');
         infoDiv.style.textAlign = 'center'; infoDiv.style.marginTop = '30px'; infoDiv.style.color = 'var(--text-secondary)';
         infoDiv.innerHTML = `<p>⚠️ 모든 경기의 점수를 입력하면 [종료] 버튼이 나타납니다. (${finishedCount}/${currentSchedule.length} 완료)</p>`;
@@ -496,8 +500,10 @@ function renderCurrentMatches() {
 }
 
 window.updateLiveScore = async (id, team, val) => {
-    let score = parseInt(val) || 0;
-    if (score < 0) score = 0; if (score > 6) score = 6;
+    let score = val === '' ? null : (parseInt(val) || 0); // 빈칸이면 null
+    if (score !== null) {
+        if (score < 0) score = 0; if (score > 6) score = 6;
+    }
     const m = currentSchedule.find(x => x.id === id);
     if (m) {
         if (team === 1) m.s1 = score; else m.s2 = score;
@@ -743,7 +749,7 @@ function updatePlayerSelect() {
 
     // 기존 옵션 유지 (첫번째 '선수 선택' 등) 하되, 목록 갱신
     // 여기서는 싹 비우고 다시 채움
-    select.innerHTML = '<option value="" disabled selected>선수 선택 (랭킹 추이)</option>';
+    select.innerHTML = '<option value="" disabled selected>선수 선택</option>';
 
     // 랭킹 보드에 있는 멤버들만 표시 (이름순 정렬)
     [...members].sort((a, b) => a.name.localeCompare(b.name)).forEach(m => {
