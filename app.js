@@ -45,7 +45,7 @@ function initFirebase() {
 
     // Firebase 설정값 (운영자님 프로젝트 설정으로 교체 필요)
     const firebaseConfig = {
-        apiKey: process.env.GOOGLE_API_KEY,
+        apiKey: "AIzaSyBjGjM6KpHG1lgQ9Dr48AawB8gvkkC8pCs",
         authDomain: "ace-ranking-system.firebaseapp.com",
         projectId: "ace-ranking-system",
         storageBucket: "ace-ranking-system.firebasestorage.app",
