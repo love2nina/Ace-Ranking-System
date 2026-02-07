@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>도토리 키재기 | ACE 랭킹 시스템</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body>
+    <div class="container">
+        <!-- 상단 헤더 및 관리자 제어바 -->
+        <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
+            <div>
+                <h1>ACE CLUB <span style="font-size: 1.2rem; color: var(--accent-color); font-weight: 400;">Ranking
+                        System</span></h1>
+                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 5px;">실시간 클라우드 랭킹 v3.0</p>
+            </div>
+            <div id="adminStatusArea" style="text-align: right;">
+                <span id="syncStatus" style="font-size: 0.75rem; color: var(--success); margin-right: 10px;">● Cloud
+                    Online</span>
+                <button id="helpBtn" class="secondary"
+                    style="padding: 5px 12px; font-size: 0.8rem; margin-right: 5px;">사용자 가이드</button>
+                <button id="adminLoginBtn" class="secondary" style="padding: 5px 12px; font-size: 0.8rem;">관리자
+                    로그인</button>
+            </div>
+        </header>
+
+        <!-- 탭 네비게이션 -->
+        <div class="tab-container">
+            <button class="tab-btn active" data-tab="stats" onclick="switchTab('stats')">대시보드</button>
+            <button class="tab-btn" data-tab="rank" onclick="switchTab('rank')">종합랭킹</button>
+            <button class="tab-btn" data-tab="apply" onclick="switchTab('apply')">참가신청</button>
+            <button class="tab-btn" data-tab="match" onclick="switchTab('match')">대진표</button>
+            <button class="tab-btn" data-tab="history" onclick="switchTab('history')">히스토리</button>
+        </div>
+
+        <!-- 1. 참가 신청 섹션 -->
+        <div id="tab-apply" class="tab-content">
+            <div class="card">
+                <h3>📢 참가 신청</h3>
+                <div class="input-group">
+                    <input type="text" id="playerName" placeholder="선수 이름 입력">
+                    <button id="addPlayerBtn">신청</button>
+                </div>
+                <div id="playerList" class="player-list-container">
+                    <!-- 참가 명단 동적 생성 -->
+                </div>
+
+                <div id="dashboard"
+                    style="display: none; margin-top: 30px; border-top: 1px solid var(--border-color); padding-top: 20px;">
+                    <div class="optimization-card">
+                        <div id="optimizationInfo">
+                            <!-- 분석 정보 노출 -->
+                        </div>
+                    </div>
+
+                    <div class="admin-only" style="display: none;">
+                        <div class="input-group"
+                            style="margin-top: 15px; display: flex; flex-direction: column; gap: 8px;">
+                            <div style="display: flex; gap: 10px;">
+                                <input type="number" id="manualSessionNum" placeholder="회차" style="max-width: 100px;">
+                                <span style="align-self: center; color: var(--text-secondary); font-size: 0.9rem;">회차
+                                    랭킹전 진행</span>
+                            </div>
+                            <div style="display: flex; gap: 10px; align-items: center;">
+                                <input type="text" id="customSplitInput" placeholder="조 인원 직접 입력 (예: 5, 5, 4, 6)"
+                                    style="flex: 1;">
+                            </div>
+                            <p id="splitStatus" style="font-size: 0.8rem; margin: 0;"></p>
+                        </div>
+                        <div style="display: flex; gap: 10px; margin-top: 20px;">
+                            <button id="generateScheduleBtn" style="flex: 1;">대진표 생성</button>
+                        </div>
+                    </div>
+                    <div class="guest-only"
+                        style="text-align: center; color: var(--text-secondary); padding: 15px; background: rgba(255,255,255,0.03); border-radius: 8px; margin-top: 15px;">
+                        ⚠️ 대진 생성을 기다리는 중입니다.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. 대진표 및 결과 섹션 -->
+        <div id="tab-match" class="tab-content">
+            <div class="card">
+                <div id="groupTabsContainer" class="sub-tabs" style="display: none; margin-bottom: 20px;">
+                    <!-- A조, B조 탭 동적 생성 -->
+                </div>
+                <div id="matchContainer">
+                    <p style="text-align: center; color: var(--text-secondary); padding: 40px;">대진표를 생성해 주세요.</p>
+                </div>
+                <div id="matchFooter" style="display: none; margin-top: 20px; text-align: center;">
+                    <div class="admin-only" style="display: none;">
+                        <button id="updateEloBtn"
+                            style="background-color: var(--success); color: white; width: 100%;">랭킹전을 종료합니다.</button>
+                        <p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 10px;">* 업데이트 시 현재 대진 기록이
+                            클라우드 히스토리에 누적됩니다.</p>
+                    </div>
+                    <div class="guest-only" style="padding: 15px; color: var(--accent-color); font-weight: bold;">
+                        🏅 실시간 경기 결과가 업데이트 중입니다.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. 경기 히스토리 섹션 -->
+        <div id="tab-history" class="tab-content">
+            <div class="card">
+                <h3>� 경기 기록</h3>
+                <div id="historyList">
+                    <!-- 히스토리 카드 동적 생성 -->
+                </div>
+            </div>
+        </div>
+
+        <!-- 4. 종합 랭킹 섹션 -->
+        <div id="tab-rank" class="tab-content">
+            <div class="card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h3>🏆 종합 랭킹 보드</h3>
+                    <span id="sessionBadge" class="session-info">진행된 대회: 0회차</span>
+                </div>
+                <div class="table-responsive">
+                    <table id="rankingTable">
+                        <thead>
+                            <tr>
+                                <th>순위</th>
+                                <th>성명</th>
+                                <th>Rating</th>
+                                <th>전적</th>
+                                <th>득실</th>
+                                <th>참여율</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <!-- 5. 데이터 분석 섹션 -->
+        <div id="tab-stats" class="tab-content active">
+            <div class="stats-grid">
+                <div class="card stat-card best-player-card">
+                    <div class="stat-label">👑 최고의 도토리</div>
+                    <div id="statBestPlayer" class="stat-value">---</div>
+                </div>
+                <div class="card stat-card shadow-sm">
+                    <div class="stat-label">총 선수</div>
+                    <div id="statTotalPlayers" class="stat-value">0</div>
+                </div>
+                <div class="card stat-card shadow-sm">
+                    <div class="stat-label">대회 횟수</div>
+                    <div id="statTotalSessions" class="stat-value">0</div>
+                </div>
+                <div class="card stat-card shadow-sm">
+                    <div class="stat-label">누적 매치</div>
+                    <div id="statTotalMatches" class="stat-value">0</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>📊 도토리 키재기</h3>
+                <div style="height: 300px; position: relative;">
+                    <canvas id="eloChart"></canvas>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>📈 도토리 성장 추이</h3>
+                <div style="margin-bottom: 15px;">
+                    <select id="playerSelect" style="max-width: 200px;" onchange="renderPlayerTrend()">
+                        <option value="">선수 선택</option>
+                    </select>
+                </div>
+                <div style="height: 300px; position: relative;">
+                    <canvas id="trendChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 관리자 로그인 모달 -->
+    <div id="adminModal" class="modal hidden">
+        <div class="modal-content" style="max-width: 350px;">
+            <h3>🔐 관리자 인증</h3>
+            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 15px;">운영 비밀번호를 입력해 주세요.</p>
+            <input type="text" id="adminPassword" class="admin-pw-input" placeholder="비밀번호 입력"
+                style="width: 100%; margin-bottom: 20px;" autocomplete="new-password">
+            <div style="display: flex; gap: 10px;">
+                <button onclick="closeAdminModal()" class="secondary" style="flex: 1;">취소</button>
+                <button id="confirmAdminBtn" style="flex: 1;">로그인</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 경기 수정 모달 (기존 유지하되 관리자만 호출 가능하도록 로직 조정 예정) -->
+    <div id="editModal" class="modal hidden">
+        <div class="modal-content">
+            <h3>경기 기록 수정</h3>
+            <div id="editFields"></div>
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button onclick="closeModal()" class="secondary" style="flex: 1;">취소</button>
+                <button id="saveEditBtn" style="flex: 1;">저장</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 사용 가이드 모달 -->
+    <div id="helpModal" class="modal hidden">
+        <div class="modal-content" style="max-width: 600px; max-height: 80vh; overflow-y: auto; text-align: left;">
+            <div
+                style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid var(--border-color); padding-bottom: 15px;">
+                <h2 style="margin: 0; color: var(--accent-color);">🏸 ACE 랭킹 시스템 사용 가이드</h2>
+                <button onclick="closeHelpModal()" class="secondary" style="padding: 5px 10px;">닫기</button>
+            </div>
+
+            <div class="manual-section">
+                <h3>📋 1. 참가자용 가이드 (모든 사용자)</h3>
+                <div class="manual-item">
+                    <strong>✅ 참가 신청 (참가신청 탭)</strong>
+                    <ul>
+                        <li><strong>이름 입력</strong>: '선수 이름 입력' 칸에 본인의 이름을 입력합니다.</li>
+                        <li><strong>신청 확인</strong>: 하단 명단에 본인의 이름이 나타나면 정상 처리된 것입니다.</li>
+                    </ul>
+                </div>
+                <div class="manual-item">
+                    <strong>⚔️ 대진표 및 경기 진행 (대진표 탭)</strong>
+                    <ul>
+                        <li><strong>대진 확인</strong>: 본인이 속한 조(A, B 등)를 선택하여 상대를 확인합니다.</li>
+                        <li><strong>점수 입력</strong>: 경기가 끝나면 누구나 <strong>실시간으로 점수를 입력</strong>할 수 있습니다.</li>
+                    </ul>
+                </div>
+                <div class="manual-item">
+                    <strong>📊 랭킹 및 대시보드</strong>
+                    <ul>
+                        <li><strong>종합 랭킹</strong>: 현재 모든 선수의 ELO 점수, 승률 등을 확인합니다.</li>
+                        <li><strong>도토리 성장 추이</strong>: 대시보드에서 본인의 이름을 선택하여 실력 변화 추이를 확인하세요.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="manual-section" style="margin-top: 30px;">
+                <h3>🔐 2. 관리자용 가이드 (운영진)</h3>
+                <div class="manual-item">
+                    <strong>🔑 관리자 로그인</strong>
+                    <p>상단 [관리자 로그인] 버튼 클릭 후 암호 입력 시 관리 기능이 활성화됩니다.</p>
+                </div>
+                <div class="manual-item">
+                    <strong>⚙️ 대회 운영 프로세스</strong>
+                    <ol>
+                        <li><strong>명단 확정</strong>: 신청 인원에 따른 최적의 조 편성 추천을 확인합니다.</li>
+                        <li><strong>대진표 생성</strong>: 회차와 조 인원 설정을 확인 후 [대진표 생성]을 누릅니다.</li>
+                        <li><strong>랭킹 확정</strong>: 모든 경기 완료 후 [랭킹전을 종료합니다] 버튼을 누르면 점수가 반영됩니다.</li>
+                    </ol>
+                </div>
+            </div>
+
+            <div class="manual-section"
+                style="margin-top: 30px; background: rgba(56, 189, 248, 0.05); padding: 15px; border-radius: 8px;">
+                <h3>💡 3. ELO 시스템 이해하기</h3>
+                <ul>
+                    <li><strong>1500점</strong>: 모든 참가자의 시작 점수이자 평균점입니다.</li>
+                    <li><strong>보정 계수</strong>: ELO 점수 차이가 클수록 점수가 더 많이 변동되어 실력을 빠르게 반영합니다.</li>
+                </ul>
+                <div style="margin-top: 10px; font-size: 0.85rem; color: var(--text-secondary);">
+                    💡 <strong>팁</strong>: 스마트폰 브라우저에서 '홈 화면에 추가'를 하면 앱처럼 사용 가능합니다.
+                </div>
+            </div>
+
+            <div style="margin-top: 30px; text-align: center;">
+                <button onclick="closeHelpModal()" style="width: 100%;">사용자 가이드 닫기</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase SDK (v10) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, collection, doc, setDoc, getDoc, onSnapshot, addDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        // Firebase 설정 (app.js에서 접근 가능하도록 window 객체에 바인딩)
+        window.FB_SDK = { initializeApp, getFirestore, collection, doc, setDoc, getDoc, onSnapshot, addDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp };
+    </script>
+    <script type="module" src="app.js"></script>
+</body>
+
+</html>
