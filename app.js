@@ -480,7 +480,13 @@ function renderCurrentMatches() {
     });
 
     // 모든 경기 점수가 입력되었는지 확인 및 종료 버튼 표시 (null이 아니어야 함)
-    const finishedCount = currentSchedule.filter(m => m.s1 !== null && m.s2 !== null).length;
+    // 안전장치: null 또는 undefined가 아니고, 숫자형이어야 함
+    const finishedCount = currentSchedule.filter(m =>
+        m.s1 !== null && m.s1 !== undefined && typeof m.s1 === 'number' &&
+        m.s2 !== null && m.s2 !== undefined && typeof m.s2 === 'number'
+    ).length;
+
+    console.log(`Match Status: ${finishedCount}/${currentSchedule.length}`, currentSchedule);
 
     if (finishedCount === currentSchedule.length && currentSchedule.length > 0) {
         const btnDiv = document.createElement('div');
@@ -512,7 +518,20 @@ window.updateLiveScore = async (id, team, val) => {
 };
 
 async function commitSession() {
-    if (!isAdmin || !confirm('결과를 기록하고 랭킹을 누적하시겠습니까?')) return;
+    if (!isAdmin) return;
+
+    // 안전장치: 모든 경기가 완료되었는지 재확인
+    const unfinished = currentSchedule.filter(m =>
+        m.s1 === null || m.s1 === undefined || typeof m.s1 !== 'number' ||
+        m.s2 === null || m.s2 === undefined || typeof m.s2 !== 'number'
+    );
+
+    if (unfinished.length > 0) {
+        alert(`아직 진행 중인 경기가 ${unfinished.length}건 있습니다.\n모든 점수를 입력해야 종료할 수 있습니다.`);
+        return;
+    }
+
+    if (!confirm('결과를 기록하고 랭킹을 누적하시겠습니까?')) return;
     try {
         const sessionNum = currentSchedule[0].sessionNum, date = new Date().toLocaleDateString();
         let newMemberCount = 0;
