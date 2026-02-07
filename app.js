@@ -21,7 +21,7 @@ const ELO_INITIAL = 1500;
 const K_FACTOR = 32;
 const GAME_COUNTS = { 4: 3, 5: 5, 6: 6, 7: 7, 8: 8 };
 const MATCH_PATTERNS = {
-    8: [[[0, 4], [1, 5]], [[2, 6], [3, 7]], [[0, 5], [3, 6]], [[1, 4], [7, 2]], [[2, 4], [0, 6]], [[3, 5], [1, 7]], [[0, 7], [3, 4]], [[2, 5], [1, 6]]],
+    8: [[[0, 4], [1, 5]], [[2, 6], [3, 7]], [[0, 5], [3, 6]], [[1, 4], [2, 7]], [[2, 4], [0, 6]], [[3, 5], [1, 7]], [[0, 7], [3, 4]], [[2, 5], [1, 6]]],
     7: [[[0, 3], [2, 6]], [[1, 4], [2, 5]], [[0, 4], [1, 3]], [[4, 5], [3, 6]], [[1, 6], [2, 3]], [[0, 5], [2, 4]], [[0, 6], [1, 5]]],
     6: [[[0, 2], [1, 4]], [[1, 3], [4, 5]], [[0, 5], [2, 4]], [[0, 3], [1, 2]], [[0, 4], [3, 5]], [[1, 5], [2, 3]]],
     5: [[[0, 2], [1, 4]], [[0, 4], [1, 3]], [[1, 2], [3, 4]], [[0, 3], [2, 4]], [[0, 1], [2, 3]]],
@@ -327,8 +327,16 @@ function recalculateAll() {
                 const avg1 = ((ratingSnapshot[team1[0].id] || ELO_INITIAL) + (ratingSnapshot[team1[1].id] || ELO_INITIAL)) / 2;
                 const avg2 = ((ratingSnapshot[team2[0].id] || ELO_INITIAL) + (ratingSnapshot[team2[1].id] || ELO_INITIAL)) / 2;
                 const expected = 1 / (1 + Math.pow(10, (avg2 - avg1) / 400));
+                // 승패 로직
+                // 승패 로직
                 let actual = h.score1 > h.score2 ? 1 : (h.score1 < h.score2 ? 0 : 0.5);
-                const diff = Math.abs(h.score1 - h.score2), multiplier = diff > 0 ? Math.log(diff + 1) : 1;
+                const diff = Math.abs(h.score1 - h.score2);
+
+                // 가중치 계산 (2점차 = 1.0배 기준)
+                // 공식: log(diff + 1) / log(3)
+                // 1점차: 0.63, 2점차: 1.0, 6점차: 1.77
+                const multiplier = diff > 0 ? (Math.log(diff + 1) / Math.log(3)) : 1;
+
                 const change = K_FACTOR * multiplier * (actual - expected);
 
                 h.elo_at_match = { t1_before: avg1, t2_before: avg2, expected, change };

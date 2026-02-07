@@ -261,14 +261,82 @@
 
             <div class="manual-section"
                 style="margin-top: 30px; background: rgba(56, 189, 248, 0.05); padding: 15px; border-radius: 8px;">
-                <h3>💡 3. ELO 시스템 이해하기</h3>
-                <ul>
-                    <li><strong>1500점</strong>: 모든 참가자의 시작 점수이자 평균점입니다.</li>
-                    <li><strong>보정 계수</strong>: ELO 점수 차이가 클수록 점수가 더 많이 변동되어 실력을 빠르게 반영합니다.</li>
-                </ul>
-                <div style="margin-top: 10px; font-size: 0.85rem; color: var(--text-secondary);">
-                    💡 <strong>팁</strong>: 스마트폰 브라우저에서 '홈 화면에 추가'를 하면 앱처럼 사용 가능합니다.
+                <h3 style="color: var(--accent-color); margin-bottom: 10px;">📊 ELO 점수 산정 방식</h3>
+                <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 15px;">
+                    ACE 랭킹은 <strong>상대 팀과의 기대 승률</strong>과 <strong>경기 점수 차(득실)</strong>를 모두 반영합니다.
+                </p>
+
+                <h4 style="color: white; margin-bottom: 8px; font-size: 0.95rem;">1. 기대 승률에 따른 기본 점수 (2점 차 승리 기준)</h4>
+                <div class="table-responsive" style="margin-bottom: 20px;">
+                    <table
+                        style="width: 100%; font-size: 0.85rem; text-align: center; border: 1px solid var(--border-color);">
+                        <tr style="background: rgba(255,255,255,0.1);">
+                            <th style="padding: 8px;">기대 승률</th>
+                            <th>승리 시 (+점수)</th>
+                            <th>패배 시 (-점수)</th>
+                        </tr>
+                        <tr>
+                            <td>45% (열세)</td>
+                            <td style="color: var(--success);">+17.6점</td>
+                            <td style="color: var(--danger);">-14.4점</td>
+                        </tr>
+                        <tr>
+                            <td>50% (대등)</td>
+                            <td style="color: var(--success);">+16.0점</td>
+                            <td style="color: var(--danger);">-16.0점</td>
+                        </tr>
+                        <tr>
+                            <td>55% (우세)</td>
+                            <td style="color: var(--success);">+14.4점</td>
+                            <td style="color: var(--danger);">-17.6점</td>
+                        </tr>
+                    </table>
                 </div>
+
+                <h4 style="color: white; margin-bottom: 8px; font-size: 0.95rem;">2. 점수 차(득실) 가중치</h4>
+                <div class="table-responsive">
+                    <table
+                        style="width: 100%; font-size: 0.85rem; text-align: center; border: 1px solid var(--border-color);">
+                        <tr style="background: rgba(255,255,255,0.1);">
+                            <th style="padding: 8px;">점수 차</th>
+                            <th>가중치</th>
+                            <th>비고</th>
+                        </tr>
+                        <tr>
+                            <td>1점 차</td>
+                            <td>63%</td>
+                            <td style="color: var(--text-secondary);">접전</td>
+                        </tr>
+                        <tr style="background: rgba(56, 189, 248, 0.1);">
+                            <td style="font-weight: bold; color: var(--accent-color);">2점 차</td>
+                            <td style="font-weight: bold; color: var(--accent-color);">100%</td>
+                            <td style="color: var(--accent-color);">기준</td>
+                        </tr>
+                        <tr>
+                            <td>3점 차</td>
+                            <td>126%</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>4점 차</td>
+                            <td>146%</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>5점 차</td>
+                            <td>163%</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>6점 차</td>
+                            <td>177%</td>
+                            <td style="color: var(--success);">완승</td>
+                        </tr>
+                    </table>
+                </div>
+                <p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 10px; text-align: center;">
+                    * 접전(1점 차)은 점수 변동이 적고, 완승(6점 차)은 점수 변동이 큽니다.
+                </p>
             </div>
 
             <div style="margin-top: 30px; text-align: center;">
