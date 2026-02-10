@@ -12,20 +12,18 @@
 <body>
     <div class="container">
         <!-- 상단 헤더 및 관리자 제어바 -->
-        <header style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 25px;">
-            <div style="text-align: left;">
-                <h1 style="margin: 0; padding: 0; line-height: 1.2;">도토리 키재기</h1>
-                <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 5px 0 0 0; padding: 0;">
-                    ACE Club Ranking Management System v3.0
-                </p>
+        <!-- 상단 헤더 및 관리자 제어바 -->
+        <header class="main-header">
+            <div class="header-branding">
+                <h1>도토리 키재기</h1>
+                <p>ACE Club Ranking Management System v3.0</p>
             </div>
-            <div id="adminStatusArea" style="text-align: right;">
-                <span id="syncStatus" style="font-size: 0.75rem; color: var(--success); margin-right: 10px;">● Cloud
-                    Online</span>
-                <button id="helpBtn" class="secondary"
-                    style="padding: 5px 12px; font-size: 0.8rem; margin-right: 5px;">사용자 가이드</button>
-                <button id="adminLoginBtn" class="secondary" style="padding: 5px 12px; font-size: 0.8rem;">관리자
-                    로그인</button>
+            <div id="adminStatusArea" class="header-controls">
+                <span id="syncStatus" class="sync-status">● Cloud Online</span>
+                <div class="header-buttons">
+                    <button id="helpBtn" class="secondary">사용자 가이드</button>
+                    <button id="adminLoginBtn" class="secondary">관리자 로그인</button>
+                </div>
             </div>
         </header>
 
@@ -241,8 +239,9 @@
                 <div class="manual-item">
                     <strong>✅ 참가 신청 (참가신청 탭)</strong>
                     <ul>
-                        <li><strong>이름 입력</strong>: '선수 이름 입력' 칸에 본인의 이름을 입력합니다.</li>
-                        <li><strong>신청 확인</strong>: 하단 명단에 본인의 이름이 나타나면 정상 처리된 것입니다.</li>
+                        <li><strong>대기</strong>: 관리자가 회차를 오픈할 때까지 기다립니다.</li>
+                        <li><strong>신청</strong>: 접수가 시작되면 본인의 이름을 입력하고 신청합니다.</li>
+                        <li><strong>확인</strong>: 하단 명단에 본인의 이름이 나타나면 정상 처리된 것입니다.</li>
                     </ul>
                 </div>
                 <div class="manual-item">
@@ -270,8 +269,9 @@
                 <div class="manual-item">
                     <strong>⚙️ 대회 운영 프로세스</strong>
                     <ol>
+                        <li><strong>회차 오픈</strong>: 참가신청 탭에서 회차 번호를 확인하고 [참가 접수 시작]을 누릅니다.</li>
                         <li><strong>명단 확정</strong>: 신청 인원에 따른 최적의 조 편성 추천을 확인합니다.</li>
-                        <li><strong>대진표 생성</strong>: 회차와 조 인원 설정을 확인 후 [대진표 생성]을 누릅니다.</li>
+                        <li><strong>대진표 생성</strong>: [대진표 생성]을 누르면 <u>참가 접수가 자동 마감</u>되고 경기가 시작됩니다.</li>
                         <li><strong>랭킹 확정</strong>: 모든 경기 완료 후 [랭킹전을 종료합니다] 버튼을 누르면 점수가 반영됩니다.</li>
                     </ol>
                 </div>

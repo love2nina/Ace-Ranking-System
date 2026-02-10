@@ -508,7 +508,8 @@ td {
     color: var(--text-primary);
 }
 
-.manual-item ul, .manual-item ol {
+.manual-item ul,
+.manual-item ol {
     padding-left: 20px;
     color: var(--text-secondary);
     font-size: 0.95rem;
@@ -516,4 +517,100 @@ td {
 
 .manual-item li {
     margin-bottom: 5px;
+}
+
+/* --- Responsive Header Styles (New) --- */
+.main-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    /* Vertically center */
+    margin-bottom: 25px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.header-branding {
+    text-align: left;
+}
+
+.header-branding h1 {
+    margin: 0;
+    padding: 0;
+    line-height: 1.2;
+    font-size: 2rem;
+    background: linear-gradient(to right, #38bdf8, #818cf8);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.header-branding p {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin: 5px 0 0 0;
+    padding: 0;
+}
+
+.header-controls {
+    text-align: right;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 5px;
+}
+
+.sync-status {
+    font-size: 0.75rem;
+    color: var(--success);
+    margin-bottom: 3px;
+}
+
+.header-buttons {
+    display: flex;
+    gap: 6px;
+}
+
+.header-buttons button {
+    padding: 6px 12px;
+    font-size: 0.8rem;
+    white-space: nowrap;
+    /* Prevent button text wrapping */
+}
+
+/* Mobile Responsive Adjustments */
+@media (max-width: 640px) {
+    .main-header {
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        gap: 15px;
+    }
+
+    .header-branding {
+        text-align: center;
+    }
+
+    .header-branding h1 {
+        font-size: 1.8rem;
+        /* Slightly smaller on mobile */
+    }
+
+    .header-controls {
+        align-items: center;
+        width: 100%;
+    }
+
+    .header-buttons {
+        justify-content: center;
+        width: 100%;
+        flex-wrap: wrap;
+    }
+
+    .header-buttons button {
+        flex: 1;
+        /* Buttons take equal width on mobile if needed, or remove this for auto width */
+        min-width: 100px;
+        max-width: 160px;
+    }
 }
