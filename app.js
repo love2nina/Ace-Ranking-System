@@ -13,6 +13,7 @@ let currentSchedule = [];
 let activeGroupTab = 'A';
 let editingMatchId = null;
 let sessionNum = 1;
+let currentSessionState = { status: 'idle', sessionNum: 0 }; // idle, recruiting, playing
 let eloChart = null;
 let trendChart = null;
 
@@ -90,6 +91,19 @@ function initFirebase() {
         }
     });
 
+    // [세션 상태 리스너]
+    onSnapshot(doc(db, "system", "sessionStatus"), (snap) => {
+        if (snap.exists()) {
+            currentSessionState = snap.data();
+            updateUI();
+        } else {
+            // 초기값 설정
+            const nextSeq = (matchHistory.length > 0 ? Math.max(...matchHistory.map(h => parseInt(h.sessionNum) || 0)) : 0) + 1;
+            currentSessionState = { status: 'idle', sessionNum: nextSeq };
+            setDoc(doc(db, "system", "sessionStatus"), currentSessionState);
+        }
+    });
+
     // 전역 문서 참조 업데이트 (저장 시 사용)
     window.saveToCloud = async () => {
         try {
@@ -133,8 +147,89 @@ function initUIEvents() {
     document.getElementById('generateScheduleBtn').onclick = generateSchedule;
     document.getElementById('updateEloBtn').onclick = commitSession;
     document.getElementById('saveEditBtn').onclick = saveEdit;
+    document.getElementById('openRoundBtn').onclick = openRegistration;
     const splitInput = document.getElementById('customSplitInput');
     if (splitInput) splitInput.oninput = validateCustomSplit;
+}
+
+// --- 세션 관리 로직 (New) ---
+async function openRegistration() {
+    if (!isAdmin) return;
+    const input = document.getElementById('nextSessionNum');
+    const num = parseInt(input.value);
+
+    if (!num || num < 1) {
+        alert('유효한 회차 번호를 입력하세요.');
+        return;
+    }
+
+    if (confirm(`제 ${num}회차 참가 접수를 시작하시겠습니까?`)) {
+        await window.saveSessionState('recruiting', num);
+        // 기존 참가자 명단 초기화 여부는 선택사항이나, 새 회차 시작 시 보통 초기화함
+        if (applicants.length > 0 && confirm('이전 대기 명단을 초기화하시겠습니까?')) {
+            applicants = [];
+            await window.saveToCloud();
+        }
+    }
+}
+
+window.saveSessionState = async (status, sessionNum) => {
+    try {
+        const db = window.FB_SDK.getFirestore();
+        await window.FB_SDK.setDoc(window.FB_SDK.doc(db, "system", "sessionStatus"), { status, sessionNum });
+    } catch (e) { console.error("Session State Error:", e); }
+};
+
+function renderSessionStatus() {
+    const banner = document.getElementById('roundStatusBanner');
+    const form = document.getElementById('applicationForm');
+    const adminPanel = document.getElementById('nextSessionNum')?.parentElement?.parentElement;
+
+    // 상태별 텍스트 및 스타일
+    let statusText = "";
+    let statusColor = "";
+
+    if (currentSessionState.status === 'recruiting') {
+        statusText = `📢 제 ${currentSessionState.sessionNum}회차 참가 접수 중`;
+        statusColor = "rgba(56, 189, 248, 0.2)"; // Blue tint
+        if (form) form.style.display = 'block';
+    } else if (currentSessionState.status === 'playing') {
+        statusText = `🔥 제 ${currentSessionState.sessionNum}회차 경기 진행 중`;
+        statusColor = "rgba(255, 99, 132, 0.1)"; // Red tint
+        if (form) form.style.display = 'none';
+    } else {
+        statusText = "💤 현재 진행 중인 랭킹전 일정이 없습니다.";
+        statusColor = "rgba(255, 255, 255, 0.05)"; // Gray
+        if (form) form.style.display = 'none';
+
+        // Idle 상태일 때 관리자에게 다음 회차 자동 추천
+        if (isAdmin) {
+            const nextSeq = (matchHistory.length > 0 ? Math.max(...matchHistory.map(h => parseInt(h.sessionNum) || 0)) : 0) + 1;
+            const input = document.getElementById('nextSessionNum');
+            if (input && !input.value) input.value = nextSeq;
+        }
+    }
+
+    if (banner) {
+        banner.innerHTML = `<h3 style="margin:0">${statusText}</h3>`;
+        banner.style.background = statusColor;
+    }
+
+    // 관리자 패널 표시 제어 (경기 중일 때는 숨김 request)
+    if (adminPanel && isAdmin) {
+        if (currentSessionState.status === 'playing') {
+            adminPanel.style.display = 'none';
+        } else {
+            adminPanel.style.display = 'block';
+        }
+    }
+
+    // 관리자 UI 제어 (모집 중일 때는 오픈 버튼 비활성화 등)
+    const openBtn = document.getElementById('openRoundBtn');
+    if (openBtn) {
+        openBtn.disabled = (currentSessionState.status === 'recruiting');
+        openBtn.innerText = currentSessionState.status === 'recruiting' ? "접수 진행 중" : "참가 접수 시작";
+    }
 }
 
 // --- 수동 조 편성 엔진 (v3.2: 복구 및 정밀화) ---
@@ -247,6 +342,7 @@ function updateAdminUI() {
     }
     renderApplicants(); // 관리자 상태 변경 시 명단(X버튼 등) 즉시 갱신
     renderHistory();    // 관리자 상태 변경 시 히스토리 버튼 즉시 갱신
+    renderSessionStatus(); // 관리자 상태 변경 시 세션 UI 즉시 갱신 (New)
 }
 
 // --- 데이터 동기화 로직 통합 (v3.1) ---
@@ -254,6 +350,10 @@ function updateAdminUI() {
 
 // --- 개선된 신청 로직 (비회원도 가능, 멤버 등록은 경기 후) ---
 async function addPlayer() {
+    if (currentSessionState.status !== 'recruiting') {
+        alert('현재 참가 접수 기간이 아닙니다.');
+        return;
+    }
     const nameInput = document.getElementById('playerName');
     const name = nameInput.value.trim(); if (!name) return;
 
@@ -364,6 +464,7 @@ function updateUI() {
     updateApplyButtonState(); // 신청 버튼 상태 갱신 추가
     updateStatistics(); // 통계 업데이트 추가
     renderStatsDashboard(); // 대시보드 렌더링 엔진 가동
+    renderSessionStatus(); // 세션 상태 렌더링 추가
 }
 
 function renderApplicants() {
@@ -403,8 +504,11 @@ function updateOptimizationInfo() {
 // --- 대진표 생성 (Admin Only: 수동 조 편성 로직 최우선 반영) ---
 async function generateSchedule() {
     if (!isAdmin) return;
-    const sessionNum = document.getElementById('manualSessionNum').value;
-    if (!sessionNum) { alert('회차를 입력하세요.'); return; }
+
+    // 활성화된 회차 번호 우선 사용
+    const sessionNum = currentSessionState.sessionNum || document.getElementById('manualSessionNum')?.value;
+
+    if (!sessionNum) { alert('회차 정보가 없습니다. 회차를 활성화하거나 입력해주세요.'); return; }
 
     let split;
     const customValue = document.getElementById('customSplitInput').value.trim();
@@ -432,13 +536,19 @@ async function generateSchedule() {
         pattern.forEach((m, matchIdx) => {
             let roundNum = Math.floor(matchIdx / (g.length === 8 ? 2 : 1)) + 1;
             currentSchedule.push({
-                id: Math.random().toString(36).substr(2, 9), sessionNum, group: gLabel, groupRound: roundNum,
+                id: Math.random().toString(36).substr(2, 9),
+                sessionNum: currentSessionState.sessionNum || sessionNum, // 활성화된 회차 번호 사용
+                group: gLabel, groupRound: roundNum,
                 t1: [g[m[0][0]], g[m[0][1]]], t2: [g[m[1][0]], g[m[1][1]]], s1: null, s2: null
             });
         });
     });
 
     activeGroupTab = 'A';
+
+    // 대진 생성 시 상태를 'playing'으로 변경하여 접수 마감
+    await window.saveSessionState('playing', currentSessionState.sessionNum);
+
     // 대진 생성 시 신청자 명단 초기화 (운영 로직 강화)
     applicants = [];
     await window.saveToCloud();
@@ -488,7 +598,6 @@ function renderCurrentMatches() {
     });
 
     // 모든 경기 점수가 입력되었는지 확인 및 종료 버튼 표시 (null이 아니어야 함)
-    // 안전장치: null 또는 undefined가 아니고, 숫자형이어야 함
     const finishedCount = currentSchedule.filter(m =>
         m.s1 !== null && m.s1 !== undefined && typeof m.s1 === 'number' &&
         m.s2 !== null && m.s2 !== undefined && typeof m.s2 === 'number'
@@ -496,20 +605,22 @@ function renderCurrentMatches() {
 
     console.log(`Match Status: ${finishedCount}/${currentSchedule.length}`, currentSchedule);
 
-    if (finishedCount === currentSchedule.length && currentSchedule.length > 0) {
-        const btnDiv = document.createElement('div');
-        btnDiv.style.textAlign = 'center'; btnDiv.style.marginTop = '30px';
-        btnDiv.innerHTML = `<button id="updateEloBtn" class="primary" onclick="commitSession()">🏆 랭킹전 종료 및 결과 확정</button>`;
-        container.appendChild(btnDiv);
-    } else if (currentSchedule.length > 0) {
-        const btnDiv = document.createElement('div');
-        btnDiv.style.textAlign = 'center'; btnDiv.style.marginTop = '30px';
-        // 아직 완료되지 않았을 때는 회색 버튼(비활성)으로 보여주는 것이 더 직관적일 수 있음
-        // 하지만 요청은 "생기게 해달라(숨김->표시)" 였으므로 안내 문구 유지
-        const infoDiv = document.createElement('div');
-        infoDiv.style.textAlign = 'center'; infoDiv.style.marginTop = '30px'; infoDiv.style.color = 'var(--text-secondary)';
-        infoDiv.innerHTML = `<p>⚠️ 모든 경기의 점수를 입력하면 [종료] 버튼이 나타납니다. (${finishedCount}/${currentSchedule.length} 완료)</p>`;
-        container.appendChild(infoDiv);
+    const eloBtn = document.getElementById('updateEloBtn');
+    const footerMsg = footer ? footer.querySelector('p') : null;
+
+    if (eloBtn) {
+        if (finishedCount === currentSchedule.length && currentSchedule.length > 0) {
+            eloBtn.style.display = 'block';
+            eloBtn.disabled = false;
+            eloBtn.innerText = "🏆 랭킹전 종료 및 결과 확정";
+            if (footerMsg) footerMsg.innerText = "* 모든 경기가 종료되었습니다. 결과를 확정하세요.";
+        } else {
+            // 진행 중일 때는 안내 문구 표시 및 버튼 비활성화 (혹은 숨김)
+            eloBtn.style.display = 'block';
+            eloBtn.disabled = true;
+            eloBtn.innerText = `경기 진행 중 (${finishedCount}/${currentSchedule.length})`;
+            if (footerMsg) footerMsg.innerText = "⚠️ 모든 경기의 점수를 입력하면 [종료] 버튼이 활성화됩니다.";
+        }
     }
 }
 
@@ -575,6 +686,10 @@ async function commitSession() {
 
         currentSchedule = []; applicants = [];
         await window.saveToCloud();
+
+        // 랭킹전 종료 후 상태를 IDLE로 변경하고 다음 회차 번호 준비
+        await window.saveSessionState('idle', parseInt(sessionNum) + 1);
+
         switchTab('rank');
         alert(`랭킹전이 확정되었습니다!\n(신규 멤버 ${newMemberCount}명 등록됨)`);
     } catch (e) {

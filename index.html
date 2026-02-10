@@ -41,10 +41,32 @@
         <!-- 1. 참가 신청 섹션 -->
         <div id="tab-apply" class="tab-content">
             <div class="card">
-                <h3>📢 참가 신청</h3>
-                <div class="input-group">
-                    <input type="text" id="playerName" placeholder="선수 이름 입력">
-                    <button id="addPlayerBtn">신청</button>
+                <!-- Status Banner -->
+                <div id="roundStatusBanner" class="status-banner"
+                    style="margin-bottom: 20px; padding: 15px; border-radius: 8px; text-align: center; background: rgba(255, 255, 255, 0.05);">
+                    <h3 style="margin: 0;">⏳ 데이터 로딩 중...</h3>
+                </div>
+
+                <!-- Admin Control (Admin Only) -->
+                <div class="admin-only"
+                    style="display: none; margin-bottom: 20px; padding: 15px; border: 1px solid var(--accent-color); border-radius: 8px;">
+                    <h4 style="margin: 0 0 10px 0; color: var(--accent-color);">👮‍♂️ 관리자 권한: 회차 오픈</h4>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <span style="white-space: nowrap;">제</span>
+                        <input type="number" id="nextSessionNum" style="width: 80px; text-align: center;"
+                            placeholder="N">
+                        <span style="white-space: nowrap;">회차</span>
+                        <button id="openRoundBtn" class="primary" style="flex: 1;">참가 접수 시작</button>
+                    </div>
+                </div>
+
+                <!-- Guest Application Form -->
+                <div id="applicationForm" style="display: none;">
+                    <h3>📢 참가 신청</h3>
+                    <div class="input-group">
+                        <input type="text" id="playerName" placeholder="선수 이름 입력">
+                        <button id="addPlayerBtn">신청</button>
+                    </div>
                 </div>
                 <div id="playerList" class="player-list-container">
                     <!-- 참가 명단 동적 생성 -->
@@ -61,11 +83,7 @@
                     <div class="admin-only" style="display: none;">
                         <div class="input-group"
                             style="margin-top: 15px; display: flex; flex-direction: column; gap: 8px;">
-                            <div style="display: flex; gap: 10px;">
-                                <input type="number" id="manualSessionNum" placeholder="회차" style="max-width: 100px;">
-                                <span style="align-self: center; color: var(--text-secondary); font-size: 0.9rem;">회차
-                                    랭킹전 진행</span>
-                            </div>
+                            <!-- Manual Session Input Removed -->
                             <div style="display: flex; gap: 10px; align-items: center;">
                                 <input type="text" id="customSplitInput" placeholder="조 인원 직접 입력 (예: 5, 5, 4, 6)"
                                     style="flex: 1;">
