@@ -585,7 +585,10 @@ function renderCurrentMatches() {
         filtered.filter(m => m.groupRound === rNum).forEach(m => {
             const div = document.createElement('div'); div.className = 'match-card';
             div.innerHTML = `
-                <div style="flex:1"><strong>${m.t1[0].name}, ${m.t1[1].name}</strong></div>
+                <div style="flex:1">
+                    <strong>${m.t1[0].name}, ${m.t1[1].name}</strong>
+                    ${isAdmin ? `<div style="margin-top:5px"><button class="edit-btn" style="padding:2px 6px; font-size:0.7rem; color:var(--text-secondary)" onclick="openCurrentMatchEditModal('${m.id}')">이름 수정</button></div>` : ''}
+                </div>
                 <div class="vs">
                     <input type="number" class="score-input" value="${m.s1 !== null ? m.s1 : ''}" placeholder="-" min="0" max="6" onchange="updateLiveScore('${m.id}',1,this.value)"> 
                     : 
@@ -780,16 +783,57 @@ window.openEditModal = (id) => {
     editingMatchId = id; const h = matchHistory.find(x => x.id === id);
     const fields = document.getElementById('editFields');
     if (fields) fields.innerHTML = `<div class="input-group"><input type="text" id="edit_t1_1" value="${h.t1_names[0]}"><input type="text" id="edit_t1_2" value="${h.t1_names[1]}"></div><div class="input-group"><input type="text" id="edit_t2_1" value="${h.t2_names[0]}"><input type="text" id="edit_t2_2" value="${h.t2_names[1]}"></div><div class="input-group" style="justify-content:center"><input type="number" id="edit_s1" value="${h.score1}" style="max-width:80px">:<input type="number" id="edit_s2" value="${h.score2}" style="max-width:80px"></div>`;
+
+    // 저장 버튼 핸들러 복원 (히스토리 수정용)
+    document.getElementById('saveEditBtn').onclick = saveEdit;
     document.getElementById('editModal').classList.remove('hidden');
 };
 window.closeModal = () => document.getElementById('editModal').classList.add('hidden');
+
+// --- 대진표 선수 이름 수정 로직 (New) ---
+window.openCurrentMatchEditModal = (id) => {
+    if (!isAdmin) return;
+    editingMatchId = id;
+    const m = currentSchedule.find(x => x.id === id);
+    if (!m) return;
+
+    const fields = document.getElementById('editFields');
+    if (fields) {
+        fields.innerHTML = `
+            <div class="input-group"><input type="text" id="edit_t1_1" value="${m.t1[0].name}"><input type="text" id="edit_t1_2" value="${m.t1[1].name}"></div>
+            <div class="input-group"><input type="text" id="edit_t2_1" value="${m.t2[0].name}"><input type="text" id="edit_t2_2" value="${m.t2[1].name}"></div>
+            <p style="font-size:0.8rem; color:var(--text-secondary); text-align:center">경기 진행 중인 대진표의 이름을 수정합니다.</p>
+        `;
+    }
+
+    // 저장 버튼 핸들러 변경 (현재 대진 수정용)
+    document.getElementById('saveEditBtn').onclick = saveScheduleEdit;
+    document.getElementById('editModal').classList.remove('hidden');
+};
+
+async function saveScheduleEdit() {
+    if (!isAdmin) return;
+    const m = currentSchedule.find(x => x.id === editingMatchId);
+    if (m) {
+        m.t1[0].name = document.getElementById('edit_t1_1').value;
+        m.t1[1].name = document.getElementById('edit_t1_2').value;
+        m.t2[0].name = document.getElementById('edit_t2_1').value;
+        m.t2[1].name = document.getElementById('edit_t2_2').value;
+
+        closeModal();
+        await window.saveToCloud();
+    }
+}
+
 async function saveEdit() {
     if (!isAdmin) return;
     const h = matchHistory.find(x => x.id === editingMatchId);
-    h.t1_names = [document.getElementById('edit_t1_1').value, document.getElementById('edit_t1_2').value];
-    h.t2_names = [document.getElementById('edit_t2_1').value, document.getElementById('edit_t2_2').value];
-    h.score1 = parseInt(document.getElementById('edit_s1').value) || 0; h.score2 = parseInt(document.getElementById('edit_s2').value) || 0;
-    closeModal(); await window.saveToCloud();
+    if (h) {
+        h.t1_names = [document.getElementById('edit_t1_1').value, document.getElementById('edit_t1_2').value];
+        h.t2_names = [document.getElementById('edit_t2_1').value, document.getElementById('edit_t2_2').value];
+        h.score1 = parseInt(document.getElementById('edit_s1').value) || 0; h.score2 = parseInt(document.getElementById('edit_s2').value) || 0;
+        closeModal(); await window.saveToCloud();
+    }
 }
 
 function renderRanking() {
