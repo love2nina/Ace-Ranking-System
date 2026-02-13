@@ -4,7 +4,9 @@
 let db;
 let isAdmin = false;
 let systemSettings = { admin_pw: "ace_admin" };
-let currentDbName = localStorage.getItem('ace_db_name') || 'Default';
+let currentDbName = 'Default';
+let clusterUnsubscribe = null;
+let statusUnsubscribe = null;
 
 // --- 핵심 도메인 데이터 ---
 let members = [];
@@ -44,7 +46,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 });
 
 function initFirebase() {
-    const { initializeApp, getFirestore, onSnapshot, collection, doc, setDoc, getDocs } = window.FB_SDK;
+    const { initializeApp, getFirestore, onSnapshot, doc, setDoc } = window.FB_SDK;
 
     const firebaseConfig = {
         apiKey: "AIzaSyBjGjM6KpHG1lgQ9Dr48AawB8gvkkC8pCs",
@@ -59,96 +61,101 @@ function initFirebase() {
     const app = initializeApp(firebaseConfig);
     db = getFirestore(app);
 
-    // DB 이름에 따른 문서 경로 설정
+    // 글로벌 설정 리스너 (가장 먼저 실행)
+    const settingsRef = doc(db, "system", "settings");
+    onSnapshot(settingsRef, (snapshot) => {
+        if (snapshot.exists()) {
+            systemSettings = snapshot.data();
+            const globalActiveDb = systemSettings.active_cluster || 'Default';
+
+            // 전역 활성 DB가 변경되었을 경우에만 리스너 재구독
+            if (globalActiveDb !== currentDbName || !clusterUnsubscribe) {
+                console.log(`[Global Sync] Switching to Active DB: ${globalActiveDb}`);
+                subscribeToCluster(globalActiveDb);
+            }
+        } else {
+            setDoc(settingsRef, { admin_pw: "ace_admin", active_cluster: "Default" });
+        }
+    });
+}
+
+function subscribeToCluster(dbName) {
+    const { doc, onSnapshot, setDoc } = window.FB_SDK;
+
+    // 기존 리스너 해제
+    if (clusterUnsubscribe) clusterUnsubscribe();
+    if (statusUnsubscribe) statusUnsubscribe();
+
+    currentDbName = dbName;
+    updateDbDisplay();
+
+    // 1. 데이터 클러스터 리스너
     const docRef = doc(db, "clusters", currentDbName);
-
-    onSnapshot(docRef, async (snapshot) => {
-        console.log(`[Firebase] Snapshot received for DB: ${currentDbName}. Exists: ${snapshot.exists()}`);
-
+    clusterUnsubscribe = onSnapshot(docRef, async (snapshot) => {
+        console.log(`[Firebase] Snapshot received for DB: ${currentDbName}`);
         let data = snapshot.exists() ? snapshot.data() : null;
-        // 멤버가 없거나 데이터가 아예 없는 경우 마이그레이션 대상 후보
         let isEmpty = !data || (Array.isArray(data.members) && data.members.length === 0);
 
         if (isEmpty && currentDbName.toLowerCase() === 'default') {
-            console.log("[Migration] Default DB is empty. Checking for legacy data...");
-            try {
-                const legacyRef = doc(db, "system", "database");
-                const { getDoc } = window.FB_SDK;
-                const legacySnap = await getDoc(legacyRef);
-
-                if (legacySnap.exists()) {
-                    console.log("[Migration] Legacy data found in 'system/database'. Starting migration...");
-                    const legacyData = legacySnap.data();
-
-                    // 데이터 매핑
-                    members = legacyData.members || [];
-                    matchHistory = legacyData.matchHistory || [];
-                    currentSchedule = legacyData.currentSchedule || [];
-                    sessionNum = legacyData.sessionNum || 1;
-                    applicants = legacyData.applicants || [];
-
-                    console.log(`[Migration] Data loaded: ${members.length} members, ${matchHistory.length} matches.`);
-
-                    // 새 구조(clusters/Default)로 즉시 저장
-                    await window.saveToCloud();
-
-                    // 세션 상태 마이그레이션
-                    const legacySessionRef = doc(db, "system", "sessionStatus");
-                    const legacySessionSnap = await getDoc(legacySessionRef);
-                    if (legacySessionSnap.exists()) {
-                        await window.FB_SDK.setDoc(doc(db, "system", "sessionStatus_Default"), legacySessionSnap.data());
-                        console.log("[Migration] Session status migrated.");
-                    }
-                    console.log("[Migration] Migration to 'clusters/Default' complete!");
-
-                    // 데이터 로드 후 UI 갱신
-                    recalculateAll();
-                    updateUI();
-                } else {
-                    console.log("[Migration] No legacy data found in 'system/database'. Starting fresh.");
-                    members = []; matchHistory = []; currentSchedule = []; applicants = [];
-                    // 문서가 아예 없는 경우에만 초기 저장
-                    if (!snapshot.exists()) await window.saveToCloud();
-                }
-            } catch (e) {
-                console.error("[Migration] Error during migration:", e);
-            }
+            await handleMigration();
         } else if (snapshot.exists()) {
             members = data.members || [];
             matchHistory = data.matchHistory || [];
             currentSchedule = data.currentSchedule || [];
             sessionNum = data.sessionNum || 1;
             applicants = data.applicants || [];
-
             recalculateAll();
             updateUI();
         } else {
-            // Default 외의 DB가 존재하지 않을 때
-            console.log(`[Firebase] DB '${currentDbName}' does not exist. Initializing...`);
             members = []; matchHistory = []; currentSchedule = []; applicants = [];
             await window.saveToCloud();
         }
     });
 
-    const settingsRef = doc(db, "system", "settings");
-    onSnapshot(settingsRef, (snapshot) => {
-        if (snapshot.exists()) {
-            systemSettings = snapshot.data();
-        } else {
-            setDoc(settingsRef, { admin_pw: "1234" });
-        }
-    });
-
-    onSnapshot(doc(db, "system", "sessionStatus_" + currentDbName), (snap) => {
+    // 2. 세션 상태 리스너
+    statusUnsubscribe = onSnapshot(doc(db, "system", "sessionStatus_" + currentDbName), (snap) => {
         if (snap.exists()) {
             currentSessionState = snap.data();
             updateUI();
-        } else if (currentDbName.toLowerCase() !== 'default') { // Default는 위 마이그레이션 로직에서 처리됨
+        } else if (currentDbName.toLowerCase() !== 'default') {
             const nextSeq = (matchHistory.length > 0 ? Math.max(...matchHistory.map(h => parseInt(h.sessionNum) || 0)) : 0) + 1;
             currentSessionState = { status: 'idle', sessionNum: nextSeq };
             setDoc(doc(db, "system", "sessionStatus_" + currentDbName), currentSessionState);
         }
     });
+}
+
+async function handleMigration() {
+    const { doc, getDoc, setDoc } = window.FB_SDK;
+    console.log("[Migration] Default DB is empty. Checking for legacy data...");
+    try {
+        const legacyRef = doc(db, "system", "database");
+        const legacySnap = await getDoc(legacyRef);
+
+        if (legacySnap.exists()) {
+            const legacyData = legacySnap.data();
+            members = legacyData.members || [];
+            matchHistory = legacyData.matchHistory || [];
+            currentSchedule = legacyData.currentSchedule || [];
+            sessionNum = legacyData.sessionNum || 1;
+            applicants = legacyData.applicants || [];
+
+            await window.saveToCloud();
+
+            const legacySessionRef = doc(db, "system", "sessionStatus");
+            const legacySessionSnap = await getDoc(legacySessionRef);
+            if (legacySessionSnap.exists()) {
+                await setDoc(doc(db, "system", "sessionStatus_Default"), legacySessionSnap.data());
+            }
+            recalculateAll();
+            updateUI();
+        } else {
+            members = []; matchHistory = []; currentSchedule = []; applicants = [];
+            await window.saveToCloud();
+        }
+    } catch (e) {
+        console.error("[Migration] Error:", e);
+    }
 }
 
 window.saveToCloud = async () => {
@@ -199,12 +206,16 @@ function initUIEvents() {
     bindClick('openRoundBtn', openRegistration);
     bindClick('switchDbBtn', switchDatabase);
     bindClick('dbSettingsBtn', openDbModal);
-    bindClick('loadDbBtn', () => {
+    bindClick('loadDbBtn', async () => {
         const sel = document.getElementById('dbListSelect');
         if (sel && sel.value) {
-            if (confirm(`'${sel.value}' 데이터베이스로 전환하시겠습니까?`)) {
-                localStorage.setItem('ace_db_name', sel.value);
-                location.reload();
+            if (confirm(`전체 사용자에게 '${sel.value}' 데이터베이스를 활성 DB로 설정하시겠습니까?`)) {
+                try {
+                    const { doc, updateDoc } = window.FB_SDK;
+                    await updateDoc(doc(db, "system", "settings"), { active_cluster: sel.value });
+                    alert(`'${sel.value}' DB가 전역 활성 DB로 설정되었습니다.`);
+                    closeDbModal();
+                } catch (e) { alert('설정 변경 실패: ' + e.message); }
             }
         } else {
             alert('전환할 데이터베이스를 선택해주세요.');
@@ -247,9 +258,14 @@ async function fetchDbList() {
 async function switchDatabase() {
     const newName = document.getElementById('newDbInput').value.trim();
     if (!newName) { alert('DB 이름을 입력해주세요.'); return; }
-    if (confirm(`'${newName}' 데이터베이스를 생성하거나 이동하시겠습니까?`)) {
-        localStorage.setItem('ace_db_name', newName);
-        location.reload();
+    if (confirm(`'${newName}' 데이터베이스를 생성하고 모든 사용자의 기본 DB로 설정하시겠습니까?`)) {
+        try {
+            const { doc, updateDoc } = window.FB_SDK;
+            await updateDoc(doc(db, "system", "settings"), { active_cluster: newName });
+            document.getElementById('newDbInput').value = '';
+            alert(`신규 DB '${newName}'이 생성 및 전역 활성 DB로 설정되었습니다.`);
+            closeDbModal();
+        } catch (e) { alert('생성 실패: ' + e.message); }
     }
 }
 
