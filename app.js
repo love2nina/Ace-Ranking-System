@@ -1323,16 +1323,41 @@ window.renderPlayerTrend = () => {
 };
 
 function getSplits(n) {
+    const table = {
+        4: [4], 5: [5], 6: [6], 7: [7], 8: [8],
+        9: [5, 4], 10: [5, 5], 11: [6, 5],
+        12: [4, 4, 4], 13: [5, 4, 4], 14: [5, 5, 4], 15: [5, 5, 5],
+        16: [5, 6, 5], 17: [6, 6, 5], 18: [6, 6, 6],
+        19: [5, 5, 5, 4], 20: [4, 4, 4, 4, 4], 21: [4, 4, 5, 4, 4],
+        22: [4, 4, 6, 4, 4], 23: [4, 4, 7, 4, 4], 24: [4, 4, 4, 4, 4, 4]
+    };
+
+    if (table[n]) return table[n];
+    if (n < 4) return [];
+
+    // 24명 초과 시 자동 최적화 로직 적용 (Fallback)
     let best = null, bestG = -1, memo = {};
     function f(rem) {
         if (rem === 0) return [[]]; if (rem < 4) return null; if (memo[rem]) return memo[rem];
-        let r = []; for (let s = 4; s <= 8; s++) { let sub = f(rem - s); if (sub) sub.forEach(x => r.push([...x, s].sort((a, b) => a - b))); }
-        let u = []; let sSet = new Set(); r.forEach(x => { let k = x.join(','); if (!sSet.has(k)) { u.push(x); sSet.add(k); } });
+        let r = [];
+        for (let s = 4; s <= 8; s++) {
+            let sub = f(rem - s);
+            if (sub) sub.forEach(x => r.push([...x, s].sort((a, b) => a - b)));
+        }
+        let u = []; let sSet = new Set();
+        r.forEach(x => {
+            let k = x.join(',');
+            if (!sSet.has(k)) { u.push(x); sSet.add(k); }
+        });
         return memo[rem] = u;
     }
     const res = f(n);
-    res.forEach(s => { let gs = s.reduce((a, b) => a + (GAME_COUNTS[b] || 0), 0); if (gs <= 18 && gs > bestG) { bestG = gs; best = s; } });
-    return best || (res && res[0]) || [];
+    if (!res) return [];
+    res.forEach(s => {
+        let gs = s.reduce((a, b) => a + (GAME_COUNTS[b] || 0), 0);
+        if (gs <= 18 && gs > bestG) { bestG = gs; best = s; }
+    });
+    return best || res[0] || [];
 }
 
 function exportHistoryToCsv() {
