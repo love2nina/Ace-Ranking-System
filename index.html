@@ -131,7 +131,15 @@
         <div id="tab-history" class="tab-content">
             <div class="card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                    <h3> 경기 기록</h3>
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                        <h3>경기 기록</h3>
+                        <div class="view-toggle-group">
+                            <button id="viewMatchesBtn" class="toggle-btn active"
+                                onclick="setHistoryViewMode('match')">경기별</button>
+                            <button id="viewPlayersBtn" class="toggle-btn"
+                                onclick="setHistoryViewMode('player')">선수별</button>
+                        </div>
+                    </div>
                     <button id="exportCsvBtn" class="export-btn admin-only"
                         style="padding: 5px 10px; font-size: 0.8rem; display: none;">CSV
                         내보내기</button>
@@ -155,8 +163,9 @@
                             <tr>
                                 <th>순위</th>
                                 <th>성명</th>
-                                <th>Rating</th>
+                                <th>ELO 점수</th>
                                 <th>전적</th>
+                                <th>승률</th>
                                 <th>득실</th>
                                 <th>참여율</th>
                             </tr>
@@ -337,92 +346,91 @@
                 <div class="table-responsive">
                     <table
                         style="width: 100%; font-size: 0.85rem; text-align: center; border: 1px solid var(--border-color);">
-                        <tr style="background: rgba(255,255,255,0.1);">
-                            <th style="padding: 8px;">점수 차</th>
-                            <th>가중치</th>
-                            <th>비고</th>
-                        </tr>
-                        <tr>
-                            <td>1~3점 차</td>
-                            <td>100%</td>
-                            <td style="color: var(--text-secondary);">기본</td>
-                        </tr>
-                        <tr style="background: rgba(56, 189, 248, 0.1);">
-                            <td style="font-weight: bold; color: var(--accent-color);">4~5점 차</td>
-                            <td style="font-weight: bold; color: var(--accent-color);">125%</td>
-                            <td style="color: var(--accent-color);">가중치</td>
-                        </tr>
-                        <tr>
-                            <td>6점 차 (완승)</td>
-                            <td>150%</td>
-                            <td style="color: var(--success);">최대 가중치</td>
-                        </tr>
-                    </table>
+                        <div class="manual-item">
+                            <strong>📈 ELO 보너스 가중치</strong>
+                            <table style="font-size: 0.85rem; background: rgba(15, 23, 42, 0.5); border-radius: 8px;">
+                                <tr style="background: rgba(255,255,255,0.1);">
+                                    <th style="padding: 8px;">경기 결과</th>
+                                    <th>가중치</th>
+                                    <th>비고</th>
+                                </tr>
+                                <tr>
+                                    <td>일반 경기</td>
+                                    <td>100%</td>
+                                    <td style="color: var(--text-secondary);">기본 산정</td>
+                                </tr>
+                                <tr style="background: rgba(34, 197, 94, 0.1);">
+                                    <td style="font-weight: bold; color: #4ade80;">6 : 0 (완승)</td>
+                                    <td style="font-weight: bold; color: #4ade80;">120%</td>
+                                    <td style="color: #4ade80;">20% 보너스</td>
+                                </tr>
+                            </table>
+                        </div>
+                        <p
+                            style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 10px; text-align: center;">
+                            * 완승(6:0) 시 승점의 1.2배(20% 가산)를 획득하며, 패자는 동일하게 차감됩니다.
+                        </p>
                 </div>
-                <p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 10px; text-align: center;">
-                    * 접전(1점 차)은 기본점수이고, 완승(6점 차)은 기본 점수의 1.5배입니다.
-                </p>
-            </div>
 
-            <div style="margin-top: 30px; text-align: center;">
-                <button onclick="closeHelpModal()" style="width: 100%;">사용자 가이드 닫기</button>
-            </div>
-        </div>
-    </div>
-
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, collection, doc, setDoc, getDoc, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-
-        // Firebase 설정 (app.js에서 접근 가능하도록 window 객체에 바인딩)
-        window.FB_SDK = { initializeApp, getFirestore, collection, doc, setDoc, getDoc, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp };
-    </script>
-    <script type="module" src="app.js"></script>
-    <!-- DB 관리 모달 -->
-    <div id="dbModal" class="modal hidden">
-        <div class="modal-content" style="max-width: 400px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h3 style="margin: 0;">📂 데이터베이스 관리</h3>
-                <button onclick="closeDbModal()" class="secondary" style="padding: 5px 10px;">닫기</button>
-            </div>
-
-            <div class="db-management">
-                <div class="db-selector-group" style="display: flex; flex-direction: column; gap: 15px;">
-                    <div style="background: rgba(255,255,255,0.03); padding: 15px; border-radius: 8px;">
-                        <label
-                            style="font-size: 0.8rem; display: block; margin-bottom: 8px; color: var(--text-secondary);">기존
-                            DB 선택</label>
-                        <div style="display: flex; gap: 5px;">
-                            <select id="dbListSelect" style="flex: 1; font-size: 0.8rem;">
-                                <option value="">데이터베이스 선택...</option>
-                            </select>
-                            <button id="loadDbBtn" class="secondary"
-                                style="padding: 8px 12px; font-size: 0.8rem;">전환</button>
-                        </div>
-                    </div>
-
-                    <div style="background: rgba(255,255,255,0.03); padding: 15px; border-radius: 8px;">
-                        <label
-                            style="font-size: 0.8rem; display: block; margin-bottom: 8px; color: var(--text-secondary);">새
-                            DB 생성 또는 이동</label>
-                        <div style="display: flex; gap: 5px;">
-                            <input type="text" id="newDbInput" placeholder="이름 입력 (예: 시즌2)"
-                                style="flex: 1; font-size: 0.8rem;">
-                            <button id="switchDbBtn" class="primary"
-                                style="padding: 8px 12px; font-size: 0.8rem;">생성/이동</button>
-                        </div>
-                    </div>
+                <div style="margin-top: 30px; text-align: center;">
+                    <button onclick="closeHelpModal()" style="width: 100%;">사용자 가이드 닫기</button>
                 </div>
             </div>
+        </div>
 
-            <div style="margin-top: 20px; text-align: center;">
-                <p style="font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4;">
-                    * 새로운 환경이 필요할 때만 사용하세요.<br>
-                    데이터베이스를 전환하면 페이지가 새로고침됩니다.
-                </p>
+        <script type="module">
+            import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+            import { getFirestore, collection, doc, setDoc, getDoc, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+            // Firebase 설정 (app.js에서 접근 가능하도록 window 객체에 바인딩)
+            window.FB_SDK = { initializeApp, getFirestore, collection, doc, setDoc, getDoc, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp };
+        </script>
+        <script type="module" src="app.js"></script>
+        <!-- DB 관리 모달 -->
+        <div id="dbModal" class="modal hidden">
+            <div class="modal-content" style="max-width: 400px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h3 style="margin: 0;">📂 데이터베이스 관리</h3>
+                    <button onclick="closeDbModal()" class="secondary" style="padding: 5px 10px;">닫기</button>
+                </div>
+
+                <div class="db-management">
+                    <div class="db-selector-group" style="display: flex; flex-direction: column; gap: 15px;">
+                        <div style="background: rgba(255,255,255,0.03); padding: 15px; border-radius: 8px;">
+                            <label
+                                style="font-size: 0.8rem; display: block; margin-bottom: 8px; color: var(--text-secondary);">기존
+                                DB 선택</label>
+                            <div style="display: flex; gap: 5px;">
+                                <select id="dbListSelect" style="flex: 1; font-size: 0.8rem;">
+                                    <option value="">데이터베이스 선택...</option>
+                                </select>
+                                <button id="loadDbBtn" class="secondary"
+                                    style="padding: 8px 12px; font-size: 0.8rem;">전환</button>
+                            </div>
+                        </div>
+
+                        <div style="background: rgba(255,255,255,0.03); padding: 15px; border-radius: 8px;">
+                            <label
+                                style="font-size: 0.8rem; display: block; margin-bottom: 8px; color: var(--text-secondary);">새
+                                DB 생성 또는 이동</label>
+                            <div style="display: flex; gap: 5px;">
+                                <input type="text" id="newDbInput" placeholder="이름 입력 (예: 시즌2)"
+                                    style="flex: 1; font-size: 0.8rem;">
+                                <button id="switchDbBtn" class="primary"
+                                    style="padding: 8px 12px; font-size: 0.8rem;">생성/이동</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="margin-top: 20px; text-align: center;">
+                    <p style="font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4;">
+                        * 새로운 환경이 필요할 때만 사용하세요.<br>
+                        데이터베이스를 전환하면 페이지가 새로고침됩니다.
+                    </p>
+                </div>
             </div>
         </div>
-    </div>
 </body>
 
 </html>

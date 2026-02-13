@@ -24,6 +24,8 @@ let currentSessionState = { status: 'idle', sessionNum: 0 };
 let eloChart = null;
 let trendChart = null;
 let rankMap = new Map(); // 현재 랭킹 순위 저장용
+let historyViewMode = 'match'; // 'match' or 'player'
+let sessionStartRatings = {}; // 회차별 시작 시점의 레이팅 스냅샷
 
 // --- 설정 및 상수 ---
 const ELO_INITIAL = 1500;
@@ -577,6 +579,9 @@ function recalculateAll() {
             const ratingSnapshot = {};
             members.forEach(m => { ratingSnapshot[m.id] = m.rating; });
 
+            // 회차별 시작 시점의 레이팅 저장 (인원별 정렬용)
+            sessionStartRatings[sId] = { ...ratingSnapshot };
+
             sessionMatches.forEach(h => {
                 const team1 = h.t1_ids.map(id => memberMap.get(String(id))).filter(Boolean);
                 const team2 = h.t2_ids.map(id => memberMap.get(String(id))).filter(Boolean);
@@ -587,9 +592,12 @@ function recalculateAll() {
                 const expected = 1 / (1 + Math.pow(10, (avg2 - avg1) / 400));
                 let actual = h.score1 > h.score2 ? 1 : (h.score1 < h.score2 ? 0 : 0.5);
                 const diff = Math.abs(h.score1 - h.score2);
+
+                // --- ELO 가중치 단순화 (v4.1) ---
+                // 6:0 완승(shutout) 시에만 1.2배(20% 보너스) 가중치를 부여, 그 외는 1.0배
                 let multiplier = 1.0;
-                if (diff >= 6) multiplier = 1.5;
-                else if (diff >= 4) multiplier = 1.25;
+                if (diff >= 6) multiplier = 1.2;
+
                 const change = K_FACTOR * multiplier * (actual - expected);
 
                 h.elo_at_match = { t1_before: avg1, t2_before: avg2, expected, change };
@@ -892,6 +900,24 @@ async function commitSession() {
     }
 }
 
+window.setHistoryViewMode = (mode) => {
+    historyViewMode = mode;
+
+    // 버튼 상태 업데이트
+    const matchBtn = document.getElementById('viewMatchesBtn');
+    const playerBtn = document.getElementById('viewPlayersBtn');
+
+    if (mode === 'match') {
+        matchBtn?.classList.add('active');
+        playerBtn?.classList.remove('active');
+    } else {
+        matchBtn?.classList.remove('active');
+        playerBtn?.classList.add('active');
+    }
+
+    renderHistory();
+};
+
 function renderHistory() {
     const list = document.getElementById('historyList');
     if (!list) return;
@@ -914,6 +940,82 @@ function renderHistory() {
         const card = document.createElement('div');
         card.className = 'history-session-card';
 
+        let contentHtml = '';
+        if (historyViewMode === 'match') {
+            contentHtml = sessionMatches.map(h => {
+                // --- 히스토리 출력 개선 (v4.1) ---
+                // 1. 승자가 왼쪽으로 오도록 정렬
+                // 2. 무승부일 경우 기대승률이 낮은 사람(언더독)이 왼쪽으로 오도록 정렬
+                let isSwap = false;
+                if (h.score1 < h.score2) {
+                    isSwap = true;
+                } else if (h.score1 === h.score2) {
+                    if ((h.elo_at_match?.expected || 0.5) > 0.5) {
+                        isSwap = true;
+                    }
+                }
+
+                const t1_disp = isSwap ? h.t2_names : h.t1_names;
+                const t2_disp = isSwap ? h.t1_names : h.t2_names;
+                const s1_disp = isSwap ? h.score2 : h.score1;
+                const s2_disp = isSwap ? h.score1 : h.score2;
+                let elo_change = h.elo_at_match?.change || 0;
+                if (isSwap) elo_change = -elo_change; // 스왑되었으므로 부호 반전 (항상 양수로 보임)
+
+                return `
+                    <div class="history-match-item">
+                        <div style="flex:2">
+                            <strong>${t1_disp.join(',')}</strong> vs <strong>${t2_disp.join(',')}</strong>
+                            <div style="font-size:0.75rem; color:var(--text-secondary)">기대승률: ${(((isSwap ? 1 - (h.elo_at_match?.expected || 0.5) : (h.elo_at_match?.expected || 0.5))) * 100).toFixed(1)}%</div>
+                        </div>
+                        <div style="flex:1; text-align:center; color:var(--accent-color); font-weight:bold; font-size:1.1rem">${s1_disp} : ${s2_disp}</div>
+                        <div style="flex:1; text-align:right">
+                            <span class="history-elo-tag" style="color:var(--success)">+${Math.abs(elo_change).toFixed(1)}</span>
+                            ${isAdmin ? `<div style="margin-top:5px"><button class="edit-btn" onclick="openEditModal(${h.id})">수정</button><button class="delete-btn" onclick="deleteHistory(${h.id})">삭제</button></div>` : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        } else {
+            // 인원별 보기 로직
+            const playerStats = {};
+            sessionMatches.forEach(h => {
+                const teams = [
+                    { ids: h.t1_ids, names: h.t1_names, score: h.score1, oppScore: h.score2, change: h.elo_at_match?.change || 0 },
+                    { ids: h.t2_ids, names: h.t2_names, score: h.score2, oppScore: h.score1, change: -(h.elo_at_match?.change || 0) }
+                ];
+                teams.forEach(t => {
+                    t.ids.forEach((id, idx) => {
+                        if (!playerStats[id]) playerStats[id] = { id: id, name: t.names[idx], wins: 0, draws: 0, losses: 0, eloSum: 0 };
+                        if (t.score > t.oppScore) playerStats[id].wins++;
+                        else if (t.score < t.oppScore) playerStats[id].losses++;
+                        else playerStats[id].draws++;
+                        playerStats[id].eloSum += t.change;
+                    });
+                });
+            });
+
+            const startRatings = sessionStartRatings[sNum] || {};
+            const sortedPlayers = Object.values(playerStats).sort((a, b) => {
+                const rA = startRatings[a.id] || ELO_INITIAL;
+                const rB = startRatings[b.id] || ELO_INITIAL;
+                return rB - rA; // 시작 시점 레이팅 내림차순 (지난주 랭킹순)
+            });
+            contentHtml = sortedPlayers.map(p => `
+                <div class="player-history-item">
+                    <div>
+                        <div class="player-history-info">${p.name}</div>
+                        <div class="player-history-stats">${p.wins}승 ${p.draws}무 ${p.losses}패</div>
+                    </div>
+                    <div style="text-align:right">
+                        <span class="history-elo-tag" style="color:${p.eloSum >= 0 ? 'var(--success)' : 'var(--danger)'}">
+                            ${p.eloSum >= 0 ? '+' : ''}${p.eloSum.toFixed(1)}
+                        </span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
         card.innerHTML = `
             <div class="history-session-header" onclick="toggleHistoryContent(this)">
                 <div>
@@ -923,28 +1025,7 @@ function renderHistory() {
                 <span class="toggle-icon">▼</span>
             </div>
             <div class="history-session-content">
-                ${sessionMatches.map(h => `
-                    <div class="history-match-item">
-                        <div style="flex:2">
-                            <strong>${h.t1_names.join(',')}</strong> vs <strong>${h.t2_names.join(',')}</strong>
-                            <div style="font-size:0.75rem; color:var(--text-secondary)">기대승률: ${((h.elo_at_match?.expected || 0.5) * 100).toFixed(1)}%</div>
-                        </div>
-                        <div style="flex:1; text-align:center; color:var(--accent-color); font-weight:bold; font-size:1.1rem">
-                            ${h.score1} : ${h.score2}
-                        </div>
-                        <div style="flex:1; text-align:right">
-                            <span class="history-elo-tag" style="color:${(h.elo_at_match?.change || 0) >= 0 ? 'var(--success)' : 'var(--danger)'}">
-                                ${(h.elo_at_match?.change || 0) >= 0 ? '+' : ''}${(h.elo_at_match?.change || 0).toFixed(1)}P
-                            </span>
-                            ${isAdmin ? `
-                                <div style="margin-top:5px">
-                                    <button class="edit-btn" onclick="openEditModal(${h.id})">수정</button>
-                                    <button class="delete-btn" onclick="deleteHistory(${h.id})">삭제</button>
-                                </div>
-                            ` : ''}
-                        </div>
-                    </div>
-                `).join('')}
+                ${contentHtml}
             </div>
         `;
         list.appendChild(card);
@@ -1043,11 +1124,14 @@ function renderRanking() {
         else if (rInfo && rInfo.change < 0) rankChangeIcon = `<span class="rank-down">▼${Math.abs(rInfo.change)}</span>`;
         else if (!rInfo || p.participationArr.length === 1) rankChangeIcon = `<span class="rank-new">NEW</span>`;
 
+        const winRate = p.matchCount > 0 ? Math.round((p.wins / p.matchCount) * 100) : 0;
+
         tr.innerHTML = `
             <td><span class="rank-badge ${i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : ''}">${i + 1}</span>${rankChangeIcon}</td>
             <td><strong>${p.name}</strong></td>
-            <td style="color:var(--accent-color); font-weight:bold">${Math.round(p.rating)}P</td>
+            <td style="color:var(--accent-color); font-weight:bold">${Math.round(p.rating)}</td>
             <td>${p.wins}승 ${p.draws}무 ${p.losses}패</td>
+            <td>${winRate}%</td>
             <td style="color:${p.scoreDiff >= 0 ? 'var(--success)' : 'var(--danger)'}">${p.scoreDiff > 0 ? '+' : ''}${p.scoreDiff}</td>
             <td><span class="attendance-badge">${att}%</span></td>
         `;

@@ -248,9 +248,50 @@ td {
     font-weight: bold;
 }
 
-.gold {
-    background: #eab308;
-    color: #000;
+/* --- History View Toggle --- */
+.view-toggle-group {
+    display: inline-flex;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 3px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}
+
+.toggle-btn {
+    padding: 6px 14px;
+    font-size: 0.8rem;
+    background: transparent;
+    color: var(--text-secondary);
+    border-radius: 6px;
+    transition: all 0.2s;
+}
+
+.toggle-btn.active {
+    background: var(--accent-color);
+    color: #0f172a;
+}
+
+.player-history-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 15px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.player-history-item:last-child {
+    border-bottom: none;
+}
+
+.player-history-info {
+    font-weight: bold;
+    font-size: 1rem;
+}
+
+.player-history-stats {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin-top: 2px;
 }
 
 .silver {
