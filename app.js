@@ -3,7 +3,8 @@
 // --- Firebase 초기화 및 상태 관리 ---
 let db;
 let isAdmin = false;
-let systemSettings = { admin_pw: "ace_admin" }; // 기본값 (로딩 전 대비)
+let systemSettings = { admin_pw: "ace_admin" };
+let currentDbName = localStorage.getItem('ace_db_name') || 'Default';
 
 // --- 핵심 도메인 데이터 ---
 let members = [];
@@ -13,9 +14,10 @@ let currentSchedule = [];
 let activeGroupTab = 'A';
 let editingMatchId = null;
 let sessionNum = 1;
-let currentSessionState = { status: 'idle', sessionNum: 0 }; // idle, recruiting, playing
+let currentSessionState = { status: 'idle', sessionNum: 0 };
 let eloChart = null;
 let trendChart = null;
+let rankMap = new Map(); // 현재 랭킹 순위 저장용
 
 // --- 설정 및 상수 ---
 const ELO_INITIAL = 1500;
@@ -33,18 +35,17 @@ const MATCH_PATTERNS = {
 window.addEventListener('DOMContentLoaded', async () => {
     initFirebase();
     initUIEvents();
-    checkAdminLogin(); // 세션 유지 확인
-    // 초기 탭이 stats(대시보드)인 경우 차트 렌더링 보장
+    checkAdminLogin();
     if (document.getElementById('tab-stats').classList.contains('active')) {
         renderStatsDashboard();
     }
+    // DB 이름 표시 업데이트
+    updateDbDisplay();
 });
 
 function initFirebase() {
-    // index.html에서 로드된 FB_SDK 사용
-    const { initializeApp, getFirestore, onSnapshot, collection, doc, setDoc } = window.FB_SDK;
+    const { initializeApp, getFirestore, onSnapshot, collection, doc, setDoc, getDocs } = window.FB_SDK;
 
-    // Firebase 설정값 (운영자님 프로젝트 설정으로 교체 필요)
     const firebaseConfig = {
         apiKey: "AIzaSyBjGjM6KpHG1lgQ9Dr48AawB8gvkkC8pCs",
         authDomain: "ace-ranking-system.firebaseapp.com",
@@ -58,69 +59,112 @@ function initFirebase() {
     const app = initializeApp(firebaseConfig);
     db = getFirestore(app);
 
-    const docRef = doc(db, "system", "database");
+    // DB 이름에 따른 문서 경로 설정
+    const docRef = doc(db, "clusters", currentDbName);
 
-    // [실시간 리스너] 클라우드 데이터 상시 감시
-    onSnapshot(docRef, (snapshot) => {
-        if (snapshot.exists()) {
-            const data = snapshot.data();
+    onSnapshot(docRef, async (snapshot) => {
+        console.log(`[Firebase] Snapshot received for DB: ${currentDbName}. Exists: ${snapshot.exists()}`);
+
+        let data = snapshot.exists() ? snapshot.data() : null;
+        // 멤버가 없거나 데이터가 아예 없는 경우 마이그레이션 대상 후보
+        let isEmpty = !data || (Array.isArray(data.members) && data.members.length === 0);
+
+        if (isEmpty && currentDbName.toLowerCase() === 'default') {
+            console.log("[Migration] Default DB is empty. Checking for legacy data...");
+            try {
+                const legacyRef = doc(db, "system", "database");
+                const { getDoc } = window.FB_SDK;
+                const legacySnap = await getDoc(legacyRef);
+
+                if (legacySnap.exists()) {
+                    console.log("[Migration] Legacy data found in 'system/database'. Starting migration...");
+                    const legacyData = legacySnap.data();
+
+                    // 데이터 매핑
+                    members = legacyData.members || [];
+                    matchHistory = legacyData.matchHistory || [];
+                    currentSchedule = legacyData.currentSchedule || [];
+                    sessionNum = legacyData.sessionNum || 1;
+                    applicants = legacyData.applicants || [];
+
+                    console.log(`[Migration] Data loaded: ${members.length} members, ${matchHistory.length} matches.`);
+
+                    // 새 구조(clusters/Default)로 즉시 저장
+                    await window.saveToCloud();
+
+                    // 세션 상태 마이그레이션
+                    const legacySessionRef = doc(db, "system", "sessionStatus");
+                    const legacySessionSnap = await getDoc(legacySessionRef);
+                    if (legacySessionSnap.exists()) {
+                        await window.FB_SDK.setDoc(doc(db, "system", "sessionStatus_Default"), legacySessionSnap.data());
+                        console.log("[Migration] Session status migrated.");
+                    }
+                    console.log("[Migration] Migration to 'clusters/Default' complete!");
+
+                    // 데이터 로드 후 UI 갱신
+                    recalculateAll();
+                    updateUI();
+                } else {
+                    console.log("[Migration] No legacy data found in 'system/database'. Starting fresh.");
+                    members = []; matchHistory = []; currentSchedule = []; applicants = [];
+                    // 문서가 아예 없는 경우에만 초기 저장
+                    if (!snapshot.exists()) await window.saveToCloud();
+                }
+            } catch (e) {
+                console.error("[Migration] Error during migration:", e);
+            }
+        } else if (snapshot.exists()) {
             members = data.members || [];
             matchHistory = data.matchHistory || [];
             currentSchedule = data.currentSchedule || [];
             sessionNum = data.sessionNum || 1;
             applicants = data.applicants || [];
 
-            // 데이터 변경 시 UI 전면 쇄신
             recalculateAll();
             updateUI();
         } else {
-            // 데이터가 없는 경우 초기 마이그레이션 시도 (localStorage -> Cloud)
-            tryMigrateLocalToCloud();
+            // Default 외의 DB가 존재하지 않을 때
+            console.log(`[Firebase] DB '${currentDbName}' does not exist. Initializing...`);
+            members = []; matchHistory = []; currentSchedule = []; applicants = [];
+            await window.saveToCloud();
         }
     });
 
-    // [시스템 설정 리스너] 비밀번호 등 관리
     const settingsRef = doc(db, "system", "settings");
     onSnapshot(settingsRef, (snapshot) => {
         if (snapshot.exists()) {
             systemSettings = snapshot.data();
-            console.log("System Settings Loaded:", systemSettings);
         } else {
-            // 초기 설정이 없으면 생성
             setDoc(settingsRef, { admin_pw: "1234" });
         }
     });
 
-    // [세션 상태 리스너]
-    onSnapshot(doc(db, "system", "sessionStatus"), (snap) => {
+    onSnapshot(doc(db, "system", "sessionStatus_" + currentDbName), (snap) => {
         if (snap.exists()) {
             currentSessionState = snap.data();
             updateUI();
-        } else {
-            // 초기값 설정
+        } else if (currentDbName.toLowerCase() !== 'default') { // Default는 위 마이그레이션 로직에서 처리됨
             const nextSeq = (matchHistory.length > 0 ? Math.max(...matchHistory.map(h => parseInt(h.sessionNum) || 0)) : 0) + 1;
             currentSessionState = { status: 'idle', sessionNum: nextSeq };
-            setDoc(doc(db, "system", "sessionStatus"), currentSessionState);
+            setDoc(doc(db, "system", "sessionStatus_" + currentDbName), currentSessionState);
         }
     });
-
-    // 전역 문서 참조 업데이트 (저장 시 사용)
-    window.saveToCloud = async () => {
-        try {
-            await setDoc(docRef, {
-                members,
-                matchHistory,
-                currentSchedule,
-                sessionNum,
-                applicants
-            });
-        } catch (e) {
-            console.error("Cloud Error:", e);
-        }
-    };
-
-    console.log("Firebase Engine v3.0 Connected.");
 }
+
+window.saveToCloud = async () => {
+    const { doc, setDoc } = window.FB_SDK;
+    try {
+        await setDoc(doc(db, "clusters", currentDbName), {
+            members,
+            matchHistory,
+            currentSchedule,
+            sessionNum,
+            applicants
+        });
+    } catch (e) {
+        console.error("Cloud Error:", e);
+    }
+};
 
 async function tryMigrateLocalToCloud() {
     const localMembers = JSON.parse(localStorage.getItem('ace_v3_members'));
@@ -140,16 +184,72 @@ async function tryMigrateLocalToCloud() {
 
 // --- 관리자 인증 로직 ---
 function initUIEvents() {
-    document.getElementById('adminLoginBtn').onclick = openAdminModal;
-    document.getElementById('helpBtn').onclick = openHelpModal;
-    document.getElementById('confirmAdminBtn').onclick = tryAdminLogin;
-    document.getElementById('addPlayerBtn').onclick = addPlayer;
-    document.getElementById('generateScheduleBtn').onclick = generateSchedule;
-    document.getElementById('updateEloBtn').onclick = commitSession;
-    document.getElementById('saveEditBtn').onclick = saveEdit;
-    document.getElementById('openRoundBtn').onclick = openRegistration;
+    const bindClick = (id, fn) => {
+        const el = document.getElementById(id);
+        if (el) el.onclick = fn;
+    };
+
+    bindClick('adminLoginBtn', openAdminModal);
+    bindClick('helpBtn', openHelpModal);
+    bindClick('confirmAdminBtn', tryAdminLogin);
+    bindClick('addPlayerBtn', addPlayer);
+    bindClick('generateScheduleBtn', generateSchedule);
+    bindClick('updateEloBtn', commitSession);
+    bindClick('saveEditBtn', saveEdit);
+    bindClick('openRoundBtn', openRegistration);
+    bindClick('switchDbBtn', switchDatabase);
+    bindClick('loadDbBtn', () => {
+        const sel = document.getElementById('dbListSelect');
+        if (sel && sel.value) {
+            if (confirm(`'${sel.value}' 데이터베이스로 전환하시겠습니까?`)) {
+                localStorage.setItem('ace_db_name', sel.value);
+                location.reload();
+            }
+        } else {
+            alert('전환할 데이터베이스를 선택해주세요.');
+        }
+    });
+    bindClick('exportCsvBtn', exportHistoryToCsv);
+
     const splitInput = document.getElementById('customSplitInput');
     if (splitInput) splitInput.oninput = validateCustomSplit;
+}
+
+function updateDbDisplay() {
+    const el = document.getElementById('currentDbName');
+    if (el) el.innerText = `DB: ${currentDbName}`;
+}
+
+async function fetchDbList() {
+    if (!isAdmin) return;
+    try {
+        const { collection, getDocs } = window.FB_SDK;
+        const querySnapshot = await getDocs(collection(db, "clusters"));
+        const select = document.getElementById('dbListSelect');
+        if (!select) return;
+
+        // 초기화 (첫 번째 옵션 제외)
+        while (select.options.length > 1) select.remove(1);
+
+        querySnapshot.forEach((doc) => {
+            const opt = document.createElement('option');
+            opt.value = doc.id;
+            opt.text = doc.id;
+            if (doc.id === currentDbName) opt.selected = true;
+            select.add(opt);
+        });
+    } catch (e) {
+        console.error("Fetch DB List Error:", e);
+    }
+}
+
+async function switchDatabase() {
+    const newName = document.getElementById('newDbInput').value.trim();
+    if (!newName) { alert('DB 이름을 입력해주세요.'); return; }
+    if (confirm(`'${newName}' 데이터베이스를 생성하거나 이동하시겠습니까?`)) {
+        localStorage.setItem('ace_db_name', newName);
+        location.reload();
+    }
 }
 
 // --- 세션 관리 로직 (New) ---
@@ -175,8 +275,8 @@ async function openRegistration() {
 
 window.saveSessionState = async (status, sessionNum) => {
     try {
-        const db = window.FB_SDK.getFirestore();
-        await window.FB_SDK.setDoc(window.FB_SDK.doc(db, "system", "sessionStatus"), { status, sessionNum });
+        const { doc, setDoc } = window.FB_SDK;
+        await setDoc(doc(db, "system", "sessionStatus_" + currentDbName), { status, sessionNum });
     } catch (e) { console.error("Session State Error:", e); }
 };
 
@@ -190,11 +290,11 @@ function renderSessionStatus() {
     let statusColor = "";
 
     if (currentSessionState.status === 'recruiting') {
-        statusText = `📢 제 ${currentSessionState.sessionNum}회차 참가 접수 중`;
+        statusText = `📢 제 ${currentSessionState.sessionNum}회차 랭킹전 참가 접수 중`;
         statusColor = "rgba(56, 189, 248, 0.2)"; // Blue tint
         if (form) form.style.display = 'block';
     } else if (currentSessionState.status === 'playing') {
-        statusText = `🔥 제 ${currentSessionState.sessionNum}회차 경기 진행 중`;
+        statusText = `🔥 제 ${currentSessionState.sessionNum}회차 랭킹전 진행 중`;
         statusColor = "rgba(255, 99, 132, 0.1)"; // Red tint
         if (form) form.style.display = 'none';
     } else {
@@ -315,8 +415,9 @@ function tryAdminLogin() {
     document.getElementById('adminPassword').value = '';
 }
 
-function checkAdminLogin() {
-    if (localStorage.getItem('ace_admin') === 'true') {
+async function checkAdminLogin() {
+    const saved = localStorage.getItem('ace_admin');
+    if (saved === 'true') {
         isAdmin = true;
         updateAdminUI();
     }
@@ -333,6 +434,7 @@ function updateAdminUI() {
         status.classList.add('success');
         adminAreas.forEach(el => el.style.display = 'block');
         guestAreas.forEach(el => el.style.display = 'none');
+        fetchDbList(); // DB 관리 리스트 갱신
     } else {
         status.innerText = "관리자 로그인";
         status.classList.add('secondary');
@@ -403,16 +505,29 @@ function updateApplyButtonState() {
 
 function recalculateAll() {
     try {
-        // 멤버 룩업 맵 생성 (성능 및 정확도 향상)
-        const memberMap = new Map();
+        rankMap.clear();
         members.forEach(m => {
             m.rating = ELO_INITIAL; m.matchCount = 0; m.wins = 0; m.losses = 0; m.draws = 0; m.scoreDiff = 0;
             m.participationArr = [];
-            memberMap.set(String(m.id), m); // ID를 문자열로 통일하여 매칭
+            m.prevRating = ELO_INITIAL; // 이전 세션 레이팅 (변동 표시용)
         });
 
+        const memberMap = new Map();
+        members.forEach(m => memberMap.set(String(m.id), m));
+
         const sessionIds = [...new Set(matchHistory.map(h => (h.sessionNum || '').toString()))].filter(Boolean).sort((a, b) => parseInt(a) - parseInt(b));
-        sessionIds.forEach(sId => {
+
+        // 이전 세션까지의 랭킹 계산 (순위 변동용)
+        let previousRanking = [];
+
+        sessionIds.forEach((sId, idx) => {
+            const isLastSession = idx === sessionIds.length - 1;
+            if (isLastSession) {
+                // 현재 세션 시작 전의 레이팅 저장
+                members.forEach(m => m.prevRating = m.rating);
+                previousRanking = [...members].sort((a, b) => b.rating - a.rating).map(m => m.id);
+            }
+
             const sessionMatches = matchHistory.filter(h => (h.sessionNum || '').toString() === sId);
             const ratingSnapshot = {};
             members.forEach(m => { ratingSnapshot[m.id] = m.rating; });
@@ -420,23 +535,16 @@ function recalculateAll() {
             sessionMatches.forEach(h => {
                 const team1 = h.t1_ids.map(id => memberMap.get(String(id))).filter(Boolean);
                 const team2 = h.t2_ids.map(id => memberMap.get(String(id))).filter(Boolean);
-                if (team1.length < 2 || team2.length < 2) {
-                    console.warn(`Match ${h.id} skipped: Missing players in members list.`);
-                    return;
-                }
+                if (team1.length < 2 || team2.length < 2) return;
+
                 const avg1 = ((ratingSnapshot[team1[0].id] || ELO_INITIAL) + (ratingSnapshot[team1[1].id] || ELO_INITIAL)) / 2;
                 const avg2 = ((ratingSnapshot[team2[0].id] || ELO_INITIAL) + (ratingSnapshot[team2[1].id] || ELO_INITIAL)) / 2;
                 const expected = 1 / (1 + Math.pow(10, (avg2 - avg1) / 400));
-                // 승패 로직
-                // 승패 로직
                 let actual = h.score1 > h.score2 ? 1 : (h.score1 < h.score2 ? 0 : 0.5);
                 const diff = Math.abs(h.score1 - h.score2);
-
-                // 가중치 계산 (2점차 = 1.0배 기준)
-                // 공식: log(diff + 1) / log(3)
-                // 1점차: 0.63, 2점차: 1.0, 6점차: 1.77
-                const multiplier = diff > 0 ? (Math.log(diff + 1) / Math.log(3)) : 1;
-
+                let multiplier = 1.0;
+                if (diff >= 6) multiplier = 1.5;
+                else if (diff >= 4) multiplier = 1.25;
                 const change = K_FACTOR * multiplier * (actual - expected);
 
                 h.elo_at_match = { t1_before: avg1, t2_before: avg2, expected, change };
@@ -445,10 +553,33 @@ function recalculateAll() {
                     p.matchCount++;
                     if (!p.participationArr.includes(sId)) p.participationArr.push(sId);
                 });
-                team1.forEach(p => { p.rating += change; p.scoreDiff += (h.score1 - h.score2); if (actual === 1) p.wins++; else if (actual === 0) p.losses++; else p.draws++; });
-                team2.forEach(p => { p.rating -= change; p.scoreDiff += (h.score2 - h.score1); if (actual === 0) p.wins++; else if (actual === 1) p.losses++; else p.draws++; });
+
+                team1.forEach(p => {
+                    p.rating += change;
+                    p.scoreDiff += (h.score1 - h.score2);
+                    if (actual === 1) { p.wins++; }
+                    else if (actual === 0) { p.losses++; }
+                    else { p.draws++; }
+                });
+                team2.forEach(p => {
+                    p.rating -= change;
+                    p.scoreDiff += (h.score2 - h.score1);
+                    if (actual === 0) { p.wins++; }
+                    else if (actual === 1) { p.losses++; }
+                    else { p.draws++; }
+                });
             });
         });
+
+        // 현재 랭킹 순위 저장
+        const currentRanking = [...members].sort((a, b) => b.rating - a.rating);
+        currentRanking.forEach((m, idx) => {
+            const prevIdx = previousRanking.indexOf(m.id);
+            let change = 0;
+            if (prevIdx !== -1) change = prevIdx - idx; // 이전 순위 - 현재 순위 (양수면 상승)
+            rankMap.set(String(m.id), { rank: idx + 1, change });
+        });
+
     } catch (e) { console.error("Recalculate Error:", e); }
 }
 
@@ -470,9 +601,19 @@ function updateUI() {
 function renderApplicants() {
     const list = document.getElementById('playerList'); if (!list) return;
     list.innerHTML = '';
-    applicants.forEach(a => {
+
+    // 조별 인원 정렬 (랭킹순, 신규는 아래)
+    const sortedApplicants = [...applicants].sort((a, b) => {
+        const rA = rankMap.get(String(a.id))?.rank || 9999;
+        const rB = rankMap.get(String(b.id))?.rank || 9999;
+        return rA - rB;
+    });
+
+    sortedApplicants.forEach(a => {
         const div = document.createElement('div'); div.className = 'player-tag';
-        div.innerHTML = `${a.name}${isAdmin ? ` <span class="remove-btn" onclick="removeApplicant(${a.id})">×</span>` : ''}`;
+        const info = rankMap.get(String(a.id));
+        const rankLabel = info ? `${info.rank}위` : '첫출전';
+        div.innerHTML = `${a.name}(${rankLabel})${isAdmin ? ` <span class="remove-btn" onclick="removeApplicant('${a.id}')">×</span>` : ''}`;
         list.appendChild(div);
     });
 }
@@ -521,7 +662,11 @@ async function generateSchedule() {
     }
     if (!split || split.length === 0) { alert('인원 분할에 실패했습니다. 조별 인원을 확인해 주세요.'); return; }
 
-    const sorted = [...applicants].sort((a, b) => b.rating - a.rating);
+    // 대진 배정 로직: 랭킹 사용자(정렬) + 신규 사용자(랜덤)
+    const rankedArr = applicants.filter(a => rankMap.has(String(a.id))).sort((a, b) => b.rating - a.rating);
+    const newArr = applicants.filter(a => !rankMap.has(String(a.id))).sort(() => Math.random() - 0.5); // 신규 유저는 랜덤하게 섞음
+    const sorted = [...rankedArr, ...newArr];
+
     let groupsArr = [], cur = 0;
     split.forEach(s => {
         const groupMembers = sorted.slice(cur, cur + s);
@@ -840,10 +985,26 @@ function renderRanking() {
     const tbody = document.querySelector('#rankingTable tbody'); if (!tbody) return;
     tbody.innerHTML = '';
     const uSess = [...new Set(matchHistory.map(h => (h.sessionNum || '').toString()))].filter(Boolean);
-    [...members].sort((a, b) => b.rating - a.rating).forEach((p, i) => {
+    const sorted = [...members].sort((a, b) => b.rating - a.rating);
+
+    sorted.forEach((p, i) => {
         const att = ((p.participationArr?.length || 0) / (uSess.length || 1) * 100).toFixed(0);
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td><span class="rank-badge ${i < 3 ? ['gold', 'silver', 'bronze'][i] : ''}">${i + 1}</span></td><td><strong>${p.name}</strong></td><td style="color:var(--accent-color); font-weight:bold">${Math.round(p.rating)}</td><td>${p.wins}승 ${p.draws}무 ${p.losses}패</td><td style="color:${p.scoreDiff >= 0 ? 'var(--success)' : 'var(--danger)'}">${p.scoreDiff > 0 ? '+' : ''}${p.scoreDiff}</td><td><span class="attendance-badge">${att}%</span></td>`;
+        const rInfo = rankMap.get(String(p.id));
+
+        let rankChangeIcon = '';
+        if (rInfo && rInfo.change > 0) rankChangeIcon = `<span class="rank-up">▲${rInfo.change}</span>`;
+        else if (rInfo && rInfo.change < 0) rankChangeIcon = `<span class="rank-down">▼${Math.abs(rInfo.change)}</span>`;
+        else if (!rInfo || p.participationArr.length === 1) rankChangeIcon = `<span class="rank-new">NEW</span>`;
+
+        tr.innerHTML = `
+            <td><span class="rank-badge ${i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : ''}">${i + 1}</span>${rankChangeIcon}</td>
+            <td><strong>${p.name}</strong></td>
+            <td style="color:var(--accent-color); font-weight:bold">${Math.round(p.rating)}P</td>
+            <td>${p.wins}승 ${p.draws}무 ${p.losses}패</td>
+            <td style="color:${p.scoreDiff >= 0 ? 'var(--success)' : 'var(--danger)'}">${p.scoreDiff > 0 ? '+' : ''}${p.scoreDiff}</td>
+            <td><span class="attendance-badge">${att}%</span></td>
+        `;
         tbody.appendChild(tr);
     });
 }
@@ -1042,4 +1203,24 @@ function getSplits(n) {
     const res = f(n);
     res.forEach(s => { let gs = s.reduce((a, b) => a + (GAME_COUNTS[b] || 0), 0); if (gs <= 18 && gs > bestG) { bestG = gs; best = s; } });
     return best || (res && res[0]) || [];
+}
+
+function exportHistoryToCsv() {
+    if (!isAdmin) { alert('관리자 기능입니다.'); return; }
+    if (matchHistory.length === 0) { alert('내보낼 기록이 없습니다.'); return; }
+
+    let csv = "\uFEFF회차,날짜,팀1,팀2,점수1,점수2,ELO변동\n";
+    matchHistory.slice().sort((a, b) => b.sessionNum - a.sessionNum).forEach(h => {
+        csv += `${h.sessionNum},${h.date},"${h.t1_names.join(',')}","${h.t2_names.join(',')}",${h.score1},${h.score2},${h.elo_at_match?.change.toFixed(1) || 0}\n`;
+    });
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `ACE_Ranking_History_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 }

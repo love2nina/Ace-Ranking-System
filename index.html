@@ -19,6 +19,9 @@
                 <p>ACE Club Ranking Management System v3.0</p>
             </div>
             <div id="adminStatusArea" class="header-controls">
+                <div id="dbDisplayArea" style="margin-bottom: 5px;">
+                    <span id="currentDbName" class="db-badge">DB: Default</span>
+                </div>
                 <span id="syncStatus" class="sync-status">● Cloud Online</span>
                 <div class="header-buttons">
                     <button id="helpBtn" class="secondary">사용자 가이드</button>
@@ -48,6 +51,24 @@
                 <!-- Admin Control (Admin Only) -->
                 <div class="admin-only"
                     style="display: none; margin-bottom: 20px; padding: 15px; border: 1px solid var(--accent-color); border-radius: 8px;">
+                    <div class="db-management" style="margin-bottom: 15px;">
+                        <span style="font-size: 0.8rem; display: block; margin-bottom: 8px;">📂 DB 관리</span>
+                        <div class="db-selector-group" style="display: flex; flex-direction: column; gap: 10px;">
+                            <div style="display: flex; gap: 5px;">
+                                <select id="dbListSelect" style="flex: 1; font-size: 0.8rem;">
+                                    <option value="">데이터베이스 선택...</option>
+                                </select>
+                                <button id="loadDbBtn" class="secondary"
+                                    style="padding: 8px 12px; font-size: 0.8rem;">전환</button>
+                            </div>
+                            <div style="display: flex; gap: 5px;">
+                                <input type="text" id="newDbInput" placeholder="새 DB 이름 (예: 시즌2)"
+                                    style="flex: 1; font-size: 0.8rem;">
+                                <button id="switchDbBtn" class="primary"
+                                    style="padding: 8px 12px; font-size: 0.8rem;">생성/이동</button>
+                            </div>
+                        </div>
+                    </div>
                     <h4 style="margin: 0 0 10px 0; color: var(--accent-color);">👮‍♂️ 관리자 권한: 회차 오픈</h4>
                     <div style="display: flex; gap: 10px; align-items: center;">
                         <span style="white-space: nowrap;">제</span>
@@ -126,7 +147,12 @@
         <!-- 3. 경기 히스토리 섹션 -->
         <div id="tab-history" class="tab-content">
             <div class="card">
-                <h3>� 경기 기록</h3>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h3> 경기 기록</h3>
+                    <button id="exportCsvBtn" class="export-btn admin-only"
+                        style="padding: 5px 10px; font-size: 0.8rem; display: none;">CSV
+                        내보내기</button>
+                </div>
                 <div id="historyList">
                     <!-- 히스토리 카드 동적 생성 -->
                 </div>
@@ -248,7 +274,7 @@
                     <strong>⚔️ 대진표 및 경기 진행 (대진표 탭)</strong>
                     <ul>
                         <li><strong>대진 확인</strong>: 본인이 속한 조(A, B 등)를 선택하여 상대를 확인합니다.</li>
-                        <li><strong>점수 입력</strong>: 경기가 끝나면 누구나 <strong>실시간으로 점수를 입력</strong>할 수 있습니다.</li>
+                        <li><strong>점수 입력</strong>: 경기가 끝나면 자신들의 경기결과를 입력합니다.</li>
                     </ul>
                 </div>
                 <div class="manual-item">
@@ -267,13 +293,26 @@
                     <p>상단 [관리자 로그인] 버튼 클릭 후 암호 입력 시 관리 기능이 활성화됩니다.</p>
                 </div>
                 <div class="manual-item">
+                    <strong>📂 멀티 DB 관리 (신규)</strong>
+                    <ul>
+                        <li><strong>DB 전환</strong>: 드롭다운 메뉴에서 기존에 생성된 DB를 선택하여 전환할 수 있습니다.</li>
+                        <li><strong>새 DB 생성</strong>: 새로운 이름을 입력하고 [생성/이동]을 누르면 독립된 새 공간이 생성됩니다.</li>
+                    </ul>
+                </div>
+                <div class="manual-item">
                     <strong>⚙️ 대회 운영 프로세스</strong>
                     <ol>
                         <li><strong>회차 오픈</strong>: 참가신청 탭에서 회차 번호를 확인하고 [참가 접수 시작]을 누릅니다.</li>
-                        <li><strong>명단 확정</strong>: 신청 인원에 따른 최적의 조 편성 추천을 확인합니다.</li>
-                        <li><strong>대진표 생성</strong>: [대진표 생성]을 누르면 <u>참가 접수가 자동 마감</u>되고 경기가 시작됩니다.</li>
-                        <li><strong>랭킹 확정</strong>: 모든 경기 완료 후 [랭킹전을 종료합니다] 버튼을 누르면 점수가 반영됩니다.</li>
+                        <li><strong>명단 관리</strong>: 신청 명단은 랭킹 순으로 자동 정렬되며, 이름 옆에 현재 순위가 표시됩니다.</li>
+                        <li><strong>대진표 생성</strong>: [대진표 생성] 클릭 시 <u>신규 참가자는 랭킹권 아래에 무작위 배치</u>됩니다.</li>
+                        <li><strong>랭킹 확정</strong>: 경기 종료 후 [랭킹전을 종료합니다]를 누르면 결과가 반영됩니다.</li>
                     </ol>
+                </div>
+                <div class="manual-item">
+                    <strong>💾 데이터 활용</strong>
+                    <ul>
+                        <li><strong>CSV 내보내기</strong>: 히스토리 탭의 [CSV 내보내기] 버튼을 통해 전체 경기 기록을 엑셀 파일로 저장할 수 있습니다.</li>
+                    </ul>
                 </div>
             </div>
 
@@ -321,34 +360,19 @@
                             <th>비고</th>
                         </tr>
                         <tr>
-                            <td>1점 차</td>
-                            <td>63%</td>
-                            <td style="color: var(--text-secondary);">접전</td>
+                            <td>3점 차 이하</td>
+                            <td>100%</td>
+                            <td style="color: var(--text-secondary);">기본 가중치</td>
                         </tr>
                         <tr style="background: rgba(56, 189, 248, 0.1);">
-                            <td style="font-weight: bold; color: var(--accent-color);">2점 차</td>
-                            <td style="font-weight: bold; color: var(--accent-color);">100%</td>
-                            <td style="color: var(--accent-color);">기준</td>
+                            <td style="font-weight: bold; color: var(--accent-color);">5점 차 이하</td>
+                            <td style="font-weight: bold; color: var(--accent-color);">125%</td>
+                            <td style="color: var(--accent-color);">가속</td>
                         </tr>
                         <tr>
-                            <td>3점 차</td>
-                            <td>126%</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>4점 차</td>
-                            <td>146%</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>5점 차</td>
-                            <td>163%</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>6점 차</td>
-                            <td>177%</td>
-                            <td style="color: var(--success);">완승</td>
+                            <td>6점 차 (완승)</td>
+                            <td>150%</td>
+                            <td style="color: var(--success);">최대 가속</td>
                         </tr>
                     </table>
                 </div>
@@ -363,13 +387,12 @@
         </div>
     </div>
 
-    <!-- Firebase SDK (v10) -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, collection, doc, setDoc, getDoc, onSnapshot, addDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getFirestore, collection, doc, setDoc, getDoc, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
         // Firebase 설정 (app.js에서 접근 가능하도록 window 객체에 바인딩)
-        window.FB_SDK = { initializeApp, getFirestore, collection, doc, setDoc, getDoc, onSnapshot, addDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp };
+        window.FB_SDK = { initializeApp, getFirestore, collection, doc, setDoc, getDoc, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp };
     </script>
     <script type="module" src="app.js"></script>
 </body>
