@@ -198,6 +198,7 @@ function initUIEvents() {
     bindClick('saveEditBtn', saveEdit);
     bindClick('openRoundBtn', openRegistration);
     bindClick('switchDbBtn', switchDatabase);
+    bindClick('dbSettingsBtn', openDbModal);
     bindClick('loadDbBtn', () => {
         const sel = document.getElementById('dbListSelect');
         if (sel && sel.value) {
@@ -394,6 +395,12 @@ function openHelpModal() {
     document.getElementById('helpModal').classList.remove('hidden');
 }
 window.closeHelpModal = () => document.getElementById('helpModal').classList.add('hidden');
+
+function openDbModal() {
+    document.getElementById('dbModal').classList.remove('hidden');
+    fetchDbList();
+}
+window.closeDbModal = () => document.getElementById('dbModal').classList.add('hidden');
 
 function tryAdminLogin() {
     const pw = document.getElementById('adminPassword').value;

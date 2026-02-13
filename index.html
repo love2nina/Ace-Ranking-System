@@ -24,6 +24,7 @@
                     <span id="syncStatus" class="sync-status" style="margin: 0; padding-top: 2px;">● Cloud Online</span>
                 </div>
                 <div class="header-buttons">
+                    <button id="dbSettingsBtn" class="secondary admin-only" style="display: none;">DB 설정</button>
                     <button id="helpBtn" class="secondary">사용자 가이드</button>
                     <button id="adminLoginBtn" class="secondary">관리자 로그인</button>
                 </div>
@@ -51,24 +52,6 @@
                 <!-- Admin Control (Admin Only) -->
                 <div class="admin-only"
                     style="display: none; margin-bottom: 20px; padding: 15px; border: 1px solid var(--accent-color); border-radius: 8px;">
-                    <div class="db-management" style="margin-bottom: 15px;">
-                        <span style="font-size: 0.8rem; display: block; margin-bottom: 8px;">📂 DB 관리</span>
-                        <div class="db-selector-group" style="display: flex; flex-direction: column; gap: 10px;">
-                            <div style="display: flex; gap: 5px;">
-                                <select id="dbListSelect" style="flex: 1; font-size: 0.8rem;">
-                                    <option value="">데이터베이스 선택...</option>
-                                </select>
-                                <button id="loadDbBtn" class="secondary"
-                                    style="padding: 8px 12px; font-size: 0.8rem;">전환</button>
-                            </div>
-                            <div style="display: flex; gap: 5px;">
-                                <input type="text" id="newDbInput" placeholder="새 DB 이름 (예: 시즌2)"
-                                    style="flex: 1; font-size: 0.8rem;">
-                                <button id="switchDbBtn" class="primary"
-                                    style="padding: 8px 12px; font-size: 0.8rem;">생성/이동</button>
-                            </div>
-                        </div>
-                    </div>
                     <h4 style="margin: 0 0 10px 0; color: var(--accent-color);">👮‍♂️ 관리자 권한: 회차 오픈</h4>
                     <div style="display: flex; gap: 10px; align-items: center;">
                         <span style="white-space: nowrap;">제</span>
@@ -395,6 +378,51 @@
         window.FB_SDK = { initializeApp, getFirestore, collection, doc, setDoc, getDoc, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp };
     </script>
     <script type="module" src="app.js"></script>
+    <!-- DB 관리 모달 -->
+    <div id="dbModal" class="modal hidden">
+        <div class="modal-content" style="max-width: 400px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h3 style="margin: 0;">📂 데이터베이스 관리</h3>
+                <button onclick="closeDbModal()" class="secondary" style="padding: 5px 10px;">닫기</button>
+            </div>
+
+            <div class="db-management">
+                <div class="db-selector-group" style="display: flex; flex-direction: column; gap: 15px;">
+                    <div style="background: rgba(255,255,255,0.03); padding: 15px; border-radius: 8px;">
+                        <label
+                            style="font-size: 0.8rem; display: block; margin-bottom: 8px; color: var(--text-secondary);">기존
+                            DB 선택</label>
+                        <div style="display: flex; gap: 5px;">
+                            <select id="dbListSelect" style="flex: 1; font-size: 0.8rem;">
+                                <option value="">데이터베이스 선택...</option>
+                            </select>
+                            <button id="loadDbBtn" class="secondary"
+                                style="padding: 8px 12px; font-size: 0.8rem;">전환</button>
+                        </div>
+                    </div>
+
+                    <div style="background: rgba(255,255,255,0.03); padding: 15px; border-radius: 8px;">
+                        <label
+                            style="font-size: 0.8rem; display: block; margin-bottom: 8px; color: var(--text-secondary);">새
+                            DB 생성 또는 이동</label>
+                        <div style="display: flex; gap: 5px;">
+                            <input type="text" id="newDbInput" placeholder="이름 입력 (예: 시즌2)"
+                                style="flex: 1; font-size: 0.8rem;">
+                            <button id="switchDbBtn" class="primary"
+                                style="padding: 8px 12px; font-size: 0.8rem;">생성/이동</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div style="margin-top: 20px; text-align: center;">
+                <p style="font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4;">
+                    * 새로운 환경이 필요할 때만 사용하세요.<br>
+                    데이터베이스를 전환하면 페이지가 새로고침됩니다.
+                </p>
+            </div>
+        </div>
+    </div>
 </body>
 
 </html>
