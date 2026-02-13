@@ -664,7 +664,8 @@ function renderApplicants() {
 }
 window.removeApplicant = async (id) => {
     if (!isAdmin) return;
-    applicants = applicants.filter(a => a.id !== id);
+    // id가 숫자인 경우와 문자열인 경우 모두 대응하도록 String으로 변환하여 비교
+    applicants = applicants.filter(a => String(a.id) !== String(id));
     await window.saveToCloud();
 };
 
