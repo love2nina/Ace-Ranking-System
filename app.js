@@ -8,6 +8,10 @@ let currentDbName = 'Default';
 let clusterUnsubscribe = null;
 let statusUnsubscribe = null;
 
+// --- 멀티 클럽 감지 ---
+const urlParams = new URLSearchParams(window.location.search);
+const currentClubId = urlParams.get('club') || 'Default';
+
 // --- 핵심 도메인 데이터 ---
 let members = [];
 let matchHistory = [];
@@ -61,8 +65,10 @@ function initFirebase() {
     const app = initializeApp(firebaseConfig);
     db = getFirestore(app);
 
-    // 글로벌 설정 리스너 (가장 먼저 실행)
-    const settingsRef = doc(db, "system", "settings");
+    // 글로벌 설정 리스너 (기본 ACE 클레스터 또는 개별 클럽 경로)
+    const settingsPath = currentClubId === 'Default' ? "system/settings" : `clubs/${currentClubId}/config/settings`;
+    const settingsRef = doc(db, settingsPath);
+
     onSnapshot(settingsRef, (snapshot) => {
         if (snapshot.exists()) {
             systemSettings = snapshot.data();
@@ -74,6 +80,7 @@ function initFirebase() {
                 subscribeToCluster(globalActiveDb);
             }
         } else {
+            // 초기 설정 (클럽별 독립 설정)
             setDoc(settingsRef, { admin_pw: "ace_admin", active_cluster: "Default" });
         }
     });
@@ -90,7 +97,8 @@ function subscribeToCluster(dbName) {
     updateDbDisplay();
 
     // 1. 데이터 클러스터 리스너
-    const docRef = doc(db, "clusters", currentDbName);
+    const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
+    const docRef = doc(db, clusterPath, currentDbName);
     clusterUnsubscribe = onSnapshot(docRef, async (snapshot) => {
         console.log(`[Firebase] Snapshot received for DB: ${currentDbName}`);
         let data = snapshot.exists() ? snapshot.data() : null;
@@ -112,15 +120,19 @@ function subscribeToCluster(dbName) {
         }
     });
 
-    // 2. 세션 상태 리스너
-    statusUnsubscribe = onSnapshot(doc(db, "system", "sessionStatus_" + currentDbName), (snap) => {
+    // 2. 세션 상태 리스너 (경로 보정: 홀수 세그먼트 방지)
+    const sessionStatusDocPath = currentClubId === 'Default'
+        ? `system/sessionStatus_${currentDbName}`
+        : `clubs/${currentClubId}/status/sessionStatus_${currentDbName}`;
+
+    statusUnsubscribe = onSnapshot(doc(db, sessionStatusDocPath), (snap) => {
         if (snap.exists()) {
             currentSessionState = snap.data();
             updateUI();
         } else if (currentDbName.toLowerCase() !== 'default') {
             const nextSeq = (matchHistory.length > 0 ? Math.max(...matchHistory.map(h => parseInt(h.sessionNum) || 0)) : 0) + 1;
             currentSessionState = { status: 'idle', sessionNum: nextSeq };
-            setDoc(doc(db, "system", "sessionStatus_" + currentDbName), currentSessionState);
+            setDoc(doc(db, sessionStatusDocPath), currentSessionState);
         }
     });
 }
@@ -160,8 +172,9 @@ async function handleMigration() {
 
 window.saveToCloud = async () => {
     const { doc, setDoc } = window.FB_SDK;
+    const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
     try {
-        await setDoc(doc(db, "clusters", currentDbName), {
+        await setDoc(doc(db, clusterPath, currentDbName), {
             members,
             matchHistory,
             currentSchedule,
@@ -212,7 +225,8 @@ function initUIEvents() {
             if (confirm(`전체 사용자에게 '${sel.value}' 데이터베이스를 활성 DB로 설정하시겠습니까?`)) {
                 try {
                     const { doc, updateDoc } = window.FB_SDK;
-                    await updateDoc(doc(db, "system", "settings"), { active_cluster: sel.value });
+                    const settingsPath = currentClubId === 'Default' ? "system/settings" : `clubs/${currentClubId}/config/settings`;
+                    await updateDoc(doc(db, settingsPath), { active_cluster: sel.value });
                     alert(`'${sel.value}' DB가 전역 활성 DB로 설정되었습니다.`);
                     closeDbModal();
                 } catch (e) { alert('설정 변경 실패: ' + e.message); }
@@ -229,14 +243,18 @@ function initUIEvents() {
 
 function updateDbDisplay() {
     const el = document.getElementById('currentDbName');
-    if (el) el.innerText = `DB: ${currentDbName}`;
+    if (el) {
+        const clubText = currentClubId !== 'Default' ? `[${currentClubId}] ` : '';
+        el.innerText = `${clubText}DB: ${currentDbName}`;
+    }
 }
 
 async function fetchDbList() {
     if (!isAdmin) return;
     try {
         const { collection, getDocs } = window.FB_SDK;
-        const querySnapshot = await getDocs(collection(db, "clusters"));
+        const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
+        const querySnapshot = await getDocs(collection(db, clusterPath));
         const select = document.getElementById('dbListSelect');
         if (!select) return;
 
@@ -261,7 +279,8 @@ async function switchDatabase() {
     if (confirm(`'${newName}' 데이터베이스를 생성하고 모든 사용자의 기본 DB로 설정하시겠습니까?`)) {
         try {
             const { doc, updateDoc } = window.FB_SDK;
-            await updateDoc(doc(db, "system", "settings"), { active_cluster: newName });
+            const settingsPath = currentClubId === 'Default' ? "system/settings" : `clubs/${currentClubId}/config/settings`;
+            await updateDoc(doc(db, settingsPath), { active_cluster: newName });
             document.getElementById('newDbInput').value = '';
             alert(`신규 DB '${newName}'이 생성 및 전역 활성 DB로 설정되었습니다.`);
             closeDbModal();
@@ -293,7 +312,10 @@ async function openRegistration() {
 window.saveSessionState = async (status, sessionNum) => {
     try {
         const { doc, setDoc } = window.FB_SDK;
-        await setDoc(doc(db, "system", "sessionStatus_" + currentDbName), { status, sessionNum });
+        const sessionStatusDocPath = currentClubId === 'Default'
+            ? `system/sessionStatus_${currentDbName}`
+            : `clubs/${currentClubId}/status/sessionStatus_${currentDbName}`;
+        await setDoc(doc(db, sessionStatusDocPath), { status, sessionNum });
     } catch (e) { console.error("Session State Error:", e); }
 };
 
