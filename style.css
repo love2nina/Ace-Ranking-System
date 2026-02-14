@@ -220,6 +220,70 @@ button.secondary {
     background: rgba(239, 68, 68, 0.1);
 }
 
+/* v7.0: 조 편성 미리보기 */
+.group-preview-container {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.group-preview-box {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px dashed var(--border-color);
+    border-radius: 12px;
+    padding: 12px 16px;
+    min-height: 50px;
+    transition: all 0.2s ease;
+}
+
+.group-preview-box.drag-over {
+    border-color: var(--accent-color);
+    background: rgba(56, 189, 248, 0.08);
+    box-shadow: 0 0 12px rgba(56, 189, 248, 0.15);
+}
+
+.group-preview-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.group-preview-header .group-label {
+    font-weight: 700;
+    color: var(--accent-color);
+    font-size: 0.9rem;
+}
+
+.group-preview-header .group-count {
+    font-size: 0.8rem;
+    background: rgba(56, 189, 248, 0.1);
+    padding: 2px 8px;
+    border-radius: 999px;
+}
+
+.group-preview-members {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.player-tag.draggable {
+    cursor: grab;
+    user-select: none;
+}
+
+.player-tag.draggable:active {
+    cursor: grabbing;
+}
+
+.player-tag.dragging {
+    opacity: 0.4;
+    transform: scale(0.95);
+}
+
 table {
     width: 100%;
     border-collapse: collapse;

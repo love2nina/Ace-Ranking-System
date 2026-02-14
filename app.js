@@ -27,6 +27,7 @@ let rankMap = new Map(); // 현재 랭킹 순위 저장용
 let sessionRankSnapshots = {}; // 회차별(세션별) 시작 시점의 랭킹 스냅샷
 let historyViewMode = 'match'; // 'match' or 'player'
 let sessionStartRatings = {}; // 회차별 시작 시점의 레이팅 스냅샷
+let previewGroups = null; // v7.0: 조 편성 미리보기 상태 (null이면 자동)
 
 // --- 설정 및 상수 ---
 const ELO_INITIAL = 1500;
@@ -691,25 +692,127 @@ function renderApplicants() {
     list.innerHTML = '';
 
     // 조별 인원 정렬 (랭킹순, 신규는 아래)
-    const sortedApplicants = [...applicants].sort((a, b) => {
+    const rankedApplicants = applicants.filter(a => rankMap.has(String(a.id))).sort((a, b) => {
         const rA = rankMap.get(String(a.id))?.rank || 9999;
         const rB = rankMap.get(String(b.id))?.rank || 9999;
         return rA - rB;
     });
+    const newApplicants = applicants.filter(a => !rankMap.has(String(a.id)));
+    const sortedApplicants = [...rankedApplicants, ...newApplicants];
 
-    sortedApplicants.forEach(a => {
-        const div = document.createElement('div'); div.className = 'player-tag';
-        const info = rankMap.get(String(a.id));
-        // 신규 참가자는 (New) 표시
-        const rankLabel = info ? `<span style="font-size:0.8em; color:var(--text-secondary)">(${info.rank})</span>` : `<span style="font-size:0.8em; color:var(--accent-color)">(New)</span>`;
-        div.innerHTML = `${a.name}${rankLabel}${isAdmin ? ` <span class="remove-btn" onclick="removeApplicant('${a.id}')">×</span>` : ''}`;
-        list.appendChild(div);
+    // 4명 미만: 기존 flat 리스트
+    if (sortedApplicants.length < 4) {
+        previewGroups = null;
+        sortedApplicants.forEach(a => {
+            const div = document.createElement('div'); div.className = 'player-tag';
+            const info = rankMap.get(String(a.id));
+            const rankLabel = info ? `<span style="font-size:0.8em; color:var(--text-secondary)">(${info.rank})</span>` : `<span style="font-size:0.8em; color:var(--accent-color)">(New)</span>`;
+            div.innerHTML = `${a.name}${rankLabel}${isAdmin ? ` <span class="remove-btn" onclick="removeApplicant('${a.id}')">×</span>` : ''}`;
+            list.appendChild(div);
+        });
+        return;
+    }
+
+    // 4명 이상: 조별 미리보기
+    const split = getSplits(sortedApplicants.length);
+    if (!split || split.length === 0) { previewGroups = null; return; }
+
+    // previewGroups가 없거나, 인원이 변경되면 재생성
+    const totalInPreview = previewGroups ? previewGroups.reduce((s, g) => s + g.length, 0) : 0;
+    if (!previewGroups || totalInPreview !== sortedApplicants.length) {
+        previewGroups = [];
+        let cur = 0;
+        split.forEach(s => {
+            previewGroups.push(sortedApplicants.slice(cur, cur + s));
+            cur += s;
+        });
+    }
+
+    // 조별 컨테이너 생성
+    const container = document.createElement('div');
+    container.className = 'group-preview-container';
+
+    previewGroups.forEach((group, groupIdx) => {
+        const groupLabel = String.fromCharCode(65 + groupIdx); // A, B, C...
+        const box = document.createElement('div');
+        box.className = 'group-preview-box';
+        box.dataset.groupIdx = groupIdx;
+
+        // 드래그 앤 드롭 수신 (관리자 전용)
+        if (isAdmin) {
+            box.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                box.classList.add('drag-over');
+            });
+            box.addEventListener('dragleave', () => {
+                box.classList.remove('drag-over');
+            });
+            box.addEventListener('drop', (e) => {
+                e.preventDefault();
+                box.classList.remove('drag-over');
+                const playerId = e.dataTransfer.getData('text/plain');
+                const fromGroupIdx = parseInt(e.dataTransfer.getData('fromGroup'));
+                const toGroupIdx = groupIdx;
+
+                if (fromGroupIdx === toGroupIdx) return;
+
+                // 이동 실행 (인원 제한은 대진표 생성 시 체크)
+                const playerIdx = previewGroups[fromGroupIdx].findIndex(p => String(p.id) === playerId);
+                if (playerIdx === -1) return;
+                const [player] = previewGroups[fromGroupIdx].splice(playerIdx, 1);
+                previewGroups[toGroupIdx].push(player);
+
+                renderApplicants(); // 재렌더링
+                updateOptimizationInfo(); // 분석 정보 갱신
+            });
+        }
+
+        // 헤더
+        const header = document.createElement('div');
+        header.className = 'group-preview-header';
+        const gameCount = GAME_COUNTS[group.length] || '?';
+        header.innerHTML = `<span class="group-label">${groupLabel}조</span><span class="group-count">${group.length}명 · ${gameCount}경기</span>`;
+        box.appendChild(header);
+
+        // 멤버 목록
+        const membersDiv = document.createElement('div');
+        membersDiv.className = 'group-preview-members';
+
+        group.forEach(a => {
+            const tag = document.createElement('div');
+            tag.className = 'player-tag' + (isAdmin ? ' draggable' : '');
+            const info = rankMap.get(String(a.id));
+            const rankLabel = info ? `<span style="font-size:0.8em; color:var(--text-secondary)">(${info.rank})</span>` : `<span style="font-size:0.8em; color:var(--accent-color)">(New)</span>`;
+            tag.innerHTML = `${a.name}${rankLabel}${isAdmin ? ` <span class="remove-btn" onclick="removeApplicant('${a.id}')">×</span>` : ''}`;
+
+            // 드래그 시작 (관리자 전용)
+            if (isAdmin) {
+                tag.draggable = true;
+                tag.addEventListener('dragstart', (e) => {
+                    e.dataTransfer.setData('text/plain', String(a.id));
+                    e.dataTransfer.setData('fromGroup', String(groupIdx));
+                    tag.classList.add('dragging');
+                    // 약간의 지연 후 dragging 클래스 제거 (시각 효과)
+                    setTimeout(() => tag.classList.add('dragging'), 0);
+                });
+                tag.addEventListener('dragend', () => {
+                    tag.classList.remove('dragging');
+                });
+            }
+
+            membersDiv.appendChild(tag);
+        });
+
+        box.appendChild(membersDiv);
+        container.appendChild(box);
     });
+
+    list.appendChild(container);
 }
 window.removeApplicant = async (id) => {
     if (!isAdmin) return;
-    // id가 숫자인 경우와 문자열인 경우 모두 대응하도록 String으로 변환하여 비교
     applicants = applicants.filter(a => String(a.id) !== String(id));
+    previewGroups = null; // 인원 변경 시 미리보기 초기화
     await window.saveToCloud();
 };
 
@@ -752,29 +855,45 @@ async function generateSchedule() {
     }
     if (!split || split.length === 0) { alert('인원 분할에 실패했습니다. 조별 인원을 확인해 주세요.'); return; }
 
-    // 대진 배정 로직: 랭킹 사용자(정렬) + 신규 사용자(랜덤)
-    // 대진 배정 로직: 랭킹 사용자(정렬) + 신규 사용자(랜덤)
-    const rankedArr = applicants.filter(a => rankMap.has(String(a.id))).sort((a, b) => b.rating - a.rating);
-    const newArr = applicants.filter(a => !rankMap.has(String(a.id)));
+    // v7.0: previewGroups가 있으면 수동 조 편성을 우선 사용
+    let groupsArr = [];
+    if (previewGroups && previewGroups.length > 0) {
+        // 조별 인원 배분 기준과 일치하는지 체크
+        const actualSizes = previewGroups.map(g => g.length).sort((a, b) => a - b);
+        const expectedSizes = [...split].sort((a, b) => a - b);
+        const isMatch = actualSizes.length === expectedSizes.length && actualSizes.every((v, i) => v === expectedSizes[i]);
+        if (!isMatch) {
+            const actualStr = previewGroups.map((g, i) => `${String.fromCharCode(65 + i)}조: ${g.length}명`).join(', ');
+            const expectedStr = split.join(', ');
+            alert(`조별 인원 배분이 기준과 맞지 않습니다.\n\n현재: ${actualStr}\n기준: ${expectedStr}분할\n\n선수를 드래그하여 조 편성을 조정해 주세요.`);
+            return;
+        }
 
-    // 신규 사용자 랜덤 셔플 및 가상 랭킹(vRank) 부여
-    // 가상 랭킹 시작: 전체 멤버 수 + 1
-    // 랜덤성을 위해 먼저 섞음
-    newArr.sort(() => Math.random() - 0.5);
-
-    let startVRank = members.length + 1;
-    newArr.forEach(p => {
-        p.vRank = startVRank++; // 대진표 생성을 위한 임시 속성
-    });
-
-    const sorted = [...rankedArr, ...newArr];
-
-    let groupsArr = [], cur = 0;
-    split.forEach(s => {
-        const groupMembers = sorted.slice(cur, cur + s);
-        if (groupMembers.length >= 4) groupsArr.push(groupMembers);
-        cur += s;
-    });
+        // 미리보기에서 확정된 조 편성 사용
+        let startVRank = members.length + 1;
+        previewGroups.forEach(group => {
+            group.forEach(p => {
+                if (!rankMap.has(String(p.id))) {
+                    p.vRank = startVRank++;
+                }
+            });
+            groupsArr.push([...group]);
+        });
+    } else {
+        // 기존 자동 로직 (Fallback)
+        const rankedArr = applicants.filter(a => rankMap.has(String(a.id))).sort((a, b) => b.rating - a.rating);
+        const newArr = applicants.filter(a => !rankMap.has(String(a.id)));
+        newArr.sort(() => Math.random() - 0.5);
+        let startVRank = members.length + 1;
+        newArr.forEach(p => { p.vRank = startVRank++; });
+        const sorted = [...rankedArr, ...newArr];
+        let cur = 0;
+        split.forEach(s => {
+            const groupMembers = sorted.slice(cur, cur + s);
+            if (groupMembers.length >= 4) groupsArr.push(groupMembers);
+            cur += s;
+        });
+    }
 
     currentSchedule = [];
     groupsArr.forEach((g, groupIdx) => {
@@ -784,10 +903,8 @@ async function generateSchedule() {
             let roundNum = Math.floor(matchIdx / (g.length === 8 ? 2 : 1)) + 1;
             currentSchedule.push({
                 id: Math.random().toString(36).substr(2, 9),
-                sessionNum: currentSessionState.sessionNum || sessionNum, // 활성화된 회차 번호 사용
+                sessionNum: currentSessionState.sessionNum || sessionNum,
                 group: gLabel, groupRound: roundNum,
-                // 플레이어 객체에 vRank가 있다면 이를 보존해야 함.
-                // applicants의 객체를 그대로 참조하면 되지만, 안전을 위해 복사하되 vRank는 포함.
                 t1: [{ ...g[m[0][0]] }, { ...g[m[0][1]] }],
                 t2: [{ ...g[m[1][0]] }, { ...g[m[1][1]] }],
                 s1: null, s2: null
@@ -796,6 +913,7 @@ async function generateSchedule() {
     });
 
     activeGroupTab = 'A';
+    previewGroups = null; // 미리보기 초기화
 
     // 대진 생성 시 상태를 'playing'으로 변경하여 접수 마감
     await window.saveSessionState('playing', currentSessionState.sessionNum);
@@ -1465,7 +1583,7 @@ window.renderPlayerTrend = () => {
 
 function getSplits(n) {
     const table = {
-        4: [4], 5: [5], 6: [6], 7: [7], 8: [8],
+        4: [4], 5: [5], 6: [6], 7: [7], 8: [4, 4],
         9: [5, 4], 10: [5, 5], 11: [6, 5],
         12: [4, 4, 4], 13: [5, 4, 4], 14: [5, 5, 4], 15: [5, 5, 5],
         16: [5, 6, 5], 17: [6, 6, 5], 18: [6, 6, 6],
