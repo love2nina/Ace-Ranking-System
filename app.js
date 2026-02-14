@@ -952,8 +952,17 @@ function renderCurrentMatches() {
         const h = document.createElement('h4'); h.style.margin = '20px 0 10px 0'; h.style.color = 'var(--accent-color)'; h.innerText = `${rNum}회전`;
         container.appendChild(h);
         filtered.filter(m => m.groupRound === rNum).forEach(m => {
+            // 기대승률 계산
+            const r1 = m.t1[0].rating || ELO_INITIAL;
+            const r2 = m.t1[1].rating || ELO_INITIAL;
+            const r3 = m.t2[0].rating || ELO_INITIAL;
+            const r4 = m.t2[1].rating || ELO_INITIAL;
+            const avg1 = (r1 + r2) / 2;
+            const avg2 = (r3 + r4) / 2;
+            const expected = 1 / (1 + Math.pow(10, (avg2 - avg1) / 400));
+            const expPcnt = (expected * 100).toFixed(0);
+
             // 랭킹 정보 조회 (v5.3: vRank 지원, v6.1: 스냅샷 지원은 History 전용이므로 여기는 vRank/CurrentRank)
-            // 대진표(Current Schedule)는 '지금' 생성된 것이므로 vRank 또는 현재 랭킹 사용
             const getRank = (p) => {
                 if (p.vRank) return `<span style="font-size:0.8em; color:var(--text-secondary)">(${p.vRank})</span>`;
                 const info = rankMap.get(String(p.id));
@@ -967,10 +976,13 @@ function renderCurrentMatches() {
                     <div><strong>${m.t1[1].name}${getRank(m.t1[1])}</strong></div>
                     ${isAdmin ? `<div style="margin-top:5px"><button class="edit-btn" style="padding:2px 6px; font-size:0.7rem; color:var(--text-secondary)" onclick="openCurrentMatchEditModal('${m.id}')">이름 수정</button></div>` : ''}
                 </div>
-                <div class="vs">
-                    <input type="number" class="score-input" value="${m.s1 !== null ? m.s1 : ''}" placeholder="-" min="0" max="6" onchange="updateLiveScore('${m.id}',1,this.value)"> 
-                    : 
-                    <input type="number" class="score-input" value="${m.s2 !== null ? m.s2 : ''}" placeholder="-" min="0" max="6" onchange="updateLiveScore('${m.id}',2,this.value)">
+                <div class="vs" style="display:flex; flex-direction:column; align-items:center; gap:5px;">
+                    <div style="display:flex; align-items:center;">
+                        <input type="number" class="score-input" value="${m.s1 !== null ? m.s1 : ''}" placeholder="-" min="0" max="6" onchange="updateLiveScore('${m.id}',1,this.value)"> 
+                        <span style="margin:0 5px">:</span> 
+                        <input type="number" class="score-input" value="${m.s2 !== null ? m.s2 : ''}" placeholder="-" min="0" max="6" onchange="updateLiveScore('${m.id}',2,this.value)">
+                    </div>
+                    <div style="font-size:0.7rem; color:var(--text-secondary); opacity:0.8;">(기대승률 ${expPcnt}%)</div>
                 </div>
                 <div style="flex:1; text-align:right; display:flex; flex-direction:column; justify-content:center; gap:2px;">
                     <div><strong>${m.t2[0].name}${getRank(m.t2[0])}</strong></div>
@@ -1164,19 +1176,15 @@ function renderHistory() {
                 // "elo_change" variable used below. Let's rename or reuse.
                 let elo_change = left_change;
 
+                // 기대승률 계산 (좌측 팀 기준)
+                const expVal = h.elo_at_match?.expected || 0.5;
+                const left_expected = isSwap ? (1 - expVal) : expVal;
+                const expPcnt = (left_expected * 100).toFixed(0);
+
                 // 랭킹 정보 조회 (과거 회차 당시 기준)
                 const getRankStrArr = (ids, names, sessNum) => {
                     return names.map((n, i) => {
-                        const pid = ids[i];
-                        let rankVal = '-';
-                        if (sessionRankSnapshots[sessNum] && sessionRankSnapshots[sessNum][pid]) {
-                            rankVal = sessionRankSnapshots[sessNum][pid];
-                        }
-                        // 신규 참가자(기록 없음)인 경우 (New)
-                        const r = (rankVal !== '-')
-                            ? `<span style="font-size:0.8em; color:var(--text-secondary)">(${rankVal})</span>`
-                            : `<span style="font-size:0.8em; color:var(--accent-color)">(New)</span>`;
-                        return `${n}${r}`;
+                        return `<span style="font-size:0.9rem;"><strong>${n}</strong></span>`;
                     });
                 };
 
@@ -1192,17 +1200,20 @@ function renderHistory() {
                         <div style="flex:2; display:flex; flex-direction:column; gap:2px;">
                             <div style="display:flex; justify-content:space-between; align-items:center;">
                                 <div style="display:flex; flex-direction:column;">
-                                    <span><strong>${t1_arr[0]}</strong></span>
-                                    <span><strong>${t1_arr[1]}</strong></span>
+                                    ${t1_arr[0]}
+                                    ${t1_arr[1]}
                                 </div>
                                 <span style="font-size:0.8rem; color:var(--text-secondary); margin:0 5px;">vs</span>
                                 <div style="display:flex; flex-direction:column; text-align:right;">
-                                    <span><strong>${t2_arr[0]}</strong></span>
-                                    <span><strong>${t2_arr[1]}</strong></span>
+                                    ${t2_arr[0]}
+                                    ${t2_arr[1]}
                                 </div>
                             </div>
+                            <div style="font-size:0.7rem; color:var(--text-secondary); opacity:0.8; margin-top:2px;">기대승률 ${expPcnt}%</div>
                         </div>
-                        <div style="flex:1; text-align:center; color:var(--accent-color); font-weight:bold; font-size:1.1rem">${s1_disp} : ${s2_disp}</div>
+                        <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+                            <div style="color:var(--accent-color); font-weight:bold; font-size:1.1rem">${s1_disp} : ${s2_disp}</div>
+                        </div>
                         <div style="flex:1; text-align:right">
                             <span class="history-elo-tag" style="color:${elo_change >= 0 ? 'var(--success)' : 'var(--danger)'}">
                                 ${elo_change >= 0 ? '+' : ''}${elo_change.toFixed(1)}
