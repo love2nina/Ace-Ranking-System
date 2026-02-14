@@ -24,6 +24,7 @@ let currentSessionState = { status: 'idle', sessionNum: 0 };
 let eloChart = null;
 let trendChart = null;
 let rankMap = new Map(); // 현재 랭킹 순위 저장용
+let sessionRankSnapshots = {}; // 회차별(세션별) 시작 시점의 랭킹 스냅샷
 let historyViewMode = 'match'; // 'match' or 'player'
 let sessionStartRatings = {}; // 회차별 시작 시점의 레이팅 스냅샷
 
@@ -579,6 +580,18 @@ function recalculateAll() {
             const ratingSnapshot = {};
             members.forEach(m => { ratingSnapshot[m.id] = m.rating; });
 
+            // 회차별 시작 시점의 랭킹 스냅샷 저장
+            // v6.3: 신규 멤버(matchCount===0)는 하위 랭킹으로 배치
+            const existingMembers = members.filter(m => m.matchCount > 0);
+            const newMembers = members.filter(m => m.matchCount === 0);
+            existingMembers.sort((a, b) => b.rating - a.rating);
+            newMembers.sort(() => Math.random() - 0.5); // 신규끼리는 랜덤
+            const finalSorted = [...existingMembers, ...newMembers];
+            sessionRankSnapshots[sId] = {};
+            finalSorted.forEach((m, idx) => {
+                sessionRankSnapshots[sId][m.id] = idx + 1;
+            });
+
             // 회차별 시작 시점의 레이팅 저장 (인원별 정렬용)
             sessionStartRatings[sId] = { ...ratingSnapshot };
 
@@ -593,14 +606,30 @@ function recalculateAll() {
                 let actual = h.score1 > h.score2 ? 1 : (h.score1 < h.score2 ? 0 : 0.5);
                 const diff = Math.abs(h.score1 - h.score2);
 
-                // --- ELO 가중치 단순화 (v4.1) ---
-                // 6:0 완승(shutout) 시에만 1.2배(20% 보너스) 가중치를 부여, 그 외는 1.0배
-                let multiplier = 1.0;
-                if (diff >= 6) multiplier = 1.2;
+                // --- Modified ELO System (v6) ---
+                // 초기: 1500점
+                // 공식: Change = K * (Actual - Expected)
+                // 완승(6:0) 보너스: Change * 1.5 (승자 +50%, 패자 -50%)
 
-                const change = K_FACTOR * multiplier * (actual - expected);
+                const exp1 = 1 / (1 + Math.pow(10, (avg2 - avg1) / 400));
+                const exp2 = 1 / (1 + Math.pow(10, (avg1 - avg2) / 400));
 
-                h.elo_at_match = { t1_before: avg1, t2_before: avg2, expected, change };
+                // Actual Score (1=Win, 0=Loss, 0.5=Draw)
+                let act1 = 0.5;
+                let act2 = 0.5;
+                if (actual === 1) { act1 = 1; act2 = 0; }
+                else if (actual === 0) { act1 = 0; act2 = 1; }
+
+                let changeT1 = K_FACTOR * (act1 - exp1);
+                let changeT2 = K_FACTOR * (act2 - exp2);
+
+                // Shutout Bonus (1.5x)
+                if (diff >= 6) {
+                    changeT1 *= 1.5;
+                    changeT2 *= 1.5;
+                }
+
+                h.elo_at_match = { t1_before: avg1, t2_before: avg2, expected, change1: changeT1, change2: changeT2 };
 
                 [...team1, ...team2].forEach(p => {
                     p.matchCount++;
@@ -608,24 +637,30 @@ function recalculateAll() {
                 });
 
                 team1.forEach(p => {
-                    p.rating += change;
+                    p.rating += changeT1;
                     p.scoreDiff += (h.score1 - h.score2);
                     if (actual === 1) { p.wins++; }
                     else if (actual === 0) { p.losses++; }
                     else { p.draws++; }
                 });
                 team2.forEach(p => {
-                    p.rating -= change;
+                    p.rating += changeT2;
                     p.scoreDiff += (h.score2 - h.score1);
                     if (actual === 0) { p.wins++; }
                     else if (actual === 1) { p.losses++; }
                     else { p.draws++; }
                 });
             });
+            // 세션 참가 점수 제거됨
         });
 
         // 현재 랭킹 순위 저장
-        const currentRanking = [...members].sort((a, b) => b.rating - a.rating);
+        const currentRanking = [...members].sort((a, b) => {
+            if (b.rating !== a.rating) return b.rating - a.rating;
+            // 동점자(특히 신규 0점) 처리: 랜덤 배정 (요청사항)
+            // 주의: 리렌더링 시마다 순위가 바뀔 수 있음. 고정하려면 별도 seed 필요하나, 현재는 요청대로 단순 랜덤 적용.
+            return Math.random() - 0.5;
+        });
         currentRanking.forEach((m, idx) => {
             const prevIdx = previousRanking.indexOf(m.id);
             let change = 0;
@@ -665,8 +700,9 @@ function renderApplicants() {
     sortedApplicants.forEach(a => {
         const div = document.createElement('div'); div.className = 'player-tag';
         const info = rankMap.get(String(a.id));
-        const rankLabel = info ? `${info.rank}위` : '첫출전';
-        div.innerHTML = `${a.name}(${rankLabel})${isAdmin ? ` <span class="remove-btn" onclick="removeApplicant('${a.id}')">×</span>` : ''}`;
+        // 신규 참가자는 (New) 표시
+        const rankLabel = info ? `<span style="font-size:0.8em; color:var(--text-secondary)">(${info.rank})</span>` : `<span style="font-size:0.8em; color:var(--accent-color)">(New)</span>`;
+        div.innerHTML = `${a.name}${rankLabel}${isAdmin ? ` <span class="remove-btn" onclick="removeApplicant('${a.id}')">×</span>` : ''}`;
         list.appendChild(div);
     });
 }
@@ -717,8 +753,20 @@ async function generateSchedule() {
     if (!split || split.length === 0) { alert('인원 분할에 실패했습니다. 조별 인원을 확인해 주세요.'); return; }
 
     // 대진 배정 로직: 랭킹 사용자(정렬) + 신규 사용자(랜덤)
+    // 대진 배정 로직: 랭킹 사용자(정렬) + 신규 사용자(랜덤)
     const rankedArr = applicants.filter(a => rankMap.has(String(a.id))).sort((a, b) => b.rating - a.rating);
-    const newArr = applicants.filter(a => !rankMap.has(String(a.id))).sort(() => Math.random() - 0.5); // 신규 유저는 랜덤하게 섞음
+    const newArr = applicants.filter(a => !rankMap.has(String(a.id)));
+
+    // 신규 사용자 랜덤 셔플 및 가상 랭킹(vRank) 부여
+    // 가상 랭킹 시작: 전체 멤버 수 + 1
+    // 랜덤성을 위해 먼저 섞음
+    newArr.sort(() => Math.random() - 0.5);
+
+    let startVRank = members.length + 1;
+    newArr.forEach(p => {
+        p.vRank = startVRank++; // 대진표 생성을 위한 임시 속성
+    });
+
     const sorted = [...rankedArr, ...newArr];
 
     let groupsArr = [], cur = 0;
@@ -738,7 +786,11 @@ async function generateSchedule() {
                 id: Math.random().toString(36).substr(2, 9),
                 sessionNum: currentSessionState.sessionNum || sessionNum, // 활성화된 회차 번호 사용
                 group: gLabel, groupRound: roundNum,
-                t1: [g[m[0][0]], g[m[0][1]]], t2: [g[m[1][0]], g[m[1][1]]], s1: null, s2: null
+                // 플레이어 객체에 vRank가 있다면 이를 보존해야 함.
+                // applicants의 객체를 그대로 참조하면 되지만, 안전을 위해 복사하되 vRank는 포함.
+                t1: [{ ...g[m[0][0]] }, { ...g[m[0][1]] }],
+                t2: [{ ...g[m[1][0]] }, { ...g[m[1][1]] }],
+                s1: null, s2: null
             });
         });
     });
@@ -782,10 +834,19 @@ function renderCurrentMatches() {
         const h = document.createElement('h4'); h.style.margin = '20px 0 10px 0'; h.style.color = 'var(--accent-color)'; h.innerText = `${rNum}회전`;
         container.appendChild(h);
         filtered.filter(m => m.groupRound === rNum).forEach(m => {
+            // 랭킹 정보 조회 (v5.3: vRank 지원, v6.1: 스냅샷 지원은 History 전용이므로 여기는 vRank/CurrentRank)
+            // 대진표(Current Schedule)는 '지금' 생성된 것이므로 vRank 또는 현재 랭킹 사용
+            const getRank = (p) => {
+                if (p.vRank) return `<span style="font-size:0.8em; color:var(--text-secondary)">(${p.vRank})</span>`;
+                const info = rankMap.get(String(p.id));
+                return info ? `<span style="font-size:0.8em; color:var(--text-secondary)">(${info.rank})</span>` : '';
+            };
+
             const div = document.createElement('div'); div.className = 'match-card';
             div.innerHTML = `
-                <div style="flex:1">
-                    <strong>${m.t1[0].name}, ${m.t1[1].name}</strong>
+                <div style="flex:1; display:flex; flex-direction:column; justify-content:center; gap:2px;">
+                    <div><strong>${m.t1[0].name}${getRank(m.t1[0])}</strong></div>
+                    <div><strong>${m.t1[1].name}${getRank(m.t1[1])}</strong></div>
                     ${isAdmin ? `<div style="margin-top:5px"><button class="edit-btn" style="padding:2px 6px; font-size:0.7rem; color:var(--text-secondary)" onclick="openCurrentMatchEditModal('${m.id}')">이름 수정</button></div>` : ''}
                 </div>
                 <div class="vs">
@@ -793,7 +854,10 @@ function renderCurrentMatches() {
                     : 
                     <input type="number" class="score-input" value="${m.s2 !== null ? m.s2 : ''}" placeholder="-" min="0" max="6" onchange="updateLiveScore('${m.id}',2,this.value)">
                 </div>
-                <div style="flex:1; text-align:right"><strong>${m.t2[0].name}, ${m.t2[1].name}</strong></div>
+                <div style="flex:1; text-align:right; display:flex; flex-direction:column; justify-content:center; gap:2px;">
+                    <div><strong>${m.t2[0].name}${getRank(m.t2[0])}</strong></div>
+                    <div><strong>${m.t2[1].name}${getRank(m.t2[1])}</strong></div>
+                </div>
             `;
             container.appendChild(div);
         });
@@ -959,18 +1023,72 @@ function renderHistory() {
                 const t2_disp = isSwap ? h.t1_names : h.t2_names;
                 const s1_disp = isSwap ? h.score2 : h.score1;
                 const s2_disp = isSwap ? h.score1 : h.score2;
-                let elo_change = h.elo_at_match?.change || 0;
-                if (isSwap) elo_change = -elo_change; // 스왑되었으므로 부호 반전 (항상 양수로 보임)
+
+                // Growth Point Fix: use change1/change2 based on isSwap
+                // If isSwap is true, left side is Team 2. So we show change2.
+                // But wait, the UI shows a single "+XX" tag on the right side.
+                // Usually this was for the winner.
+                // In Growth Point, both gain points.
+                // Let's show the points gained by the *winner* (or the left side player if draw?).
+                // Or maybe show "+W / +L" style?
+                // Given the space, let's just show the points of the *Left Side* team (which is usually the winner).
+
+                let left_change = 0;
+                if (isSwap) {
+                    left_change = h.elo_at_match?.change2 || 0;
+                } else {
+                    left_change = h.elo_at_match?.change1 || 0;
+                }
+
+                // If draw, both get same points usually.
+                // If win, winner gets more.
+                // Let's just show the points of the winner (who is on the left).
+                // "elo_change" variable used below. Let's rename or reuse.
+                let elo_change = left_change;
+
+                // 랭킹 정보 조회 (과거 회차 당시 기준)
+                const getRankStrArr = (ids, names, sessNum) => {
+                    return names.map((n, i) => {
+                        const pid = ids[i];
+                        let rankVal = '-';
+                        if (sessionRankSnapshots[sessNum] && sessionRankSnapshots[sessNum][pid]) {
+                            rankVal = sessionRankSnapshots[sessNum][pid];
+                        }
+                        // 신규 참가자(기록 없음)인 경우 (New)
+                        const r = (rankVal !== '-')
+                            ? `<span style="font-size:0.8em; color:var(--text-secondary)">(${rankVal})</span>`
+                            : `<span style="font-size:0.8em; color:var(--accent-color)">(New)</span>`;
+                        return `${n}${r}`;
+                    });
+                };
+
+                const t1_arr = getRankStrArr(isSwap ? h.t2_ids : h.t1_ids, t1_disp, h.sessionNum);
+                const t2_arr = getRankStrArr(isSwap ? h.t1_ids : h.t2_ids, t2_disp, h.sessionNum);
+
+                // Growth Point에서는 elo_at_match.change가 큰 의미가 없을 수 있으나, 승리팀 획득 점수 등을 표시할 수도 있음.
+                // 여기서는 점수 변동폭이 승/패에 따라 다르므로 개별 표시가 이상적이나, UI상 승리팀 획득 점수만 표시하거나 숨김.
+                // 기존 형식을 유지하되 값은 새로 계산된 로직을 따름.
 
                 return `
                     <div class="history-match-item">
-                        <div style="flex:2">
-                            <strong>${t1_disp.join(',')}</strong> vs <strong>${t2_disp.join(',')}</strong>
-                            <div style="font-size:0.75rem; color:var(--text-secondary)">기대승률: ${(((isSwap ? 1 - (h.elo_at_match?.expected || 0.5) : (h.elo_at_match?.expected || 0.5))) * 100).toFixed(1)}%</div>
+                        <div style="flex:2; display:flex; flex-direction:column; gap:2px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <div style="display:flex; flex-direction:column;">
+                                    <span><strong>${t1_arr[0]}</strong></span>
+                                    <span><strong>${t1_arr[1]}</strong></span>
+                                </div>
+                                <span style="font-size:0.8rem; color:var(--text-secondary); margin:0 5px;">vs</span>
+                                <div style="display:flex; flex-direction:column; text-align:right;">
+                                    <span><strong>${t2_arr[0]}</strong></span>
+                                    <span><strong>${t2_arr[1]}</strong></span>
+                                </div>
+                            </div>
                         </div>
                         <div style="flex:1; text-align:center; color:var(--accent-color); font-weight:bold; font-size:1.1rem">${s1_disp} : ${s2_disp}</div>
                         <div style="flex:1; text-align:right">
-                            <span class="history-elo-tag" style="color:var(--success)">+${Math.abs(elo_change).toFixed(1)}</span>
+                            <span class="history-elo-tag" style="color:${elo_change >= 0 ? 'var(--success)' : 'var(--danger)'}">
+                                ${elo_change >= 0 ? '+' : ''}${elo_change.toFixed(1)}
+                            </span>
                             ${isAdmin ? `<div style="margin-top:5px"><button class="edit-btn" onclick="openEditModal(${h.id})">수정</button><button class="delete-btn" onclick="deleteHistory(${h.id})">삭제</button></div>` : ''}
                         </div>
                     </div>
@@ -981,8 +1099,8 @@ function renderHistory() {
             const playerStats = {};
             sessionMatches.forEach(h => {
                 const teams = [
-                    { ids: h.t1_ids, names: h.t1_names, score: h.score1, oppScore: h.score2, change: h.elo_at_match?.change || 0 },
-                    { ids: h.t2_ids, names: h.t2_names, score: h.score2, oppScore: h.score1, change: -(h.elo_at_match?.change || 0) }
+                    { ids: h.t1_ids, names: h.t1_names, score: h.score1, oppScore: h.score2, change: h.elo_at_match?.change1 || 0 },
+                    { ids: h.t2_ids, names: h.t2_names, score: h.score2, oppScore: h.score1, change: h.elo_at_match?.change2 || 0 }
                 ];
                 teams.forEach(t => {
                     t.ids.forEach((id, idx) => {
@@ -995,25 +1113,32 @@ function renderHistory() {
                 });
             });
 
-            const startRatings = sessionStartRatings[sNum] || {};
+            // v6.2: 선수별 보기 정렬 (당시 랭킹 순)
+            // sessionRankSnapshots[sNum]에 당시 순위(1, 2, 3...)가 저장되어 있음.
             const sortedPlayers = Object.values(playerStats).sort((a, b) => {
-                const rA = startRatings[a.id] || ELO_INITIAL;
-                const rB = startRatings[b.id] || ELO_INITIAL;
-                return rB - rA; // 시작 시점 레이팅 내림차순 (지난주 랭킹순)
+                const rankA = (sessionRankSnapshots[sNum] && sessionRankSnapshots[sNum][a.id]) || 9999;
+                const rankB = (sessionRankSnapshots[sNum] && sessionRankSnapshots[sNum][b.id]) || 9999;
+                return rankA - rankB; // 오름차순 (1위가 먼저)
             });
-            contentHtml = sortedPlayers.map(p => `
+            contentHtml = sortedPlayers.map(p => {
+                // v6.2: 당시 랭킹(Snapshot Rank) 표시
+                let rankVal = (sessionRankSnapshots[sNum] && sessionRankSnapshots[sNum][p.id]) || '-';
+                const rankLabel = (rankVal !== '-')
+                    ? `<span style="font-size:0.8em; color:var(--text-secondary)">(${rankVal})</span>`
+                    : `<span style="font-size:0.8em; color:var(--accent-color)">(New)</span>`;
+                return `
                 <div class="player-history-item">
                     <div>
-                        <div class="player-history-info">${p.name}</div>
+                        <div class="player-history-info">${p.name}${rankLabel}</div>
                         <div class="player-history-stats">${p.wins}승 ${p.draws}무 ${p.losses}패</div>
                     </div>
                     <div style="text-align:right">
                         <span class="history-elo-tag" style="color:${p.eloSum >= 0 ? 'var(--success)' : 'var(--danger)'}">
-                            ${p.eloSum >= 0 ? '+' : ''}${p.eloSum.toFixed(1)}
+                           ${p.eloSum >= 0 ? '+' : ''}${p.eloSum.toFixed(1)}
                         </span>
                     </div>
-                </div>
-            `).join('');
+                </div>`;  // Fixed missing </div> and made color always success because points only go up
+            }).join('');
         }
 
         card.innerHTML = `
@@ -1250,34 +1375,49 @@ window.renderPlayerTrend = () => {
     const m = members.find(x => x.id.toString() === playerId.toString());
     if (!m) return;
 
-    // 회차별 점수 추적
+    // 회차별 점수 추적 & 전체 평균 계산
     let currentRating = ELO_INITIAL;
     const labels = ['초기'];
     const data = [ELO_INITIAL];
+    const averageData = [ELO_INITIAL]; // 평균 점수 추이
 
     const sessionIds = [...new Set(matchHistory.map(h => (h.sessionNum || '').toString()))].filter(Boolean).sort((a, b) => parseInt(a) - parseInt(b));
 
+    // 회차별 전체 멤버 점수 시뮬레이션
+    let memberRatingsSim = {};
+    members.forEach(mem => memberRatingsSim[mem.id] = ELO_INITIAL);
+
     sessionIds.forEach(sId => {
         const sessionMatches = matchHistory.filter(h => (h.sessionNum || '').toString() === sId);
-        sessionMatches.forEach(h => {
-            const team1 = h.t1_ids;
-            const team2 = h.t2_ids;
-            const isT1 = team1.includes(m.id);
-            const isT2 = team2.includes(m.id);
 
-            if (isT1 || isT2) {
-                const change = h.elo_at_match?.change || 0;
-                if (isT1) currentRating += change;
-                else currentRating -= change;
-            }
+        sessionMatches.forEach(h => {
+            // 1. 선택된 선수의 점수 계산
+            const isT1 = h.t1_ids.includes(m.id);
+            const isT2 = h.t2_ids.includes(m.id);
+
+            if (isT1) currentRating += (h.elo_at_match?.change1 || 0);
+            if (isT2) currentRating += (h.elo_at_match?.change2 || 0);
+
+            // 2. 전체 선수 점수 시뮬레이션 (평균 계산용)
+            h.t1_ids.forEach(pid => {
+                if (memberRatingsSim[pid] !== undefined) memberRatingsSim[pid] += (h.elo_at_match?.change1 || 0);
+            });
+            h.t2_ids.forEach(pid => {
+                if (memberRatingsSim[pid] !== undefined) memberRatingsSim[pid] += (h.elo_at_match?.change2 || 0);
+            });
         });
+
         labels.push(`${sId}회`);
         data.push(Math.round(currentRating));
+
+        // 해당 회차 종료 시점의 전체 평균 계산
+        const sum = Object.values(memberRatingsSim).reduce((a, b) => a + b, 0);
+        const avg = sum / members.length;
+        averageData.push(Math.round(avg));
     });
 
     // 선수별 비교를 위해 전 선수 중 최소/최대 레이팅을 기준으로 Y축 고정
     const allRatings = members.map(m => m.rating);
-    const minRating = Math.floor(Math.min(...allRatings, ELO_INITIAL) / 50) * 50 - 50;
     const maxRating = Math.ceil(Math.max(...allRatings, ELO_INITIAL) / 50) * 50 + 50;
 
     if (trendChart) trendChart.destroy();
@@ -1287,7 +1427,7 @@ window.renderPlayerTrend = () => {
             labels: labels,
             datasets: [
                 {
-                    label: 'ELO 변화',
+                    label: '내 점수',
                     data: data,
                     borderColor: '#22c55e',
                     backgroundColor: 'rgba(34, 197, 94, 0.1)',
@@ -1298,8 +1438,8 @@ window.renderPlayerTrend = () => {
                 {
                     label: '평균(1500)',
                     data: Array(labels.length).fill(1500),
-                    borderColor: '#facc15', // 더 눈에 띄는 노란색
-                    borderWidth: 2,          // 두께 강화
+                    borderColor: '#fbbf24', // Amber-400
+                    borderWidth: 2,
                     borderDash: [5, 5],
                     pointRadius: 0,
                     fill: false,
@@ -1312,8 +1452,9 @@ window.renderPlayerTrend = () => {
             maintainAspectRatio: false,
             scales: {
                 y: {
-                    min: minRating,
-                    max: maxRating,
+                    min: 1200,
+                    // 1800점을 기본 Max로 하되, 실제 데이터가 넘으면 자동으로 늘어남
+                    max: Math.max(maxRating, 1800),
                     grid: { color: 'rgba(255,255,255,0.05)' }
                 },
                 x: { grid: { display: false } }

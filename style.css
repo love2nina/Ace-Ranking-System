@@ -769,4 +769,28 @@ td {
         min-width: 100px;
         max-width: 160px;
     }
+
+    /* 랭킹 테이블 모바일 최적화 (v4.2) */
+    #rankingTable th,
+    #rankingTable td {
+        padding: 8px 4px;
+        font-size: 0.8rem;
+    }
+
+    #rankingTable .rank-badge {
+        width: 20px;
+        height: 20px;
+        line-height: 20px;
+        font-size: 0.8rem;
+    }
+
+    #rankingTable .rank-up,
+    #rankingTable .rank-down,
+    #rankingTable .rank-new {
+        display: block;
+        /* 줄바꿈하여 공간 절약 */
+        margin-left: 0;
+        margin-top: 2px;
+        font-size: 0.65rem;
+    }
 }
