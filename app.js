@@ -4,7 +4,7 @@
 let db;
 let isAdmin = false;
 let systemSettings = { admin_pw: "ace_admin" };
-let currentDbName = 'Default';
+let currentDbName = ''; // 실제 값을 가져오기 전까지 비워둠
 let clusterUnsubscribe = null;
 let statusUnsubscribe = null;
 
@@ -228,7 +228,7 @@ function initUIEvents() {
     bindClick('confirmAdminBtn', tryAdminLogin);
     bindClick('addPlayerBtn', addPlayer);
     bindClick('generateScheduleBtn', () => generateSchedule(false));
-    bindClick('generateAIScheduleBtn', () => generateSchedule(true));
+    bindClick('cancelScheduleBtn', cancelSchedule);
     bindClick('updateEloBtn', commitSession);
     bindClick('saveEditBtn', saveEdit);
     bindClick('openRoundBtn', openRegistration);
@@ -706,6 +706,22 @@ function updateUI() {
 function renderApplicants() {
     const list = document.getElementById('playerList'); if (!list) return;
     list.innerHTML = '';
+    const dashboard = document.getElementById('dashboard');
+
+    // 대진 중일 때는 명단 대신 메시지 표시
+    if (currentSessionState.status === 'playing') {
+        list.innerHTML = `
+            <div style="text-align:center; padding:40px 20px; color:var(--text-secondary);">
+                <div style="font-size:3rem; margin-bottom:15px;">🎾</div>
+                <h3 style="color:var(--accent-color); margin-bottom:10px;">현재 랭킹전이 진행 중입니다.</h3>
+                <p style="font-size:0.9rem; opacity:0.8;">대진표 탭에서 경기 결과를 입력해 주세요.<br>대진표를 초기화하면 다시 명단 수정이 가능합니다.</p>
+            </div>
+        `;
+        if (dashboard) dashboard.style.display = 'none';
+        return;
+    }
+
+    if (dashboard) dashboard.style.display = 'block';
 
     // 조별 인원 정렬 (랭킹순, 신규는 아래)
     const rankedApplicants = applicants.filter(a => rankMap.has(String(a.id))).sort((a, b) => {
@@ -946,10 +962,27 @@ async function generateSchedule(isAI = false) {
     // 대진 생성 시 상태를 'playing'으로 변경하여 접수 마감
     await window.saveSessionState('playing', currentSessionState.sessionNum);
 
-    // 대진 생성 시 신청자 명단 초기화 (운영 로직 강화)
-    applicants = [];
+    // [중요] 대진 생성 후에도 명단을 유지해야 '대진 취소' 시 복구가 가능함
+    // applicants = []; // 이 줄을 제거하여 명단을 유지합니다.
+
     await window.saveToCloud();
     switchTab('match');
+}
+
+async function cancelSchedule() {
+    if (!isAdmin) return;
+    if (!confirm('현재 대진표를 삭제하고 참가 접수 단계로 돌아가시겠습니까?\n(입력된 경기 결과가 모두 사라집니다.)')) return;
+
+    currentSchedule = [];
+    previewGroups = null;
+
+    // 상태를 다시 'recruiting'으로 변경
+    await window.saveSessionState('recruiting', currentSessionState.sessionNum);
+    await window.saveToCloud();
+
+    alert('대진표가 초기화되었습니다. 참가신청 탭에서 명단을 수정할 수 있습니다.');
+    renderApplicants(); // UI 즉시 갱신
+    switchTab('apply');
 }
 
 function renderCurrentMatches() {
@@ -977,8 +1010,40 @@ function renderCurrentMatches() {
     const filtered = currentSchedule.filter(m => m.group === activeGroupTab);
     const rounds = [...new Set(filtered.map(m => m.groupRound))].sort((a, b) => a - b);
     rounds.forEach(rNum => {
-        const h = document.createElement('h4'); h.style.margin = '20px 0 10px 0'; h.style.color = 'var(--accent-color)'; h.innerText = `${rNum}회전`;
-        container.appendChild(h);
+        const headerDiv = document.createElement('div');
+        headerDiv.style.display = 'flex';
+        headerDiv.style.justifyContent = 'space-between';
+        headerDiv.style.alignItems = 'center';
+        headerDiv.style.margin = '20px 0 10px 0';
+
+        const h = document.createElement('h4');
+        h.style.margin = '0';
+        h.style.color = 'var(--accent-color)';
+        h.innerText = `${rNum}회전`;
+        headerDiv.appendChild(h);
+
+        if (isAdmin) {
+            const editAllBtn = document.createElement('button');
+            editAllBtn.style.fontSize = '0.7rem';
+            editAllBtn.style.color = 'var(--text-secondary)';
+            editAllBtn.style.background = 'none';
+            editAllBtn.style.border = 'none';
+            editAllBtn.style.padding = '0';
+            editAllBtn.style.cursor = 'pointer';
+            editAllBtn.style.opacity = '0.6';
+            editAllBtn.style.textDecoration = 'underline';
+            editAllBtn.innerText = '이름 수정';
+
+            // 해당 라운드의 첫 번째 경기 ID를 넘겨 모달을 열거나, 통합 수정을 지원
+            const roundMatches = filtered.filter(m => m.groupRound === rNum);
+            if (roundMatches.length > 0) {
+                editAllBtn.onclick = () => openCurrentMatchEditModal(roundMatches[0].id);
+            }
+            headerDiv.appendChild(editAllBtn);
+        }
+
+        container.appendChild(headerDiv);
+
         filtered.filter(m => m.groupRound === rNum).forEach(m => {
             // 기대승률 계산
             const r1 = m.t1[0].rating || ELO_INITIAL;
@@ -1002,13 +1067,26 @@ function renderCurrentMatches() {
                 <div style="flex:1; display:flex; flex-direction:column; justify-content:center; gap:2px;">
                     <div><strong>${m.t1[0].name}${getRank(m.t1[0])}</strong></div>
                     <div><strong>${m.t1[1].name}${getRank(m.t1[1])}</strong></div>
-                    ${isAdmin ? `<div style="margin-top:5px"><button class="edit-btn" style="padding:2px 6px; font-size:0.7rem; color:var(--text-secondary)" onclick="openCurrentMatchEditModal('${m.id}')">이름 수정</button></div>` : ''}
                 </div>
                 <div class="vs" style="display:flex; flex-direction:column; align-items:center; gap:5px;">
                     <div style="display:flex; align-items:center;">
-                        <input type="number" class="score-input" value="${m.s1 !== null ? m.s1 : ''}" placeholder="-" min="0" max="6" onchange="updateLiveScore('${m.id}',1,this.value)"> 
-                        <span style="margin:0 5px">:</span> 
-                        <input type="number" class="score-input" value="${m.s2 !== null ? m.s2 : ''}" placeholder="-" min="0" max="6" onchange="updateLiveScore('${m.id}',2,this.value)">
+                        <input type="number" 
+                               class="score-input" 
+                               value="${m.s1 !== null ? m.s1 : ''}" 
+                               placeholder="-" 
+                               min="0" max="6" 
+                               inputmode="numeric" 
+                               onchange="updateLiveScore('${m.id}',1,this.value)"
+                               style="width:55px; font-size:1.1rem; padding:5px 0;"> 
+                        <span style="margin:0 5px; font-weight:bold;">:</span> 
+                        <input type="number" 
+                               class="score-input" 
+                               value="${m.s2 !== null ? m.s2 : ''}" 
+                               placeholder="-" 
+                               min="0" max="6" 
+                               inputmode="numeric" 
+                               onchange="updateLiveScore('${m.id}',2,this.value)"
+                               style="width:55px; font-size:1.1rem; padding:5px 0;">
                     </div>
                     <div style="font-size:0.7rem; color:var(--text-secondary); opacity:0.8;">(기대승률 ${expPcnt}%)</div>
                 </div>
@@ -1108,7 +1186,8 @@ async function commitSession() {
             });
         });
 
-        currentSchedule = []; applicants = [];
+        currentSchedule = [];
+        applicants = []; // 랭킹전 최종 종료 시에만 명단 초기화
         await window.saveToCloud();
 
         // 랭킹전 종료 후 상태를 IDLE로 변경하고 다음 회차 번호 준비

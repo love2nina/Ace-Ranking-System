@@ -19,7 +19,7 @@
             </div>
             <div id="adminStatusArea" class="header-controls">
                 <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 5px;">
-                    <span id="currentDbName" class="db-badge">DB: Default</span>
+                    <span id="currentDbName" class="db-badge">DB: 커넥팅...</span>
                     <span id="syncStatus" class="sync-status" style="margin: 0; padding-top: 2px;">● Cloud Online</span>
                 </div>
                 <div class="header-buttons">
@@ -93,11 +93,8 @@
                         </div>
                         <div style="display: flex; gap: 10px; margin-top: 20px;">
                             <button id="generateScheduleBtn"
-                                style="flex: 1; background: var(--bg-card); border: 1px solid var(--border-color);">일반
-                                대진 생성</button>
-                            <button id="generateAIScheduleBtn"
-                                style="flex: 1; background: linear-gradient(135deg, #6366f1, #a855f7); color: white;">✨
-                                AI 스마트 대진</button>
+                                style="flex: 1; background: var(--accent-color); color: #0f172a; padding: 15px; font-size: 1.1rem; border: none; font-weight: 800; box-shadow: 0 4px 12px rgba(56, 189, 248, 0.3);">👥
+                                대진표 생성</button>
                         </div>
                         <div id="aiStatus"
                             style="display: none; text-align: center; margin-top: 10px; font-size: 0.8rem; color: var(--accent-color);">
@@ -124,9 +121,13 @@
                 <div id="matchFooter" style="display: none; margin-top: 20px; text-align: center;">
                     <div class="admin-only" style="display: none;">
                         <button id="updateEloBtn"
-                            style="background-color: var(--success); color: white; width: 100%;">랭킹전을 종료합니다.</button>
-                        <p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 10px;">* 업데이트 시 현재 대진 기록이
-                            클라우드 히스토리에 누적됩니다.</p>
+                            style="background-color: var(--success); color: white; width: 100%;">🏆 랭킹전 종료 및 결과
+                            확정</button>
+                        <button id="cancelScheduleBtn" class="secondary"
+                            style="width: 100%; margin-top: 10px; color: var(--danger); border-color: var(--danger);">🚫
+                            대진표 초기화 및 접수 재개</button>
+                        <p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 10px;">* '접수 재개' 시 현재
+                            대진표가 삭제되고 다시 명단을 수정할 수 있습니다.</p>
                     </div>
                     <div class="guest-only" style="padding: 15px; color: var(--accent-color); font-weight: bold;">
                         🏅 실시간 경기 결과가 업데이트 중입니다.
