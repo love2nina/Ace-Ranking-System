@@ -92,7 +92,16 @@
                             <p id="splitStatus" style="font-size: 0.8rem; margin: 0;"></p>
                         </div>
                         <div style="display: flex; gap: 10px; margin-top: 20px;">
-                            <button id="generateScheduleBtn" style="flex: 1;">대진표 생성</button>
+                            <button id="generateScheduleBtn"
+                                style="flex: 1; background: var(--bg-card); border: 1px solid var(--border-color);">일반
+                                대진 생성</button>
+                            <button id="generateAIScheduleBtn"
+                                style="flex: 1; background: linear-gradient(135deg, #6366f1, #a855f7); color: white;">✨
+                                AI 스마트 대진</button>
+                        </div>
+                        <div id="aiStatus"
+                            style="display: none; text-align: center; margin-top: 10px; font-size: 0.8rem; color: var(--accent-color);">
+                            <span class="pulse">⚡ AI가 최적의 대진을 분석 중입니다...</span>
                         </div>
                     </div>
                     <div class="guest-only"
@@ -365,60 +374,63 @@
                 </div>
             </div>
         </div>
+    </div>
 
-        <script type="module">
-            import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-            import { getFirestore, collection, doc, setDoc, getDoc, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+    <!-- DB 관리 모달 -->
+    <div id="dbModal" class="modal hidden">
+        <div class="modal-content" style="max-width: 400px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h3 style="margin: 0;">📂 데이터베이스 관리</h3>
+                <button onclick="closeDbModal()" class="secondary" style="padding: 5px 10px;">닫기</button>
+            </div>
 
-            // Firebase 설정 (app.js에서 접근 가능하도록 window 객체에 바인딩)
-            window.FB_SDK = { initializeApp, getFirestore, collection, doc, setDoc, getDoc, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp };
-        </script>
-        <script type="module" src="app.js"></script>
-        <!-- DB 관리 모달 -->
-        <div id="dbModal" class="modal hidden">
-            <div class="modal-content" style="max-width: 400px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                    <h3 style="margin: 0;">📂 데이터베이스 관리</h3>
-                    <button onclick="closeDbModal()" class="secondary" style="padding: 5px 10px;">닫기</button>
-                </div>
-
-                <div class="db-management">
-                    <div class="db-selector-group" style="display: flex; flex-direction: column; gap: 15px;">
-                        <div style="background: rgba(255,255,255,0.03); padding: 15px; border-radius: 8px;">
-                            <label
-                                style="font-size: 0.8rem; display: block; margin-bottom: 8px; color: var(--text-secondary);">기존
-                                DB 선택</label>
-                            <div style="display: flex; gap: 5px;">
-                                <select id="dbListSelect" style="flex: 1; font-size: 0.8rem;">
-                                    <option value="">데이터베이스 선택...</option>
-                                </select>
-                                <button id="loadDbBtn" class="secondary"
-                                    style="padding: 8px 12px; font-size: 0.8rem;">전환</button>
-                            </div>
+            <div class="db-management">
+                <div class="db-selector-group" style="display: flex; flex-direction: column; gap: 15px;">
+                    <div style="background: rgba(255,255,255,0.03); padding: 15px; border-radius: 8px;">
+                        <label
+                            style="font-size: 0.8rem; display: block; margin-bottom: 8px; color: var(--text-secondary);">기존
+                            DB 선택</label>
+                        <div style="display: flex; gap: 5px;">
+                            <select id="dbListSelect" style="flex: 1; font-size: 0.8rem;">
+                                <option value="">데이터베이스 선택...</option>
+                            </select>
+                            <button id="loadDbBtn" class="secondary"
+                                style="padding: 8px 12px; font-size: 0.8rem;">전환</button>
                         </div>
+                    </div>
 
-                        <div style="background: rgba(255,255,255,0.03); padding: 15px; border-radius: 8px;">
-                            <label
-                                style="font-size: 0.8rem; display: block; margin-bottom: 8px; color: var(--text-secondary);">새
-                                DB 생성 또는 이동</label>
-                            <div style="display: flex; gap: 5px;">
-                                <input type="text" id="newDbInput" placeholder="이름 입력 (예: 시즌2)"
-                                    style="flex: 1; font-size: 0.8rem;">
-                                <button id="switchDbBtn" class="primary"
-                                    style="padding: 8px 12px; font-size: 0.8rem;">생성/이동</button>
-                            </div>
+                    <div style="background: rgba(255,255,255,0.03); padding: 15px; border-radius: 8px;">
+                        <label
+                            style="font-size: 0.8rem; display: block; margin-bottom: 8px; color: var(--text-secondary);">새
+                            DB 생성 또는 이동</label>
+                        <div style="display: flex; gap: 5px;">
+                            <input type="text" id="newDbInput" placeholder="이름 입력 (예: 시즌2)"
+                                style="flex: 1; font-size: 0.8rem;">
+                            <button id="switchDbBtn" class="primary"
+                                style="padding: 8px 12px; font-size: 0.8rem;">생성/이동</button>
                         </div>
                     </div>
                 </div>
+            </div>
 
-                <div style="margin-top: 20px; text-align: center;">
-                    <p style="font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4;">
-                        * 새로운 환경이 필요할 때만 사용하세요.<br>
-                        데이터베이스를 전환하면 페이지가 새로고침됩니다.
-                    </p>
-                </div>
+            <div style="margin-top: 20px; text-align: center;">
+                <p style="font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4;">
+                    * 새로운 환경이 필요할 때만 사용하세요.<br>
+                    데이터베이스를 전환하면 페이지가 새로고침됩니다.
+                </p>
             </div>
         </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, collection, doc, setDoc, getDoc, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        // Firebase 설정 (app.js에서 접근 가능하도록 window 객체에 바인딩)
+        window.FB_SDK = { initializeApp, getFirestore, collection, doc, setDoc, getDoc, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp };
+    </script>
+    <script type="module" src="app.js"></script>
+
 </body>
 
 </html>

@@ -54,7 +54,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 });
 
 function initFirebase() {
-    const { initializeApp, getFirestore, onSnapshot, doc, setDoc } = window.FB_SDK;
+    const { initializeApp, getFirestore, onSnapshot, doc, setDoc, getDoc } = window.FB_SDK;
 
     const firebaseConfig = {
         apiKey: "AIzaSyBjGjM6KpHG1lgQ9Dr48AawB8gvkkC8pCs",
@@ -73,20 +73,30 @@ function initFirebase() {
     const settingsPath = currentClubId === 'Default' ? "system/settings" : `clubs/${currentClubId}/config/settings`;
     const settingsRef = doc(db, settingsPath);
 
-    onSnapshot(settingsRef, (snapshot) => {
-        if (snapshot.exists()) {
-            systemSettings = snapshot.data();
-            const globalActiveDb = systemSettings.active_cluster || 'Default';
-
-            // 전역 활성 DB가 변경되었을 경우에만 리스너 재구독
-            if (globalActiveDb !== currentDbName || !clusterUnsubscribe) {
-                console.log(`[Global Sync] Switching to Active DB: ${globalActiveDb}`);
-                subscribeToCluster(globalActiveDb);
-            }
-        } else {
-            // 초기 설정 (클럽별 독립 설정)
-            setDoc(settingsRef, { admin_pw: "ace_admin", active_cluster: "Default" });
+    // 먼저 settings를 한 번 읽어서 활성 DB를 확인 (Default DB 불필요 참조 방지)
+    getDoc(settingsRef).then(snap => {
+        if (snap.exists()) {
+            const activeDb = snap.data().active_cluster || 'Default';
+            currentDbName = activeDb;
+            updateDbDisplay();
         }
+    }).catch(() => { }).finally(() => {
+        // settings 리스너 등록 (이후 실시간 변경 감지)
+        onSnapshot(settingsRef, (snapshot) => {
+            if (snapshot.exists()) {
+                systemSettings = snapshot.data();
+                const globalActiveDb = systemSettings.active_cluster || 'Default';
+
+                // 전역 활성 DB가 변경되었을 경우에만 리스너 재구독
+                if (globalActiveDb !== currentDbName || !clusterUnsubscribe) {
+                    console.log(`[Global Sync] Switching to Active DB: ${globalActiveDb}`);
+                    subscribeToCluster(globalActiveDb);
+                }
+            } else {
+                // 초기 설정 (클럽별 독립 설정)
+                setDoc(settingsRef, { admin_pw: "ace_admin", active_cluster: "Default" });
+            }
+        });
     });
 }
 
@@ -217,7 +227,8 @@ function initUIEvents() {
     bindClick('helpBtn', openHelpModal);
     bindClick('confirmAdminBtn', tryAdminLogin);
     bindClick('addPlayerBtn', addPlayer);
-    bindClick('generateScheduleBtn', generateSchedule);
+    bindClick('generateScheduleBtn', () => generateSchedule(false));
+    bindClick('generateAIScheduleBtn', () => generateSchedule(true));
     bindClick('updateEloBtn', commitSession);
     bindClick('saveEditBtn', saveEdit);
     bindClick('openRoundBtn', openRegistration);
@@ -574,7 +585,10 @@ function recalculateAll() {
             if (isLastSession) {
                 // 현재 세션 시작 전의 레이팅 저장
                 members.forEach(m => m.prevRating = m.rating);
-                previousRanking = [...members].sort((a, b) => b.rating - a.rating).map(m => m.id);
+                previousRanking = [...members].sort((a, b) => {
+                    if (b.rating !== a.rating) return b.rating - a.rating;
+                    return String(a.id).localeCompare(String(b.id));
+                }).map(m => m.id);
             }
 
             const sessionMatches = matchHistory.filter(h => (h.sessionNum || '').toString() === sId);
@@ -585,8 +599,11 @@ function recalculateAll() {
             // v6.3: 신규 멤버(matchCount===0)는 하위 랭킹으로 배치
             const existingMembers = members.filter(m => m.matchCount > 0);
             const newMembers = members.filter(m => m.matchCount === 0);
-            existingMembers.sort((a, b) => b.rating - a.rating);
-            newMembers.sort(() => Math.random() - 0.5); // 신규끼리는 랜덤
+            existingMembers.sort((a, b) => {
+                if (b.rating !== a.rating) return b.rating - a.rating;
+                return String(a.id).localeCompare(String(b.id));
+            });
+            newMembers.sort((a, b) => String(a.id).localeCompare(String(b.id))); // 신규끼리는 ID 기반 결정적 정렬 (일관된 순위 유지)
             const finalSorted = [...existingMembers, ...newMembers];
             sessionRankSnapshots[sId] = {};
             finalSorted.forEach((m, idx) => {
@@ -658,9 +675,8 @@ function recalculateAll() {
         // 현재 랭킹 순위 저장
         const currentRanking = [...members].sort((a, b) => {
             if (b.rating !== a.rating) return b.rating - a.rating;
-            // 동점자(특히 신규 0점) 처리: 랜덤 배정 (요청사항)
-            // 주의: 리렌더링 시마다 순위가 바뀔 수 있음. 고정하려면 별도 seed 필요하나, 현재는 요청대로 단순 랜덤 적용.
-            return Math.random() - 0.5;
+            // 동점자 처리: ID 기반 결정적 정렬 (접속 시마다 순위가 변경되지 않도록)
+            return String(a.id).localeCompare(String(b.id));
         });
         currentRanking.forEach((m, idx) => {
             const prevIdx = previousRanking.indexOf(m.id);
@@ -836,7 +852,7 @@ function updateOptimizationInfo() {
 }
 
 // --- 대진표 생성 (Admin Only: 수동 조 편성 로직 최우선 반영) ---
-async function generateSchedule() {
+async function generateSchedule(isAI = false) {
     if (!isAdmin) return;
 
     // 활성화된 회차 번호 우선 사용
@@ -854,6 +870,12 @@ async function generateSchedule() {
         split = getSplits(applicants.length);
     }
     if (!split || split.length === 0) { alert('인원 분할에 실패했습니다. 조별 인원을 확인해 주세요.'); return; }
+
+    const aiStatus = document.getElementById('aiStatus');
+    if (isAI && aiStatus) aiStatus.style.display = 'block';
+
+    // AI 모드일 경우 약간의 딜레이를 주어 분석 중임을 시각화 (선택사항)
+    if (isAI) await new Promise(r => setTimeout(r, 600));
 
     // v7.0: previewGroups가 있으면 수동 조 편성을 우선 사용
     let groupsArr = [];
@@ -898,6 +920,10 @@ async function generateSchedule() {
     currentSchedule = [];
     groupsArr.forEach((g, groupIdx) => {
         const pattern = MATCH_PATTERNS[g.length]; if (!pattern) return;
+
+        // AI 최적화 적용 시 조별 그룹 내 순서 재배치
+        const optimizedGroup = isAI ? optimizeGroupMatches(g, pattern) : g;
+
         const gLabel = String.fromCharCode(65 + groupIdx);
         pattern.forEach((m, matchIdx) => {
             let roundNum = Math.floor(matchIdx / (g.length === 8 ? 2 : 1)) + 1;
@@ -905,12 +931,14 @@ async function generateSchedule() {
                 id: Math.random().toString(36).substr(2, 9),
                 sessionNum: currentSessionState.sessionNum || sessionNum,
                 group: gLabel, groupRound: roundNum,
-                t1: [{ ...g[m[0][0]] }, { ...g[m[0][1]] }],
-                t2: [{ ...g[m[1][0]] }, { ...g[m[1][1]] }],
+                t1: [{ ...optimizedGroup[m[0][0]] }, { ...optimizedGroup[m[0][1]] }],
+                t2: [{ ...optimizedGroup[m[1][0]] }, { ...optimizedGroup[m[1][1]] }],
                 s1: null, s2: null
             });
         });
     });
+
+    if (isAI && aiStatus) aiStatus.style.display = 'none';
 
     activeGroupTab = 'A';
     previewGroups = null; // 미리보기 초기화
@@ -1209,12 +1237,12 @@ function renderHistory() {
                                     ${t2_arr[1]}
                                 </div>
                             </div>
-                            <div style="font-size:0.7rem; color:var(--text-secondary); opacity:0.8; margin-top:2px;">기대승률 ${expPcnt}%</div>
                         </div>
                         <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;">
                             <div style="color:var(--accent-color); font-weight:bold; font-size:1.1rem">${s1_disp} : ${s2_disp}</div>
                         </div>
-                        <div style="flex:1; text-align:right">
+                        <div style="flex:1; text-align:right; display:flex; flex-direction:column; justify-content:center; align-items:flex-end;">
+                            <div style="font-size:0.65rem; color:var(--text-secondary); opacity:0.8; margin-bottom:2px;">기대승률 ${expPcnt}%</div>
                             <span class="history-elo-tag" style="color:${elo_change >= 0 ? 'var(--success)' : 'var(--danger)'}">
                                 ${elo_change >= 0 ? '+' : ''}${elo_change.toFixed(1)}
                             </span>
@@ -1591,6 +1619,37 @@ window.renderPlayerTrend = () => {
         }
     });
 };
+
+// --- AI 대진 최적화 로직 (v8.0) ---
+function optimizeGroupMatches(group, pattern) {
+    let bestGroup = [...group];
+    let minImbalance = Infinity;
+
+    // 1000회 시뮬레이션
+    for (let i = 0; i < 1000; i++) {
+        const currentTry = [...group].sort(() => Math.random() - 0.5);
+        let totalImbalance = 0;
+
+        pattern.forEach(m => {
+            const r1 = currentTry[m[0][0]].rating || ELO_INITIAL;
+            const r2 = currentTry[m[0][1]].rating || ELO_INITIAL;
+            const r3 = currentTry[m[1][0]].rating || ELO_INITIAL;
+            const r4 = currentTry[m[1][1]].rating || ELO_INITIAL;
+            const avg1 = (r1 + r2) / 2;
+            const avg2 = (r3 + r4) / 2;
+            const expected = 1 / (1 + Math.pow(10, (avg2 - avg1) / 400));
+
+            // 50%에서 벗어날수록 정규화된 벌점 부여
+            totalImbalance += Math.abs(expected - 0.5);
+        });
+
+        if (totalImbalance < minImbalance) {
+            minImbalance = totalImbalance;
+            bestGroup = [...currentTry];
+        }
+    }
+    return bestGroup;
+}
 
 function getSplits(n) {
     const table = {

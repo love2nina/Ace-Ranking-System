@@ -798,6 +798,26 @@ td {
     /* Prevent button text wrapping */
 }
 
+/* AI Status Pulse Animation */
+.pulse {
+    animation: pulse-animation 1.5s infinite;
+}
+
+@keyframes pulse-animation {
+    0% {
+        opacity: 0.6;
+    }
+
+    50% {
+        opacity: 1;
+        transform: scale(1.02);
+    }
+
+    100% {
+        opacity: 0.6;
+    }
+}
+
 /* Mobile Responsive Adjustments */
 @media (max-width: 640px) {
     .main-header {
