@@ -505,6 +505,7 @@ function updateAdminUI() {
     renderApplicants(); // 관리자 상태 변경 시 명단(X버튼 등) 즉시 갱신
     renderHistory();    // 관리자 상태 변경 시 히스토리 버튼 즉시 갱신
     renderSessionStatus(); // 관리자 상태 변경 시 세션 UI 즉시 갱신 (New)
+    renderCurrentMatches(); // 대진표 화면 갱신
 }
 
 // --- 데이터 동기화 로직 통합 (v3.1) ---
@@ -721,7 +722,7 @@ function renderApplicants() {
         return;
     }
 
-    if (dashboard) dashboard.style.display = 'block';
+    // Dashboard visibility is handled by updateOptimizationInfo()
 
     // 조별 인원 정렬 (랭킹순, 신규는 아래)
     const rankedApplicants = applicants.filter(a => rankMap.has(String(a.id))).sort((a, b) => {
@@ -850,7 +851,12 @@ window.removeApplicant = async (id) => {
 
 function updateOptimizationInfo() {
     const dash = document.getElementById('dashboard'); if (!dash) return;
-    if (applicants.length < 4) { dash.style.display = 'none'; return; }
+
+    // 오직 'recruiting' 상태이고 인원이 4명 이상일 때만 조 편성 및 분석 정보 표시
+    if (currentSessionState.status !== 'recruiting' || applicants.length < 4) {
+        dash.style.display = 'none';
+        return;
+    }
     dash.style.display = 'block';
 
     const sessIn = document.getElementById('manualSessionNum');
@@ -986,11 +992,25 @@ async function cancelSchedule() {
 }
 
 function renderCurrentMatches() {
-    const container = document.getElementById('matchContainer'), footer = document.getElementById('matchFooter'), tabs = document.getElementById('groupTabsContainer');
+    const container = document.getElementById('matchContainer'),
+        footer = document.getElementById('matchFooter'),
+        tabs = document.getElementById('groupTabsContainer'),
+        adminControls = document.getElementById('adminMatchControls');
+
     if (!container) return;
     container.innerHTML = '';
-    if (currentSchedule.length === 0) { if (footer) footer.style.display = 'none'; if (tabs) tabs.style.display = 'none'; return; }
-    if (footer) footer.style.display = 'block'; if (tabs) tabs.style.display = 'block';
+
+    if (currentSchedule.length === 0) {
+        if (footer) footer.style.display = 'none';
+        if (tabs) tabs.style.display = 'none';
+        if (adminControls) adminControls.style.display = 'none';
+        container.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 40px;">대진표를 생성해 주세요.</p>';
+        return;
+    }
+
+    if (footer) footer.style.display = 'block';
+    if (tabs) tabs.style.display = 'block';
+    if (adminControls && isAdmin) adminControls.style.display = 'block';
 
     const groups = [...new Set(currentSchedule.map(m => m.group))].sort();
     if (tabs) {

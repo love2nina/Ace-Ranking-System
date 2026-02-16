@@ -101,10 +101,6 @@
                             <span class="pulse">⚡ AI가 최적의 대진을 분석 중입니다...</span>
                         </div>
                     </div>
-                    <div class="guest-only"
-                        style="text-align: center; color: var(--text-secondary); padding: 15px; background: rgba(255,255,255,0.03); border-radius: 8px; margin-top: 15px;">
-                        ⚠️ 대진 생성을 기다리는 중입니다.
-                    </div>
                 </div>
             </div>
         </div>
@@ -112,6 +108,17 @@
         <!-- 2. 대진표 및 결과 섹션 -->
         <div id="tab-match" class="tab-content">
             <div class="card">
+                <div id="adminMatchControls" class="admin-only"
+                    style="display: none; margin-bottom: 15px; border-bottom: 1px solid var(--border-color); padding-bottom: 15px;">
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <button id="cancelScheduleBtn" class="secondary"
+                            style="width: 100%; color: var(--danger); border-color: var(--danger);">🚫
+                            대진표 초기화 및 접수 재개</button>
+                        <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0; text-align: center;">
+                            * '접수 재개' 시 현재 대진표가 삭제되고 다시 명단을 수정할 수 있습니다.
+                        </p>
+                    </div>
+                </div>
                 <div id="groupTabsContainer" class="sub-tabs" style="display: none; margin-bottom: 20px;">
                     <!-- A조, B조 탭 동적 생성 -->
                 </div>
@@ -123,11 +130,6 @@
                         <button id="updateEloBtn"
                             style="background-color: var(--success); color: white; width: 100%;">🏆 랭킹전 종료 및 결과
                             확정</button>
-                        <button id="cancelScheduleBtn" class="secondary"
-                            style="width: 100%; margin-top: 10px; color: var(--danger); border-color: var(--danger);">🚫
-                            대진표 초기화 및 접수 재개</button>
-                        <p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 10px;">* '접수 재개' 시 현재
-                            대진표가 삭제되고 다시 명단을 수정할 수 있습니다.</p>
                     </div>
                     <div class="guest-only" style="padding: 15px; color: var(--accent-color); font-weight: bold;">
                         🏅 실시간 경기 결과가 업데이트 중입니다.
