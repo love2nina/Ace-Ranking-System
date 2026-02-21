@@ -1546,7 +1546,14 @@ window.toggleHistoryContent = (header) => {
     }
 };
 
-window.deleteHistory = async (id) => { if (isAdmin && confirm('영구 삭제?')) { matchHistory = matchHistory.filter(x => x.id !== id); await window.saveToCloud(); } };
+window.deleteHistory = async (id) => {
+    if (!isAdmin) return;
+    if (!confirm('정말로 이 경기 기록을 삭제하시겠습니까?\n모든 랭킹 점수가 처음부터 재계산됩니다.')) return;
+    matchHistory = matchHistory.filter(h => h.id !== id);
+    recalculateAll();
+    updateUI();
+    await window.saveToCloud();
+};
 window.openEditModal = (id) => {
     if (!isAdmin) return;
     editingMatchId = id; const h = matchHistory.find(x => x.id === id);
@@ -1627,10 +1634,36 @@ async function saveEdit() {
     if (!isAdmin) return;
     const h = matchHistory.find(x => x.id === editingMatchId);
     if (h) {
-        h.t1_names = [document.getElementById('edit_t1_1').value, document.getElementById('edit_t1_2').value];
-        h.t2_names = [document.getElementById('edit_t2_1').value, document.getElementById('edit_t2_2').value];
-        h.score1 = parseInt(document.getElementById('edit_s1').value) || 0; h.score2 = parseInt(document.getElementById('edit_s2').value) || 0;
-        closeModal(); await window.saveToCloud();
+        const newT1Names = [
+            document.getElementById('edit_t1_1').value.trim(),
+            document.getElementById('edit_t1_2').value.trim()
+        ];
+        const newT2Names = [
+            document.getElementById('edit_t2_1').value.trim(),
+            document.getElementById('edit_t2_2').value.trim()
+        ];
+
+        // v7.3: 이름에 맞는 ID 동기화 로직 추가
+        const syncIds = (names) => {
+            return names.map(name => {
+                const existing = members.find(m => m.name === name);
+                if (existing) return existing.id;
+                // 이름은 있지만 ID가 없는 경우(신규) 임시 ID 부여
+                return "guest_" + Math.random().toString(36).substr(2, 9);
+            });
+        };
+
+        h.t1_names = newT1Names;
+        h.t2_names = newT2Names;
+        h.t1_ids = syncIds(newT1Names);
+        h.t2_ids = syncIds(newT2Names);
+        h.score1 = parseInt(document.getElementById('edit_s1').value) || 0;
+        h.score2 = parseInt(document.getElementById('edit_s2').value) || 0;
+
+        closeModal();
+        recalculateAll(); // 수정 즉시 데이터 재계산
+        updateUI();       // UI 갱신
+        await window.saveToCloud();
     }
 }
 
