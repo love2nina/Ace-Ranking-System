@@ -142,7 +142,6 @@ function subscribeToCluster(dbName) {
             currentSchedule = data.currentSchedule || [];
             sessionNum = data.sessionNum || 1;
             applicants = data.applicants || [];
-            previewGroups = data.previewGroups || null; // v9.0: 저장된 조편성 로드
             recalculateAll();
             updateUI();
         } else {
@@ -210,8 +209,7 @@ window.saveToCloud = async () => {
             matchHistory,
             currentSchedule,
             sessionNum,
-            applicants,
-            previewGroups // v9.0: 조편성 상태 포함 저장
+            applicants
         });
     } catch (e) {
         console.error("Cloud Error:", e);
@@ -432,7 +430,7 @@ function validateCustomSplit() {
     if (!input) {
         if (status) status.innerText = "";
         btn.disabled = false;
-        updateOptimizationInfo();
+        // v7.7.1: 부모 함수(updateOptimizationInfo)를 다시 호출하지 않음 (무한루프 방지)
         return true;
     }
 
@@ -462,14 +460,19 @@ function validateCustomSplit() {
         }
         btn.disabled = false;
 
-        // v10.0: 입력창 -> 시각화 동기화
-        // 인원 구성이 맞고, 현재 previewGroups의 구색과 다를 때만 재배치
-        const currentPreviewSplit = previewGroups ? previewGroups.map(g => g.length).sort((a, b) => a - b).join(',') : '';
-        const inputSplitSorted = [...nums].sort((a, b) => a - b).join(',');
+        // v7.5: 커스텀 분할 입력 시 저장 버튼 노출
+        const saveBtn = document.getElementById('savePreviewBtn');
+        if (saveBtn) saveBtn.style.display = 'block';
 
-        if (currentPreviewSplit !== inputSplitSorted) {
-            // 인원 변경 감지 시 즉시 시각화 갱신
-            previewGroups = null;
+        // v10.0: 입력창 -> 시각화 동기화
+        // v7.6: 정렬하지 않고 사용자가 입력한 순서(구조) 그대로 비교
+        const currentPreviewSplit = previewGroups ? previewGroups.map(g => g.length).join(',') : '';
+        const inputSplit = nums.join(',');
+
+        if (currentPreviewSplit !== inputSplit) {
+            // 조 구조 변경 감지 시 즉시 시각화 갱신
+            previewGroups = null; // null로 만들면 renderApplicants에서 신규 생성됨
+            // v7.7.1: 이미 renderApplicants가 실행 중일 수 있으므로 비동기로 호출하여 스택 오버플로 방지
             setTimeout(renderApplicants, 0);
         }
 
@@ -588,6 +591,7 @@ async function addPlayer() {
 
     nameInput.value = '';
     await window.saveToCloud();
+    renderApplicants(); // 로컬 즉시 반영
 }
 
 // 신청 버튼 상태 업데이트 (대진 진행 중일 때 비활성화)
@@ -596,7 +600,10 @@ function updateApplyButtonState() {
     const input = document.getElementById('playerName');
     if (!btn || !input) return;
 
-    if (currentSchedule.length > 0) {
+    // v7.4: currentSchedule.length 대신 명확한 세션 상태(status)를 기준으로 판단
+    const isPlaying = currentSessionState.status === 'playing';
+
+    if (isPlaying) {
         btn.disabled = true;
         btn.innerText = "대진 진행 중...";
         btn.classList.add('secondary');
@@ -795,21 +802,34 @@ function renderApplicants() {
             const div = document.createElement('div'); div.className = 'player-tag';
             const info = rankMap.get(String(a.id));
             const rankLabel = info ? `<span style="font-size:0.8em; color:var(--text-secondary)">(${info.rank})</span>` : `<span style="font-size:0.8em; color:var(--accent-color)">(New)</span>`;
-            div.innerHTML = `${a.name}${rankLabel}${isAdmin ? ` <span class="remove-btn" onclick="removeApplicant('${a.id}')">×</span>` : ''}`;
+            div.innerHTML = `${a.name}${rankLabel}${isAdmin ? ` <span class="remove-btn" onclick="event.stopPropagation(); removeApplicant('${a.id}')">×</span>` : ''}`;
             list.appendChild(div);
         });
         return;
     }
 
     // 4명 이상: 조별 미리보기
-    const split = getSplits(sortedApplicants.length);
+    let split;
+    const customInput = document.getElementById('customSplitInput');
+    const customValue = customInput ? customInput.value.trim() : "";
+
+    if (customValue) {
+        split = customValue.split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n));
+        const sum = split.reduce((a, b) => a + b, 0);
+        if (sum !== sortedApplicants.length) split = getSplits(sortedApplicants.length);
+    } else {
+        split = getSplits(sortedApplicants.length);
+    }
+
     if (!split || split.length === 0) { previewGroups = null; return; }
 
-    // previewGroups가 없거나, 인원이 변경되면 재생성 (단, 저장된 데이터가 유효한지 체크)
+    // previewGroups가 없거나, 인원수가 변경되었거나, 조 구성(구조)이 변경되면 재생성
     const totalInPreview = previewGroups ? previewGroups.reduce((s, g) => s + g.length, 0) : 0;
+    const currentStructure = previewGroups ? previewGroups.map(g => g.length).join(',') : '';
+    const targetStructure = split.join(',');
 
-    // 인원수가 다르거나 아예 없으면 기본 자동 편성
-    if (!previewGroups || totalInPreview !== sortedApplicants.length) {
+    // 인원수가 다르거나, 조 구조가 다르거나, 아예 없으면 기본 자동 편성
+    if (!previewGroups || totalInPreview !== sortedApplicants.length || currentStructure !== targetStructure) {
         previewGroups = [];
         let cur = 0;
         split.forEach(s => {
@@ -817,9 +837,10 @@ function renderApplicants() {
             cur += s;
         });
 
-        // 자동 생성 시에는 저장 버튼 숨김
+        // 자동 생성 시에는 저장 버튼 숨김 (단, 커스텀 입력값이 없을 때만)
         const saveBtn = document.getElementById('savePreviewBtn');
-        if (saveBtn) saveBtn.style.display = 'none';
+        if (saveBtn && !customValue) saveBtn.style.display = 'none';
+        else if (saveBtn && customValue) saveBtn.style.display = 'block';
     } else {
         // 인원수가 같으면 기존 previewGroups 유지 (드래그로 바꾼 상태 보존)
         // 하지만 이름 등이 최신화되어야 하므로 매핑 갱신 (ID 기준)
@@ -900,7 +921,7 @@ function renderApplicants() {
             tag.className = 'player-tag' + (isAdmin ? ' draggable' : '');
             const info = rankMap.get(String(a.id));
             const rankLabel = info ? `<span style="font-size:0.8em; color:var(--text-secondary)">(${info.rank})</span>` : `<span style="font-size:0.8em; color:var(--accent-color)">(New)</span>`;
-            tag.innerHTML = `${a.name}${rankLabel}${isAdmin ? ` <span class="remove-btn" onclick="removeApplicant('${a.id}')">×</span>` : ''}`;
+            tag.innerHTML = `${a.name}${rankLabel}${isAdmin ? ` <span class="remove-btn" onclick="event.stopPropagation(); removeApplicant('${a.id}')">×</span>` : ''}`;
 
             // 드래그 시작 (관리자 전용)
             if (isAdmin) {
@@ -935,9 +956,12 @@ function renderApplicants() {
 }
 window.removeApplicant = async (id) => {
     if (!isAdmin) return;
+    console.log(`[Admin] Removing applicant ID: ${id}`);
     applicants = applicants.filter(a => String(a.id) !== String(id));
     previewGroups = null; // 인원 변경 시 미리보기 초기화
     await window.saveToCloud();
+    // 로컬 즉시 반영 (선택 사항이나 체감 속도 향상 위해)
+    renderApplicants();
 };
 
 function updateOptimizationInfo() {
@@ -949,16 +973,16 @@ function updateOptimizationInfo() {
         return;
     }
     dash.style.display = 'block';
+    const inputField = document.getElementById('customSplitInput');
+    const inputVal = inputField ? inputField.value.trim() : "";
+    const info = document.getElementById('optimizationInfo');
 
-    const sessIn = document.getElementById('manualSessionNum');
-    if (sessIn && !sessIn.value) sessIn.value = (matchHistory.length > 0 ? Math.max(...matchHistory.map(h => parseInt(h.sessionNum) || 0)) : 0) + 1;
-
-    const customInputVal = document.getElementById('customSplitInput').value.trim();
-    if (!customInputVal) {
-        const split = getSplits(applicants.length);
+    if (!inputVal) {
+        // 입력이 없으면 현재 구성(A,B,C...) 또는 추천값 표시
+        const split = (previewGroups && previewGroups.length > 0) ? previewGroups.map(g => g.length) : getSplits(applicants.length);
         const games = split.reduce((a, b) => a + (GAME_COUNTS[b] || 0), 0);
-        const info = document.getElementById('optimizationInfo');
-        if (info) info.innerHTML = `<div>현재 참여: ${applicants.length}명 | 추천: <strong>${split.join(', ')}분할</strong></div><div style="margin-top:5px">총 경기: <span class="session-info" style="background:${games <= 18 ? 'var(--success)' : 'var(--danger)'}; color:white">${games}게임</span></div>`;
+        const label = (previewGroups && previewGroups.length > 0) ? "현재 조" : "추천";
+        if (info) info.innerHTML = `<div>현재 참여: ${applicants.length}명 | ${label}: <strong>${split.join(', ')}분할</strong></div><div style="margin-top:5px">총 경기: <span class="session-info" style="background:${games <= 18 ? 'var(--success)' : 'var(--danger)'}; color:white">${games}게임</span></div>`;
     } else {
         validateCustomSplit();
     }
@@ -971,8 +995,16 @@ function updateSplitInputFromPreview() {
     const input = document.getElementById('customSplitInput');
     if (input) {
         input.value = splitArr.join(', ');
-        // v10.1: 값을 수동으로 바꿨으므로 검증(텍스트 업데이트) 강제 실행
-        validateCustomSplit();
+        // 텍스트 업데이트를 위해 검증 실행 (무한루프 방지를 위해 renderApplicants는 트리거하지 않음)
+        const status = document.getElementById('splitStatus');
+        const nums = splitArr;
+        const totalGames = nums.reduce((a, b) => a + (GAME_COUNTS[b] || 0), 0);
+        if (status) {
+            status.innerText = `구성 가능 ✅ (총 ${totalGames}게임)`;
+            status.className = "status-success";
+        }
+        const info = document.getElementById('optimizationInfo');
+        if (info) info.innerHTML = `<div>현재 참여: ${applicants.length}명 | 현재 조: <strong>${nums.join(', ')}분할</strong></div><div style="margin-top:5px">총 경기: <span class="session-info" style="background:${totalGames <= 18 ? 'var(--success)' : 'var(--danger)'}; color:white">${totalGames}게임</span></div>`;
     }
 }
 
@@ -1090,6 +1122,9 @@ async function cancelSchedule() {
     currentSchedule = [];
     previewGroups = null;
 
+    // v7.4: 참가 신청 명단 내 임시 데이터(vRank 등) 초기화
+    applicants.forEach(a => { delete a.vRank; });
+
     // 상태를 다시 'recruiting'으로 변경
     await window.saveSessionState('recruiting', currentSessionState.sessionNum);
     await window.saveToCloud();
@@ -1108,7 +1143,7 @@ function renderCurrentMatches() {
     if (!container) return;
     container.innerHTML = '';
 
-    if (currentSchedule.length === 0) {
+    if (currentSchedule.length === 0 || currentSessionState.status !== 'playing') {
         if (footer) footer.style.display = 'none';
         if (tabs) tabs.style.display = 'none';
         if (adminControls) adminControls.style.display = 'none';
