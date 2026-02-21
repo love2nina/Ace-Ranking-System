@@ -1,5 +1,14 @@
 // ACE 랭킹 시스템 - 실시간 클라우드 엔진 v3.0 (JavaScript)
 
+// --- 글로벌 에러 핸들링 (디버깅용) ---
+window.onerror = function (msg, url, line, col, error) {
+    console.error(`Error: ${msg}\nLine: ${line}\nSource: ${url}`);
+    if (msg.includes("Firebase")) {
+        alert("Firebase 오류가 발생했습니다. 네트워크 또는 권한 설정을 확인하세요.");
+    }
+    return false;
+};
+
 // --- Firebase 초기화 및 상태 관리 ---
 let db;
 let isAdmin = false;
@@ -54,6 +63,12 @@ window.addEventListener('DOMContentLoaded', async () => {
 });
 
 function initFirebase() {
+    console.log("[Firebase] Initializing...");
+    if (!window.FB_SDK) {
+        console.error("Firebase SDK not loaded. If you are opening index.html directly from a file, please use a local server (e.g., python -m http.server).");
+        alert("DB 연결 실패: Firebase SDK를 불러오지 못했습니다. 로컬 서버(http://)를 통해 접속 중인지 확인해 주세요.");
+        return;
+    }
     const { initializeApp, getFirestore, onSnapshot, doc, setDoc, getDoc } = window.FB_SDK;
 
     const firebaseConfig = {
@@ -109,6 +124,7 @@ function subscribeToCluster(dbName) {
 
     currentDbName = dbName;
     updateDbDisplay();
+    console.log(`[Firebase] Subscribing to Cluster: ${dbName}`);
 
     // 1. 데이터 클러스터 리스너
     const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
@@ -126,6 +142,7 @@ function subscribeToCluster(dbName) {
             currentSchedule = data.currentSchedule || [];
             sessionNum = data.sessionNum || 1;
             applicants = data.applicants || [];
+            previewGroups = data.previewGroups || null; // v9.0: 저장된 조편성 로드
             recalculateAll();
             updateUI();
         } else {
@@ -193,7 +210,8 @@ window.saveToCloud = async () => {
             matchHistory,
             currentSchedule,
             sessionNum,
-            applicants
+            applicants,
+            previewGroups // v9.0: 조편성 상태 포함 저장
         });
     } catch (e) {
         console.error("Cloud Error:", e);
@@ -227,7 +245,7 @@ function initUIEvents() {
     bindClick('helpBtn', openHelpModal);
     bindClick('confirmAdminBtn', tryAdminLogin);
     bindClick('addPlayerBtn', addPlayer);
-    bindClick('generateScheduleBtn', () => generateSchedule(false));
+    bindClick('generateScheduleBtn', () => generateSchedule());
     bindClick('cancelScheduleBtn', cancelSchedule);
     bindClick('updateEloBtn', commitSession);
     bindClick('saveEditBtn', saveEdit);
@@ -251,9 +269,24 @@ function initUIEvents() {
         }
     });
     bindClick('exportCsvBtn', exportHistoryToCsv);
+    bindClick('savePreviewBtn', async () => {
+        await window.saveToCloud();
+        alert('조편성 구성이 저장되었습니다. 모든 사용자에게 실시간 반영됩니다.');
+        renderApplicants();
+    });
 
     const splitInput = document.getElementById('customSplitInput');
     if (splitInput) splitInput.oninput = validateCustomSplit;
+
+    const sessionInfoSelect = document.getElementById('sessionInfoSelect');
+    if (sessionInfoSelect) {
+        sessionInfoSelect.onchange = () => {
+            const manualInput = document.getElementById('manualSessionInfo');
+            if (manualInput) {
+                manualInput.style.display = sessionInfoSelect.value === 'manual' ? 'block' : 'none';
+            }
+        };
+    }
 }
 
 function updateDbDisplay() {
@@ -315,7 +348,10 @@ async function openRegistration() {
     }
 
     if (confirm(`제 ${num}회차 참가 접수를 시작하시겠습니까?`)) {
-        await window.saveSessionState('recruiting', num);
+        let info = document.getElementById('sessionInfoSelect').value;
+        if (info === 'manual') info = document.getElementById('manualSessionInfo').value.trim();
+
+        await window.saveSessionState('recruiting', num, info);
         // 기존 참가자 명단 초기화 여부는 선택사항이나, 새 회차 시작 시 보통 초기화함
         if (applicants.length > 0 && confirm('이전 대기 명단을 초기화하시겠습니까?')) {
             applicants = [];
@@ -324,13 +360,13 @@ async function openRegistration() {
     }
 }
 
-window.saveSessionState = async (status, sessionNum) => {
+window.saveSessionState = async (status, sessionNum, info = '') => {
     try {
         const { doc, setDoc } = window.FB_SDK;
         const sessionStatusDocPath = currentClubId === 'Default'
             ? `system/sessionStatus_${currentDbName}`
             : `clubs/${currentClubId}/status/sessionStatus_${currentDbName}`;
-        await setDoc(doc(db, sessionStatusDocPath), { status, sessionNum });
+        await setDoc(doc(db, sessionStatusDocPath), { status, sessionNum, info });
     } catch (e) { console.error("Session State Error:", e); }
 };
 
@@ -365,7 +401,8 @@ function renderSessionStatus() {
     }
 
     if (banner) {
-        banner.innerHTML = `<h3 style="margin:0">${statusText}</h3>`;
+        const infoHtml = currentSessionState.info ? `<div style="font-size:0.9rem; margin-top:5px; color:var(--accent-color);">${currentSessionState.info}</div>` : '';
+        banner.innerHTML = `<h3 style="margin:0">${statusText}</h3>${infoHtml}`;
         banner.style.background = statusColor;
     }
 
@@ -424,6 +461,17 @@ function validateCustomSplit() {
             status.className = "status-success";
         }
         btn.disabled = false;
+
+        // v10.0: 입력창 -> 시각화 동기화
+        // 인원 구성이 맞고, 현재 previewGroups의 구색과 다를 때만 재배치
+        const currentPreviewSplit = previewGroups ? previewGroups.map(g => g.length).sort((a, b) => a - b).join(',') : '';
+        const inputSplitSorted = [...nums].sort((a, b) => a - b).join(',');
+
+        if (currentPreviewSplit !== inputSplitSorted) {
+            // 인원 변경 감지 시 즉시 시각화 갱신
+            previewGroups = null;
+            setTimeout(renderApplicants, 0);
+        }
 
         const info = document.getElementById('optimizationInfo');
         if (info) info.innerHTML = `<div>현재 참여: ${applicants.length}명 | 커스텀: <strong>${nums.join(', ')}분할</strong></div><div style="margin-top:5px">총 경기: <span class="session-info" style="background:${totalGames <= 18 ? 'var(--success)' : 'var(--danger)'}; color:white">${totalGames}게임</span></div>`;
@@ -535,6 +583,7 @@ async function addPlayer() {
     // 신청 명단에 없으면 추가
     if (!applicants.find(a => a.name === name)) {
         applicants.push(applicantData);
+        previewGroups = null; // v10.1: 인원 변동 시 미리보기 리셋하여 정합성 유지
     }
 
     nameInput.value = '';
@@ -571,6 +620,7 @@ function recalculateAll() {
             m.rating = ELO_INITIAL; m.matchCount = 0; m.wins = 0; m.losses = 0; m.draws = 0; m.scoreDiff = 0;
             m.participationArr = [];
             m.prevRating = ELO_INITIAL; // 이전 세션 레이팅 (변동 표시용)
+            delete m.vRank; // v7.1: 이전 세션 임시 랭킹 초기화 (실제 랭킹 표시 보장)
         });
 
         const memberMap = new Map();
@@ -676,8 +726,13 @@ function recalculateAll() {
         // 현재 랭킹 순위 저장
         const currentRanking = [...members].sort((a, b) => {
             if (b.rating !== a.rating) return b.rating - a.rating;
-            // 동점자 처리: ID 기반 결정적 정렬 (접속 시마다 순위가 변경되지 않도록)
-            return String(a.id).localeCompare(String(b.id));
+            if (b.wins !== a.wins) return b.wins - a.wins;
+            const bWinRate = b.matchCount > 0 ? b.wins / b.matchCount : 0;
+            const aWinRate = a.matchCount > 0 ? a.wins / a.matchCount : 0;
+            if (bWinRate !== aWinRate) return bWinRate - aWinRate;
+            if (b.scoreDiff !== a.scoreDiff) return b.scoreDiff - a.scoreDiff;
+            // 동점자 처리: 이름 기반 가나다 정렬
+            return String(a.name).localeCompare(String(b.name));
         });
         currentRanking.forEach((m, idx) => {
             const prevIdx = previousRanking.indexOf(m.id);
@@ -750,8 +805,10 @@ function renderApplicants() {
     const split = getSplits(sortedApplicants.length);
     if (!split || split.length === 0) { previewGroups = null; return; }
 
-    // previewGroups가 없거나, 인원이 변경되면 재생성
+    // previewGroups가 없거나, 인원이 변경되면 재생성 (단, 저장된 데이터가 유효한지 체크)
     const totalInPreview = previewGroups ? previewGroups.reduce((s, g) => s + g.length, 0) : 0;
+
+    // 인원수가 다르거나 아예 없으면 기본 자동 편성
     if (!previewGroups || totalInPreview !== sortedApplicants.length) {
         previewGroups = [];
         let cur = 0;
@@ -759,6 +816,26 @@ function renderApplicants() {
             previewGroups.push(sortedApplicants.slice(cur, cur + s));
             cur += s;
         });
+
+        // 자동 생성 시에는 저장 버튼 숨김
+        const saveBtn = document.getElementById('savePreviewBtn');
+        if (saveBtn) saveBtn.style.display = 'none';
+    } else {
+        // 인원수가 같으면 기존 previewGroups 유지 (드래그로 바꾼 상태 보존)
+        // 하지만 이름 등이 최신화되어야 하므로 매핑 갱신 (ID 기준)
+        const appMap = new Map(sortedApplicants.map(a => [String(a.id), a]));
+        previewGroups = previewGroups.map(group =>
+            group.map(p => appMap.get(String(p.id)) || p).filter(p => appMap.has(String(p.id)))
+        );
+
+        // 인원 이동 등으로 인해 이름이 사라진 경우(퇴장 등)를 대비해 필터링 후 다시 체크
+        const newTotal = previewGroups.reduce((s, g) => s + g.length, 0);
+        if (newTotal !== sortedApplicants.length) {
+            // 정합성 깨지면 다시 자동 생성
+            previewGroups = null;
+            renderApplicants();
+            return;
+        }
     }
 
     // 조별 컨테이너 생성
@@ -794,6 +871,13 @@ function renderApplicants() {
                 if (playerIdx === -1) return;
                 const [player] = previewGroups[fromGroupIdx].splice(playerIdx, 1);
                 previewGroups[toGroupIdx].push(player);
+
+                // 수동 변경 시 저장 버튼 노출 및 입력창 업데이트
+                const saveBtn = document.getElementById('savePreviewBtn');
+                if (saveBtn) saveBtn.style.display = 'block';
+
+                // 시각 -> 입력창 동기화 (v10.0)
+                updateSplitInputFromPreview();
 
                 renderApplicants(); // 재렌더링
                 updateOptimizationInfo(); // 분석 정보 갱신
@@ -841,6 +925,13 @@ function renderApplicants() {
     });
 
     list.appendChild(container);
+
+    // v10.0: 게스트 화면에서도 dashboard(분석정보)가 활성화되어야 하므로 체크
+    const dashboardEl = document.getElementById('dashboard');
+    if (dashboardEl) {
+        // v10.1: 단순히 visibility만 조절하는 게 아니라 데이터를 최신화해야 함
+        updateOptimizationInfo();
+    }
 }
 window.removeApplicant = async (id) => {
     if (!isAdmin) return;
@@ -867,14 +958,26 @@ function updateOptimizationInfo() {
         const split = getSplits(applicants.length);
         const games = split.reduce((a, b) => a + (GAME_COUNTS[b] || 0), 0);
         const info = document.getElementById('optimizationInfo');
-        if (info) info.innerHTML = `<div>참가: ${applicants.length}명 | 추천: <strong>${split.join(', ')}분할</strong></div><div style="margin-top:5px">총 경기: <span class="session-info" style="background:${games <= 18 ? 'var(--success)' : 'var(--danger)'}; color:white">${games}게임</span></div>`;
+        if (info) info.innerHTML = `<div>현재 참여: ${applicants.length}명 | 추천: <strong>${split.join(', ')}분할</strong></div><div style="margin-top:5px">총 경기: <span class="session-info" style="background:${games <= 18 ? 'var(--success)' : 'var(--danger)'}; color:white">${games}게임</span></div>`;
     } else {
         validateCustomSplit();
     }
 }
 
+// v10.0: 시각화 -> 입력창 동기화 전용 함수
+function updateSplitInputFromPreview() {
+    if (!previewGroups) return;
+    const splitArr = previewGroups.map(g => g.length);
+    const input = document.getElementById('customSplitInput');
+    if (input) {
+        input.value = splitArr.join(', ');
+        // v10.1: 값을 수동으로 바꿨으므로 검증(텍스트 업데이트) 강제 실행
+        validateCustomSplit();
+    }
+}
+
 // --- 대진표 생성 (Admin Only: 수동 조 편성 로직 최우선 반영) ---
-async function generateSchedule(isAI = false) {
+async function generateSchedule() {
     if (!isAdmin) return;
 
     // 활성화된 회차 번호 우선 사용
@@ -893,12 +996,6 @@ async function generateSchedule(isAI = false) {
     }
     if (!split || split.length === 0) { alert('인원 분할에 실패했습니다. 조별 인원을 확인해 주세요.'); return; }
 
-    const aiStatus = document.getElementById('aiStatus');
-    if (isAI && aiStatus) aiStatus.style.display = 'block';
-
-    // AI 모드일 경우 약간의 딜레이를 주어 분석 중임을 시각화 (선택사항)
-    if (isAI) await new Promise(r => setTimeout(r, 600));
-
     // v7.0: previewGroups가 있으면 수동 조 편성을 우선 사용
     let groupsArr = [];
     if (previewGroups && previewGroups.length > 0) {
@@ -914,13 +1011,26 @@ async function generateSchedule(isAI = false) {
         }
 
         // 미리보기에서 확정된 조 편성 사용
-        let startVRank = members.length + 1;
+        // v7.1: 신규 참가자(rankMap에 없는 사람)만 따로 모아 랜덤 셔플 후 vRank 부여
+        const allNewInPreview = [];
         previewGroups.forEach(group => {
             group.forEach(p => {
                 if (!rankMap.has(String(p.id))) {
-                    p.vRank = startVRank++;
+                    allNewInPreview.push(p);
                 }
             });
+        });
+
+        // 신규 참가자끼리 셔플
+        allNewInPreview.sort(() => Math.random() - 0.5);
+
+        let startVRank = members.length + 1;
+        // 셔플된 순서대로 vRank 부여 (참조형이므로 previewGroups 내 객체에도 반영됨)
+        allNewInPreview.forEach(p => {
+            p.vRank = startVRank++;
+        });
+
+        previewGroups.forEach(group => {
             groupsArr.push([...group]);
         });
     } else {
@@ -944,7 +1054,7 @@ async function generateSchedule(isAI = false) {
         const pattern = MATCH_PATTERNS[g.length]; if (!pattern) return;
 
         // AI 최적화 적용 시 조별 그룹 내 순서 재배치
-        const optimizedGroup = isAI ? optimizeGroupMatches(g, pattern) : g;
+        const optimizedGroup = g;
 
         const gLabel = String.fromCharCode(65 + groupIdx);
         pattern.forEach((m, matchIdx) => {
@@ -959,8 +1069,6 @@ async function generateSchedule(isAI = false) {
             });
         });
     });
-
-    if (isAI && aiStatus) aiStatus.style.display = 'none';
 
     activeGroupTab = 'A';
     previewGroups = null; // 미리보기 초기화
@@ -1004,7 +1112,13 @@ function renderCurrentMatches() {
         if (footer) footer.style.display = 'none';
         if (tabs) tabs.style.display = 'none';
         if (adminControls) adminControls.style.display = 'none';
-        container.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 40px;">대진표를 생성해 주세요.</p>';
+        container.innerHTML = `
+            <div style="text-align:center; padding:60px 20px; color:var(--text-secondary); background:rgba(255,255,255,0.02); border-radius:12px; border:1px dashed rgba(255,255,255,0.1); margin:20px 0;">
+                <div style="font-size:3.5rem; margin-bottom:20px; filter:grayscale(0.5);">📋</div>
+                <h3 style="color:var(--text-secondary); margin-bottom:10px; font-weight:400;">대진표 생성을 기다리고 있습니다.</h3>
+                <p style="font-size:0.9rem; opacity:0.7;">관리자가 대진표를 생성하면 이곳에 경기 일정이 표시됩니다.</p>
+            </div>
+        `;
         return;
     }
 
@@ -1187,10 +1301,12 @@ async function commitSession() {
                     return;
                 }
                 // ID 타입 안전 비교
-                if (!members.find(existing => String(existing.id) === String(p.id))) {
+                const existingMember = members.find(existing => String(existing.id) === String(p.id));
+                if (!existingMember) {
                     members.push(p);
                     newMemberCount++;
                 }
+                // v7.2: Renaming logic removed to prevent accidental overwrites
             });
 
             matchHistory.push({
@@ -1468,10 +1584,39 @@ async function saveScheduleEdit() {
     if (!isAdmin) return;
     const m = currentSchedule.find(x => x.id === editingMatchId);
     if (m) {
-        m.t1[0].name = document.getElementById('edit_t1_1').value;
-        m.t1[1].name = document.getElementById('edit_t1_2').value;
-        m.t2[0].name = document.getElementById('edit_t2_1').value;
-        m.t2[1].name = document.getElementById('edit_t2_2').value;
+        const newNames = [
+            document.getElementById('edit_t1_1').value.trim(),
+            document.getElementById('edit_t1_2').value.trim(),
+            document.getElementById('edit_t2_1').value.trim(),
+            document.getElementById('edit_t2_2').value.trim()
+        ];
+
+        const teams = [m.t1, m.t2];
+        let nameIdx = 0;
+
+        teams.forEach(team => {
+            team.forEach((p, pIdx) => {
+                const newName = newNames[nameIdx++];
+                if (p.name !== newName) {
+                    // v7.2: 이름이 변경된 경우 '선수 교체'로 처리
+                    // 1. 기존 멤버 중 해당 이름을 가진 사람이 있는지 확인
+                    const existing = members.find(mem => mem.name === newName);
+                    if (existing) {
+                        // 기존 멤버가 있다면 해당 멤버의 정보를 매치에 할당
+                        team[pIdx] = { ...existing };
+                    } else {
+                        // 2. 없다면 신규 게스트(또는 오타 수정)로 간주하여 새 ID 부여
+                        // 기존 ID를 유지하면 기존 멤버 정보가 오염되므로 새 ID 생성
+                        team[pIdx] = {
+                            id: "guest_" + Math.random().toString(36).substr(2, 9),
+                            name: newName,
+                            rating: ELO_INITIAL,
+                            vRank: members.length + 1 // 임시 랭킹은 마지막 순위 다음으로
+                        };
+                    }
+                }
+            });
+        });
 
         closeModal();
         await window.saveToCloud();
@@ -1493,7 +1638,15 @@ function renderRanking() {
     const tbody = document.querySelector('#rankingTable tbody'); if (!tbody) return;
     tbody.innerHTML = '';
     const uSess = [...new Set(matchHistory.map(h => (h.sessionNum || '').toString()))].filter(Boolean);
-    const sorted = [...members].sort((a, b) => b.rating - a.rating);
+    const sorted = members.filter(m => m.matchCount > 0).sort((a, b) => {
+        if (b.rating !== a.rating) return b.rating - a.rating;
+        if (b.wins !== a.wins) return b.wins - a.wins;
+        const bWinRate = b.matchCount > 0 ? b.wins / b.matchCount : 0;
+        const aWinRate = a.matchCount > 0 ? a.wins / a.matchCount : 0;
+        if (bWinRate !== aWinRate) return bWinRate - aWinRate;
+        if (b.scoreDiff !== a.scoreDiff) return b.scoreDiff - a.scoreDiff;
+        return String(a.name).localeCompare(String(b.name));
+    });
 
     sorted.forEach((p, i) => {
         const att = ((p.participationArr?.length || 0) / (uSess.length || 1) * 100).toFixed(0);
@@ -1501,18 +1654,22 @@ function renderRanking() {
         const rInfo = rankMap.get(String(p.id));
 
         let rankChangeIcon = '';
-        if (rInfo && rInfo.change > 0) rankChangeIcon = `<span class="rank-up">▲${rInfo.change}</span>`;
-        else if (rInfo && rInfo.change < 0) rankChangeIcon = `<span class="rank-down">▼${Math.abs(rInfo.change)}</span>`;
-        else if (!rInfo || p.participationArr.length === 1) rankChangeIcon = `<span class="rank-new">NEW</span>`;
+        const currentSessionNum = currentSessionState.sessionNum;
+        const isFirstTime = !p.participationArr || p.participationArr.length === 0 ||
+            (p.participationArr.length === 1 && p.participationArr[0].toString() === currentSessionNum.toString());
 
-        const winRate = p.matchCount > 0 ? Math.round((p.wins / p.matchCount) * 100) : 0;
+        if (isFirstTime && p.matchCount > 0) rankChangeIcon = `<span class="rank-new">NEW</span>`;
+        else if (rInfo && rInfo.change > 0) rankChangeIcon = `<span class="rank-up">▲${rInfo.change}</span>`;
+        else if (rInfo && rInfo.change < 0) rankChangeIcon = `<span class="rank-down">▼${Math.abs(rInfo.change)}</span>`;
+
+        const winRateValue = p.matchCount > 0 ? Math.round((p.wins / p.matchCount) * 100) : 0;
 
         tr.innerHTML = `
             <td><span class="rank-badge ${i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : ''}">${i + 1}</span>${rankChangeIcon}</td>
             <td><strong>${p.name}</strong></td>
             <td style="color:var(--accent-color); font-weight:bold">${Math.round(p.rating)}</td>
             <td>${p.wins}승 ${p.draws}무 ${p.losses}패</td>
-            <td>${winRate}%</td>
+            <td>${winRateValue}%</td>
             <td style="color:${p.scoreDiff >= 0 ? 'var(--success)' : 'var(--danger)'}">${p.scoreDiff > 0 ? '+' : ''}${p.scoreDiff}</td>
             <td><span class="attendance-badge">${att}%</span></td>
         `;
@@ -1540,12 +1697,13 @@ window.switchTab = (id) => {
 
 // --- 데이터 분석 대시보드 엔진 (New v4.0) ---
 function updateStatistics() {
-    const totalPlayers = members.length;
+    const activeMembers = members.filter(m => m.matchCount > 0);
+    const totalPlayers = activeMembers.length;
     const totalSessions = [...new Set(matchHistory.map(h => h.sessionNum.toString()))].length;
     const totalMatches = matchHistory.length;
 
-    // 랭킹 1위 찾기
-    const sortedMembers = [...members].sort((a, b) => b.rating - a.rating);
+    // 랭킹 1위 찾기 (경기수 > 0 기준)
+    const sortedMembers = [...activeMembers].sort((a, b) => b.rating - a.rating);
     const bestPlayer = sortedMembers.length > 0 ? sortedMembers[0].name : "---";
 
     const sp = document.getElementById('statTotalPlayers');
@@ -1571,7 +1729,7 @@ function renderEloChart() {
     const ctx = document.getElementById('eloChart')?.getContext('2d');
     if (!ctx) return;
 
-    const data = [...members].sort((a, b) => b.rating - a.rating).slice(0, 15);
+    const data = members.filter(m => m.matchCount > 0).sort((a, b) => b.rating - a.rating).slice(0, 15);
     const labels = data.map(m => m.name);
     const ratings = data.map(m => Math.round(m.rating));
     if (ratings.length === 0) return;
@@ -1609,13 +1767,28 @@ function updatePlayerSelect() {
     // 여기서는 싹 비우고 다시 채움
     select.innerHTML = '<option value="" disabled selected>선수 선택</option>';
 
-    // 랭킹 보드에 있는 멤버들만 표시 (이름순 정렬)
-    [...members].sort((a, b) => a.name.localeCompare(b.name)).forEach(m => {
+    // 랭킹 보드에 있는 멤버들만 표시 (이름순 정렬, 경기수 > 0)
+    const sortedMembers = members.filter(m => m.matchCount > 0).sort((a, b) => a.name.localeCompare(b.name));
+    sortedMembers.forEach(m => {
         const opt = document.createElement('option');
         opt.value = m.id;
         opt.innerText = m.name;
         select.appendChild(opt);
     });
+
+    // 아무것도 선택되지 않았을 경우 1위 선수 자동 선택 (경기수 > 0 기준)
+    if (!select.value && sortedMembers.length > 0) {
+        const topPlayer = members.filter(m => m.matchCount > 0).sort((a, b) => {
+            if (b.rating !== a.rating) return b.rating - a.rating;
+            if (b.wins !== a.wins) return b.wins - a.wins;
+            return b.scoreDiff - a.scoreDiff;
+        })[0];
+
+        if (topPlayer) {
+            select.value = topPlayer.id;
+            renderPlayerTrend();
+        }
+    }
 }
 
 window.renderPlayerTrend = () => {
@@ -1718,37 +1891,6 @@ window.renderPlayerTrend = () => {
         }
     });
 };
-
-// --- AI 대진 최적화 로직 (v8.0) ---
-function optimizeGroupMatches(group, pattern) {
-    let bestGroup = [...group];
-    let minImbalance = Infinity;
-
-    // 1000회 시뮬레이션
-    for (let i = 0; i < 1000; i++) {
-        const currentTry = [...group].sort(() => Math.random() - 0.5);
-        let totalImbalance = 0;
-
-        pattern.forEach(m => {
-            const r1 = currentTry[m[0][0]].rating || ELO_INITIAL;
-            const r2 = currentTry[m[0][1]].rating || ELO_INITIAL;
-            const r3 = currentTry[m[1][0]].rating || ELO_INITIAL;
-            const r4 = currentTry[m[1][1]].rating || ELO_INITIAL;
-            const avg1 = (r1 + r2) / 2;
-            const avg2 = (r3 + r4) / 2;
-            const expected = 1 / (1 + Math.pow(10, (avg2 - avg1) / 400));
-
-            // 50%에서 벗어날수록 정규화된 벌점 부여
-            totalImbalance += Math.abs(expected - 0.5);
-        });
-
-        if (totalImbalance < minImbalance) {
-            minImbalance = totalImbalance;
-            bestGroup = [...currentTry];
-        }
-    }
-    return bestGroup;
-}
 
 function getSplits(n) {
     const table = {

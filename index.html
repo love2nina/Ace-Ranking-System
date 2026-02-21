@@ -52,12 +52,22 @@
                 <div class="admin-only"
                     style="display: none; margin-bottom: 20px; padding: 15px; border: 1px solid var(--accent-color); border-radius: 8px;">
                     <h4 style="margin: 0 0 10px 0; color: var(--accent-color);">👮‍♂️ 관리자 권한: 회차 오픈</h4>
-                    <div style="display: flex; gap: 10px; align-items: center;">
+                    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
                         <span style="white-space: nowrap;">제</span>
                         <input type="number" id="nextSessionNum" style="width: 80px; text-align: center;"
                             placeholder="N">
                         <span style="white-space: nowrap;">회차</span>
                         <button id="openRoundBtn" class="primary" style="flex: 1;">참가 접수 시작</button>
+                    </div>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <select id="sessionInfoSelect" style="flex: 1; min-width: 150px;">
+                            <option value="">장소/시간 선택 안함</option>
+                            <option value="[토요일 중앙공원 06:20~]">[토요일 중앙공원 06:20~]</option>
+                            <option value="[일요일 CS 코트 06:00~]">[일요일 CS 코트 06:00~]</option>
+                            <option value="manual">직접 입력...</option>
+                        </select>
+                        <input type="text" id="manualSessionInfo" style="display: none; flex: 2;"
+                            placeholder="예: [토요일 중앙공원 06:20~]">
                     </div>
                 </div>
 
@@ -88,6 +98,8 @@
                             <div style="display: flex; gap: 10px; align-items: center;">
                                 <input type="text" id="customSplitInput" placeholder="조 인원 직접 입력 (예: 5, 5, 4, 6)"
                                     style="flex: 1;">
+                                <button id="savePreviewBtn" class="secondary"
+                                    style="white-space: nowrap; display: none;">조편성 저장</button>
                             </div>
                             <p id="splitStatus" style="font-size: 0.8rem; margin: 0;"></p>
                         </div>
@@ -95,10 +107,6 @@
                             <button id="generateScheduleBtn"
                                 style="flex: 1; background: var(--accent-color); color: #0f172a; padding: 15px; font-size: 1.1rem; border: none; font-weight: 800; box-shadow: 0 4px 12px rgba(56, 189, 248, 0.3);">👥
                                 대진표 생성</button>
-                        </div>
-                        <div id="aiStatus"
-                            style="display: none; text-align: center; margin-top: 10px; font-size: 0.8rem; color: var(--accent-color);">
-                            <span class="pulse">⚡ AI가 최적의 대진을 분석 중입니다...</span>
                         </div>
                     </div>
                 </div>
