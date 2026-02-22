@@ -29,10 +29,11 @@ let currentSchedule = [];
 let activeGroupTab = 'A';
 let editingMatchId = null;
 let sessionNum = 1;
-let currentSessionState = { status: 'idle', sessionNum: 0 };
+let currentSessionState = { status: 'idle', sessionNum: 0, matchMode: 'court' };
 let eloChart = null;
 let trendChart = null;
 let rankMap = new Map(); // 현재 랭킹 순위 저장용
+let tempSchedule = null; // 대진표 생성 미리보기용 임시 저장
 let sessionRankSnapshots = {}; // 회차별(세션별) 시작 시점의 랭킹 스냅샷
 let historyViewMode = 'match'; // 'match' or 'player'
 let sessionStartRatings = {}; // 회차별 시작 시점의 레이팅 스냅샷
@@ -161,7 +162,7 @@ function subscribeToCluster(dbName) {
             updateUI();
         } else if (currentDbName.toLowerCase() !== 'default') {
             const nextSeq = (matchHistory.length > 0 ? Math.max(...matchHistory.map(h => parseInt(h.sessionNum) || 0)) : 0) + 1;
-            currentSessionState = { status: 'idle', sessionNum: nextSeq };
+            currentSessionState = { status: 'idle', sessionNum: nextSeq, matchMode: 'court' };
             setDoc(doc(db, sessionStatusDocPath), currentSessionState);
         }
     });
@@ -250,6 +251,8 @@ function initUIEvents() {
     bindClick('openRoundBtn', openRegistration);
     bindClick('switchDbBtn', switchDatabase);
     bindClick('dbSettingsBtn', openDbModal);
+    bindClick('regenerateBtn', () => generateSchedule());
+    bindClick('finalizeScheduleBtn', finalizeSchedule);
     bindClick('loadDbBtn', async () => {
         const sel = document.getElementById('dbListSelect');
         if (sel && sel.value) {
@@ -275,6 +278,18 @@ function initUIEvents() {
 
     const splitInput = document.getElementById('customSplitInput');
     if (splitInput) splitInput.oninput = validateCustomSplit;
+
+    const matchModeRadios = document.querySelectorAll('input[name="matchMode"]');
+    matchModeRadios.forEach(radio => {
+        radio.onchange = async () => {
+            if (!isAdmin) return;
+            const newMode = radio.value;
+            console.log(`[Admin] Switching match mode to: ${newMode}`);
+            await window.saveSessionState(currentSessionState.status, currentSessionState.sessionNum, currentSessionState.info, newMode);
+            // 전체 UI 즉시 갱신 (명단 렌더링 방식 변경 반영)
+            renderApplicants();
+        };
+    });
 
     const sessionInfoSelect = document.getElementById('sessionInfoSelect');
     if (sessionInfoSelect) {
@@ -349,22 +364,27 @@ async function openRegistration() {
         let info = document.getElementById('sessionInfoSelect').value;
         if (info === 'manual') info = document.getElementById('manualSessionInfo').value.trim();
 
-        await window.saveSessionState('recruiting', num, info);
+        const matchMode = currentSessionState.matchMode || 'court';
+
+        await window.saveSessionState('recruiting', num, info, matchMode);
         // 기존 참가자 명단 초기화 여부는 선택사항이나, 새 회차 시작 시 보통 초기화함
-        if (applicants.length > 0 && confirm('이전 대기 명단을 초기화하시겠습니까?')) {
-            applicants = [];
-            await window.saveToCloud();
-        }
+        applicants = [];
+        await window.saveToCloud();
     }
+
+    // 미리보기 영역 숨김 (초기화)
+    const area = document.getElementById('schedulePreviewArea');
+    if (area) area.style.display = 'none';
+    tempSchedule = null;
 }
 
-window.saveSessionState = async (status, sessionNum, info = '') => {
+window.saveSessionState = async (status, sessionNum, info = '', matchMode = 'court') => {
     try {
         const { doc, setDoc } = window.FB_SDK;
         const sessionStatusDocPath = currentClubId === 'Default'
             ? `system/sessionStatus_${currentDbName}`
             : `clubs/${currentClubId}/status/sessionStatus_${currentDbName}`;
-        await setDoc(doc(db, sessionStatusDocPath), { status, sessionNum, info });
+        await setDoc(doc(db, sessionStatusDocPath), { status, sessionNum, info, matchMode });
     } catch (e) { console.error("Session State Error:", e); }
 };
 
@@ -404,12 +424,48 @@ function renderSessionStatus() {
         banner.style.background = statusColor;
     }
 
+    // 관리자용 대진 방식 라디오 버튼 상태 업데이트
+    if (isAdmin) {
+        const radios = document.querySelectorAll('input[name="matchMode"]');
+        radios.forEach(r => {
+            if (r.value === currentSessionState.matchMode) r.checked = true;
+        });
+    }
+
     // 관리자 패널 표시 제어 (경기 중일 때는 숨김 request)
     if (adminPanel && isAdmin) {
         if (currentSessionState.status === 'playing') {
             adminPanel.style.display = 'none';
         } else {
             adminPanel.style.display = 'block';
+        }
+    }
+
+    // 관리자 UI 제어 (모집 중일 때는 오픈 버튼 비활성화 등)
+    if (isAdmin) {
+        // 장소 선택 UI 동기화 (recruiting 상태일 때)
+        if (currentSessionState.status === 'recruiting') {
+            const infoSelect = document.getElementById('sessionInfoSelect');
+            const manualInput = document.getElementById('manualSessionInfo');
+            if (infoSelect) {
+                const infoValue = currentSessionState.info || '';
+                // 옵션 중에 이미 있는지 확인
+                const options = Array.from(infoSelect.options).map(opt => opt.value);
+                if (options.includes(infoValue)) {
+                    infoSelect.value = infoValue;
+                    if (manualInput) manualInput.style.display = 'none';
+                } else if (infoValue) {
+                    // 없으면 직접 입력 모드
+                    infoSelect.value = 'manual';
+                    if (manualInput) {
+                        manualInput.value = infoValue;
+                        manualInput.style.display = 'inline-block';
+                    }
+                } else {
+                    infoSelect.value = '';
+                    if (manualInput) manualInput.style.display = 'none';
+                }
+            }
         }
     }
 
@@ -795,8 +851,8 @@ function renderApplicants() {
     const newApplicants = applicants.filter(a => !rankMap.has(String(a.id)));
     const sortedApplicants = [...rankedApplicants, ...newApplicants];
 
-    // 4명 미만: 기존 flat 리스트
-    if (sortedApplicants.length < 4) {
+    // 4명 미만 혹은 코트 방식일 때: 기존 flat 리스트 (순위순 정렬)
+    if (sortedApplicants.length < 4 || currentSessionState.matchMode === 'court') {
         previewGroups = null;
         sortedApplicants.forEach(a => {
             const div = document.createElement('div'); div.className = 'player-tag';
@@ -1012,6 +1068,11 @@ function updateSplitInputFromPreview() {
 async function generateSchedule() {
     if (!isAdmin) return;
 
+    // 방식에 따라 분기
+    if (currentSessionState.matchMode === 'court') {
+        return generateCourtSchedule();
+    }
+
     // 활성화된 회차 번호 우선 사용
     const sessionNum = currentSessionState.sessionNum || document.getElementById('manualSessionNum')?.value;
 
@@ -1081,23 +1142,31 @@ async function generateSchedule() {
         });
     }
 
-    currentSchedule = [];
+    tempSchedule = [];
+    const gameCounts = {};
+    applicants.forEach(a => gameCounts[a.id] = 0);
+
     groupsArr.forEach((g, groupIdx) => {
         const pattern = MATCH_PATTERNS[g.length]; if (!pattern) return;
 
-        // AI 최적화 적용 시 조별 그룹 내 순서 재배치
         const optimizedGroup = g;
-
         const gLabel = String.fromCharCode(65 + groupIdx);
+
         pattern.forEach((m, matchIdx) => {
             let roundNum = Math.floor(matchIdx / (g.length === 8 ? 2 : 1)) + 1;
-            currentSchedule.push({
+            const matchData = {
                 id: Math.random().toString(36).substr(2, 9),
                 sessionNum: currentSessionState.sessionNum || sessionNum,
                 group: gLabel, groupRound: roundNum,
                 t1: [{ ...optimizedGroup[m[0][0]] }, { ...optimizedGroup[m[0][1]] }],
                 t2: [{ ...optimizedGroup[m[1][0]] }, { ...optimizedGroup[m[1][1]] }],
                 s1: null, s2: null
+            };
+            tempSchedule.push(matchData);
+
+            // 경기 수 카운트
+            [...matchData.t1, ...matchData.t2].forEach(p => {
+                gameCounts[p.id] = (gameCounts[p.id] || 0) + 1;
             });
         });
     });
@@ -1105,14 +1174,236 @@ async function generateSchedule() {
     activeGroupTab = 'A';
     previewGroups = null; // 미리보기 초기화
 
-    // 대진 생성 시 상태를 'playing'으로 변경하여 접수 마감
-    await window.saveSessionState('playing', currentSessionState.sessionNum);
+    renderSchedulePreview(gameCounts);
+}
 
-    // [중요] 대진 생성 후에도 명단을 유지해야 '대진 취소' 시 복구가 가능함
-    // applicants = []; // 이 줄을 제거하여 명단을 유지합니다.
+/**
+ * [Mode 2] 코트별 랜덤 최적 배정 알고리즘 (사용자 제공 코드 기반)
+ * 6라운드, 최대 3코트 (인원에 따라 조정), 인당 최대 4경기 기준
+ */
+async function generateCourtSchedule() {
+    const sessionNum = currentSessionState.sessionNum;
+    if (!sessionNum) { alert('회차 정보가 없습니다.'); return; }
+    if (applicants.length < 4) { alert('최소 4명 이상의 선수가 필요합니다.'); return; }
 
+    const info = currentSessionState.info || '';
+    let courtConfig = null;
+
+    // 장소별 특화 설정 (사용자 요청 반영)
+    if (info.includes('중앙공원')) {
+        courtConfig = { '코트 1': 5, '코트 2': 5, '코트 3': 7 };
+    } else if (info.includes('CS')) {
+        // 일요일 CS코트: 코트4(7), 코트3(7), 코트2(5)
+        courtConfig = { '코트 4': 7, '코트 3': 7, '코트 2': 5 };
+    }
+
+    let numRounds, roundsToCourts = {};
+    if (courtConfig) {
+        numRounds = Math.max(...Object.values(courtConfig));
+        for (let r = 1; r <= numRounds; r++) {
+            roundsToCourts[r] = Object.keys(courtConfig).filter(btn => r <= courtConfig[btn]);
+        }
+    } else {
+        // 기본값 (6라운드, 최대 3코트)
+        numRounds = 6;
+        const defaultCourts = Math.min(3, Math.floor(applicants.length / 4));
+        for (let r = 1; r <= numRounds; r++) {
+            roundsToCourts[r] = Array.from({ length: defaultCourts }, (_, i) => `코트 ${i + 1}`);
+        }
+    }
+
+    // 인당 최대 4게임으로 제한 (사용자 요청)
+    const maxGamesPerPlayer = 4;
+
+    console.log(`[CourtMatch] Rounds: ${numRounds}, Max Games/Player Cap: ${maxGamesPerPlayer}`);
+
+    const players = [...applicants];
+    const gameCounts = {};
+    const partners = {};
+    const opponents = {};
+
+    players.forEach(p => {
+        gameCounts[p.id] = 0;
+        partners[p.id] = new Set();
+        opponents[p.id] = new Map();
+    });
+
+    const fullScheduleData = [];
+
+    for (let r = 1; r <= numRounds; r++) {
+        const activeCourtsInRound = roundsToCourts[r] || [];
+        if (activeCourtsInRound.length === 0) continue;
+
+        // 1. 이번 라운드 참여 가능한 선수 풀
+        const availablePool = [...players]
+            .filter(p => gameCounts[p.id] < maxGamesPerPlayer)
+            .sort((a, b) => {
+                if (gameCounts[a.id] !== gameCounts[b.id]) return gameCounts[a.id] - gameCounts[b.id];
+                return Math.random() - 0.5;
+            });
+
+        // 2. 현재 라운드의 코트 수에 맞춰 선발
+        const numMatches = Math.min(activeCourtsInRound.length, Math.floor(availablePool.length / 4));
+        const roundPlayers = availablePool.slice(0, numMatches * 4);
+
+        if (numMatches === 0) continue;
+
+        // 3. 선발된 선수들을 코트별로 최적 배분
+        const roundMatches = optimizeCourtRoundLayout(roundPlayers, partners, opponents);
+
+        for (let i = 0; i < roundMatches.length; i++) {
+            const match = roundMatches[i];
+            const courtName = activeCourtsInRound[i]; // 지정된 코트 이름 사용
+
+            // 배정 데이터 기록
+            const allInMatch = [...match.team1, ...match.team2];
+            allInMatch.forEach(p => gameCounts[p.id]++);
+
+            partners[match.team1[0].id].add(match.team1[1].id);
+            partners[match.team1[1].id].add(match.team1[0].id);
+            partners[match.team2[0].id].add(match.team2[1].id);
+            partners[match.team2[1].id].add(match.team2[0].id);
+
+            match.team1.forEach(p1 => match.team2.forEach(p2 => {
+                opponents[p1.id].set(p2.id, (opponents[p1.id].get(p2.id) || 0) + 1);
+                opponents[p2.id].set(p1.id, (opponents[p2.id].get(p1.id) || 0) + 1);
+            }));
+
+            fullScheduleData.push({
+                id: Math.random().toString(36).substr(2, 9),
+                sessionNum: sessionNum,
+                group: courtName,
+                groupRound: r,
+                t1: [{ ...match.team1[0] }, { ...match.team1[1] }],
+                t2: [{ ...match.team2[0] }, { ...match.team2[1] }],
+                s1: null, s2: null
+            });
+        }
+    }
+
+    tempSchedule = fullScheduleData;
+    activeGroupTab = '1R'; // 초기 탭을 1라운드로 설정
+    renderSchedulePreview(gameCounts);
+}
+
+function renderSchedulePreview(gameCounts) {
+    const area = document.getElementById('schedulePreviewArea');
+    const grid = document.getElementById('previewStatsGrid');
+    const avgEl = document.getElementById('previewAvgGames');
+    if (!area || !grid) return;
+
+    grid.innerHTML = '';
+    let totalGames = 0;
+    const playerIds = Object.keys(gameCounts);
+
+    playerIds.forEach(id => {
+        const p = applicants.find(a => String(a.id) === String(id));
+        if (!p) return;
+
+        const div = document.createElement('div');
+        div.style.cssText = "background:rgba(255,255,255,0.05); padding:8px; border-radius:4px; text-align:center; font-size:0.8rem;";
+        div.innerHTML = `
+            <div style="color:var(--text-secondary); margin-bottom:4px;">${p.name}</div>
+            <div style="font-weight:bold; color:var(--accent-color); font-size:1rem;">${gameCounts[id]}</div>
+        `;
+        grid.appendChild(div);
+        totalGames += gameCounts[id];
+    });
+
+    if (playerIds.length > 0) {
+        avgEl.innerText = (totalGames / playerIds.length).toFixed(1);
+    }
+
+    area.style.display = 'block';
+    area.scrollIntoView({ behavior: 'smooth' });
+}
+
+async function finalizeSchedule() {
+    if (!tempSchedule) return;
+    if (!confirm('현재 대진표로 확정하시겠습니까?')) return;
+
+    currentSchedule = tempSchedule;
+    tempSchedule = null;
+
+    const sessionNum = currentSchedule[0].sessionNum;
+    const mode = currentSessionState.matchMode || 'group';
+
+    // 활성 탭 초기화
+    if (mode === 'court') {
+        activeGroupTab = '1R';
+    } else {
+        activeGroupTab = 'A';
+    }
+
+    await window.saveSessionState('playing', sessionNum, currentSessionState.info, mode);
     await window.saveToCloud();
+
+    // 미리보기 영역 숨김
+    const area = document.getElementById('schedulePreviewArea');
+    if (area) area.style.display = 'none';
+
     switchTab('match');
+    alert('대진표가 확정되었습니다!');
+}
+
+function optimizeCourtRoundLayout(players, partners, opponents) {
+    let bestMatches = [];
+    let bestScore = -Infinity;
+    const numMatches = players.length / 4;
+
+    for (let i = 0; i < 500; i++) { // 속도를 고려하여 500회 시도
+        const shuffled = [...players].sort(() => Math.random() - 0.5);
+        let currentMatches = [];
+        let currentTotalScore = 0;
+
+        for (let m = 0; m < numMatches; m++) {
+            const p = shuffled.slice(m * 4, m * 4 + 4);
+            const combinations = [
+                { t1: [p[0], p[1]], t2: [p[2], p[3]] },
+                { t1: [p[0], p[2]], t2: [p[1], p[3]] },
+                { t1: [p[0], p[3]], t2: [p[1], p[2]] }
+            ];
+
+            let bestChoice = null;
+            let bestMatchScore = -Infinity;
+
+            combinations.forEach(c => {
+                let score = 0;
+                // 파트너 중복 감점
+                if (partners[c.t1[0].id].has(c.t1[1].id)) score -= 100000;
+                if (partners[c.t2[0].id].has(c.t2[1].id)) score -= 100000;
+
+                // 상대 중복 페널티
+                let oppRepeat = 0;
+                c.t1.forEach(p1 => c.t2.forEach(p2 => {
+                    oppRepeat += (opponents[p1.id].get(p2.id) || 0);
+                }));
+                score -= oppRepeat * 500;
+
+                // 실력 균형 (번호 대신 실제 레이팅 합 차이 최소화)
+                const r1 = c.t1[0].rating || 1500;
+                const r2 = c.t1[1].rating || 1500;
+                const r3 = c.t2[0].rating || 1500;
+                const r4 = c.t2[1].rating || 1500;
+                const skillDiff = Math.abs((r1 + r2) - (r3 + r4));
+                score -= skillDiff;
+
+                if (score > bestMatchScore) {
+                    bestMatchScore = score;
+                    bestChoice = { team1: c.t1, team2: c.t2 };
+                }
+            });
+
+            currentMatches.push(bestChoice);
+            currentTotalScore += bestMatchScore;
+        }
+
+        if (currentTotalScore > bestScore) {
+            bestScore = currentTotalScore;
+            bestMatches = currentMatches;
+        }
+    }
+    return bestMatches;
 }
 
 async function cancelSchedule() {
@@ -1125,11 +1416,17 @@ async function cancelSchedule() {
     // v7.4: 참가 신청 명단 내 임시 데이터(vRank 등) 초기화
     applicants.forEach(a => { delete a.vRank; });
 
-    // 상태를 다시 'recruiting'으로 변경
-    await window.saveSessionState('recruiting', currentSessionState.sessionNum);
+    // 상태를 다시 'recruiting'으로 변경 (기존 장소 및 방식 유지)
+    await window.saveSessionState('recruiting', currentSessionState.sessionNum, currentSessionState.info, currentSessionState.matchMode);
     await window.saveToCloud();
 
     alert('대진표가 초기화되었습니다. 참가신청 탭에서 명단을 수정할 수 있습니다.');
+
+    // 미리보기 영역 숨김
+    const area = document.getElementById('schedulePreviewArea');
+    if (area) area.style.display = 'none';
+    tempSchedule = null;
+
     renderApplicants(); // UI 즉시 갱신
     switchTab('apply');
 }
@@ -1161,112 +1458,157 @@ function renderCurrentMatches() {
     if (tabs) tabs.style.display = 'block';
     if (adminControls && isAdmin) adminControls.style.display = 'block';
 
-    const groups = [...new Set(currentSchedule.map(m => m.group))].sort();
+    const matchMode = currentSessionState.matchMode || 'group';
     if (tabs) {
         tabs.innerHTML = '';
-        groups.forEach(g => {
-            const btn = document.createElement('button');
-            btn.className = `sub-tab-btn ${activeGroupTab === g ? 'active' : ''}`;
-            btn.innerText = `${g}조`;
-            btn.onclick = () => { activeGroupTab = g; renderCurrentMatches(); };
-            tabs.appendChild(btn);
-        });
+        if (matchMode === 'court') {
+            const rounds = [...new Set(currentSchedule.map(m => m.groupRound))].sort((a, b) => a - b);
+            rounds.forEach(r => {
+                const rLabel = `${r}R`;
+                const btn = document.createElement('button');
+                btn.className = `sub-tab-btn ${activeGroupTab === rLabel ? 'active' : ''}`;
+                btn.innerText = rLabel;
+                btn.onclick = () => { activeGroupTab = rLabel; renderCurrentMatches(); };
+                tabs.appendChild(btn);
+            });
+        } else {
+            const groups = [...new Set(currentSchedule.map(m => m.group))].sort();
+            groups.forEach(g => {
+                const btn = document.createElement('button');
+                btn.className = `sub-tab-btn ${activeGroupTab === g ? 'active' : ''}`;
+                btn.innerText = `${g}조`;
+                btn.onclick = () => { activeGroupTab = g; renderCurrentMatches(); };
+                tabs.appendChild(btn);
+            });
+        }
     }
 
     const sessionNum = currentSchedule[0].sessionNum;
-    container.innerHTML = `<h3 style="text-align:center; margin-bottom:20px">제 ${sessionNum}회차 (${activeGroupTab}조 대진표)</h3>`;
+    let filtered = [];
+    let groupTitle = "";
 
-    const filtered = currentSchedule.filter(m => m.group === activeGroupTab);
-    const rounds = [...new Set(filtered.map(m => m.groupRound))].sort((a, b) => a - b);
-    rounds.forEach(rNum => {
-        const headerDiv = document.createElement('div');
-        headerDiv.style.display = 'flex';
-        headerDiv.style.justifyContent = 'space-between';
-        headerDiv.style.alignItems = 'center';
-        headerDiv.style.margin = '20px 0 10px 0';
+    if (matchMode === 'court') {
+        const roundNum = parseInt(activeGroupTab) || 1;
+        filtered = currentSchedule.filter(m => m.groupRound === roundNum);
+        groupTitle = `${roundNum}라운드`;
+    } else {
+        filtered = currentSchedule.filter(m => m.group === activeGroupTab);
+        groupTitle = `${activeGroupTab}조`;
+    }
 
-        const h = document.createElement('h4');
-        h.style.margin = '0';
-        h.style.color = 'var(--accent-color)';
-        h.innerText = `${rNum}회전`;
-        headerDiv.appendChild(h);
+    container.innerHTML = `<h3 style="text-align:center; margin-bottom:20px">${groupTitle} 대진표</h3>`;
 
-        if (isAdmin) {
-            const editAllBtn = document.createElement('button');
-            editAllBtn.style.fontSize = '0.7rem';
-            editAllBtn.style.color = 'var(--text-secondary)';
-            editAllBtn.style.background = 'none';
-            editAllBtn.style.border = 'none';
-            editAllBtn.style.padding = '0';
-            editAllBtn.style.cursor = 'pointer';
-            editAllBtn.style.opacity = '0.6';
-            editAllBtn.style.textDecoration = 'underline';
-            editAllBtn.innerText = '이름 수정';
+    const getRank = (p) => {
+        if (p.vRank) return `<span style="font-size:0.8em; color:var(--text-secondary)">(${p.vRank})</span>`;
+        const info = rankMap.get(String(p.id));
+        return info ? `<span style="font-size:0.8em; color:var(--text-secondary)">(${info.rank})</span>` : '';
+    };
 
-            // 해당 라운드의 첫 번째 경기 ID를 넘겨 모달을 열거나, 통합 수정을 지원
-            const roundMatches = filtered.filter(m => m.groupRound === rNum);
-            if (roundMatches.length > 0) {
-                editAllBtn.onclick = () => openCurrentMatchEditModal(roundMatches[0].id);
+    const renderMatchCard = (m) => {
+        const r1 = m.t1[0].rating || ELO_INITIAL;
+        const r2 = m.t1[1].rating || ELO_INITIAL;
+        const r3 = m.t2[0].rating || ELO_INITIAL;
+        const r4 = m.t2[1].rating || ELO_INITIAL;
+        const avg1 = (r1 + r2) / 2;
+        const avg2 = (r3 + r4) / 2;
+        const expected = 1 / (1 + Math.pow(10, (avg2 - avg1) / 400));
+        const expPcnt = (expected * 100).toFixed(0);
+
+        const div = document.createElement('div');
+        div.className = 'match-card';
+        div.innerHTML = `
+            <div style="flex:1; display:flex; flex-direction:column; justify-content:center; gap:2px;">
+                <div><strong>${m.t1[0].name}${getRank(m.t1[0])}</strong></div>
+                <div><strong>${m.t1[1].name}${getRank(m.t1[1])}</strong></div>
+            </div>
+            <div class="vs" style="display:flex; flex-direction:column; align-items:center; gap:5px;">
+                <div style="display:flex; align-items:center;">
+                    <input type="number" class="score-input" value="${m.s1 !== null ? m.s1 : ''}" placeholder="-" min="0" max="6" inputmode="numeric" onchange="updateLiveScore('${m.id}',1,this.value)" style="width:55px; font-size:1.1rem; padding:5px 0;"> 
+                    <span style="margin:0 5px; font-weight:bold;">:</span> 
+                    <input type="number" class="score-input" value="${m.s2 !== null ? m.s2 : ''}" placeholder="-" min="0" max="6" inputmode="numeric" onchange="updateLiveScore('${m.id}',2,this.value)" style="width:55px; font-size:1.1rem; padding:5px 0;">
+                </div>
+                <div style="font-size:0.7rem; color:var(--text-secondary); opacity:0.8;">(기대승률 ${expPcnt}%)</div>
+            </div>
+            <div style="flex:1; text-align:right; display:flex; flex-direction:column; justify-content:center; gap:2px;">
+                <div><strong>${m.t2[0].name}${getRank(m.t2[0])}</strong></div>
+                <div><strong>${m.t2[1].name}${getRank(m.t2[1])}</strong></div>
+            </div>
+        `;
+        container.appendChild(div);
+    };
+
+    if (matchMode === 'court') {
+        const sortedInRound = [...filtered].sort((a, b) => a.group.localeCompare(b.group, undefined, { numeric: true }));
+        sortedInRound.forEach(match => {
+            const headerDiv = document.createElement('div');
+            headerDiv.style.display = 'flex';
+            headerDiv.style.justifyContent = 'space-between';
+            headerDiv.style.alignItems = 'center';
+            headerDiv.style.margin = '20px 0 10px 0';
+
+            const h = document.createElement('h4');
+            h.style.margin = '0';
+            h.style.color = 'var(--accent-color)';
+            h.innerText = match.group;
+            headerDiv.appendChild(h);
+
+            if (isAdmin) {
+                const editAllBtn = document.createElement('button');
+                editAllBtn.style.fontSize = '0.7rem';
+                editAllBtn.style.color = 'var(--text-secondary)';
+                editAllBtn.style.background = 'none';
+                editAllBtn.style.border = 'none';
+                editAllBtn.style.padding = '0';
+                editAllBtn.style.cursor = 'pointer';
+                editAllBtn.style.opacity = '0.6';
+                editAllBtn.style.textDecoration = 'underline';
+                editAllBtn.innerText = '이름 수정';
+                editAllBtn.onclick = () => openCurrentMatchEditModal(match.id);
+                headerDiv.appendChild(editAllBtn);
             }
-            headerDiv.appendChild(editAllBtn);
-        }
 
-        container.appendChild(headerDiv);
-
-        filtered.filter(m => m.groupRound === rNum).forEach(m => {
-            // 기대승률 계산
-            const r1 = m.t1[0].rating || ELO_INITIAL;
-            const r2 = m.t1[1].rating || ELO_INITIAL;
-            const r3 = m.t2[0].rating || ELO_INITIAL;
-            const r4 = m.t2[1].rating || ELO_INITIAL;
-            const avg1 = (r1 + r2) / 2;
-            const avg2 = (r3 + r4) / 2;
-            const expected = 1 / (1 + Math.pow(10, (avg2 - avg1) / 400));
-            const expPcnt = (expected * 100).toFixed(0);
-
-            // 랭킹 정보 조회 (v5.3: vRank 지원, v6.1: 스냅샷 지원은 History 전용이므로 여기는 vRank/CurrentRank)
-            const getRank = (p) => {
-                if (p.vRank) return `<span style="font-size:0.8em; color:var(--text-secondary)">(${p.vRank})</span>`;
-                const info = rankMap.get(String(p.id));
-                return info ? `<span style="font-size:0.8em; color:var(--text-secondary)">(${info.rank})</span>` : '';
-            };
-
-            const div = document.createElement('div'); div.className = 'match-card';
-            div.innerHTML = `
-                <div style="flex:1; display:flex; flex-direction:column; justify-content:center; gap:2px;">
-                    <div><strong>${m.t1[0].name}${getRank(m.t1[0])}</strong></div>
-                    <div><strong>${m.t1[1].name}${getRank(m.t1[1])}</strong></div>
-                </div>
-                <div class="vs" style="display:flex; flex-direction:column; align-items:center; gap:5px;">
-                    <div style="display:flex; align-items:center;">
-                        <input type="number" 
-                               class="score-input" 
-                               value="${m.s1 !== null ? m.s1 : ''}" 
-                               placeholder="-" 
-                               min="0" max="6" 
-                               inputmode="numeric" 
-                               onchange="updateLiveScore('${m.id}',1,this.value)"
-                               style="width:55px; font-size:1.1rem; padding:5px 0;"> 
-                        <span style="margin:0 5px; font-weight:bold;">:</span> 
-                        <input type="number" 
-                               class="score-input" 
-                               value="${m.s2 !== null ? m.s2 : ''}" 
-                               placeholder="-" 
-                               min="0" max="6" 
-                               inputmode="numeric" 
-                               onchange="updateLiveScore('${m.id}',2,this.value)"
-                               style="width:55px; font-size:1.1rem; padding:5px 0;">
-                    </div>
-                    <div style="font-size:0.7rem; color:var(--text-secondary); opacity:0.8;">(기대승률 ${expPcnt}%)</div>
-                </div>
-                <div style="flex:1; text-align:right; display:flex; flex-direction:column; justify-content:center; gap:2px;">
-                    <div><strong>${m.t2[0].name}${getRank(m.t2[0])}</strong></div>
-                    <div><strong>${m.t2[1].name}${getRank(m.t2[1])}</strong></div>
-                </div>
-            `;
-            container.appendChild(div);
+            container.appendChild(headerDiv);
+            renderMatchCard(match);
         });
-    });
+    } else {
+        const roundsInGroup = [...new Set(filtered.map(m => m.groupRound))].sort((a, b) => a - b);
+        roundsInGroup.forEach(rNum => {
+            const headerDiv = document.createElement('div');
+            headerDiv.style.display = 'flex';
+            headerDiv.style.justifyContent = 'space-between';
+            headerDiv.style.alignItems = 'center';
+            headerDiv.style.margin = '20px 0 10px 0';
+
+            const h = document.createElement('h4');
+            h.style.margin = '0';
+            h.style.color = 'var(--accent-color)';
+            h.innerText = `${rNum}회전`;
+            headerDiv.appendChild(h);
+
+            if (isAdmin) {
+                const editAllBtn = document.createElement('button');
+                editAllBtn.style.fontSize = '0.7rem';
+                editAllBtn.style.color = 'var(--text-secondary)';
+                editAllBtn.style.background = 'none';
+                editAllBtn.style.border = 'none';
+                editAllBtn.style.padding = '0';
+                editAllBtn.style.cursor = 'pointer';
+                editAllBtn.style.opacity = '0.6';
+                editAllBtn.style.textDecoration = 'underline';
+                editAllBtn.innerText = '이름 수정';
+
+                const roundMatches = filtered.filter(m => m.groupRound === rNum);
+                if (roundMatches.length > 0) {
+                    editAllBtn.onclick = () => openCurrentMatchEditModal(roundMatches[0].id);
+                }
+                headerDiv.appendChild(editAllBtn);
+            }
+
+            container.appendChild(headerDiv);
+
+            filtered.filter(m => m.groupRound === rNum).forEach(m => renderMatchCard(m));
+        });
+    }
 
     // 모든 경기 점수가 입력되었는지 확인 및 종료 버튼 표시 (null이 아니어야 함)
     const finishedCount = currentSchedule.filter(m =>

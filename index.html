@@ -59,6 +59,7 @@
                         <span style="white-space: nowrap;">회차</span>
                         <button id="openRoundBtn" class="primary" style="flex: 1;">참가 접수 시작</button>
                     </div>
+
                     <div style="display: flex; gap: 10px; align-items: center;">
                         <select id="sessionInfoSelect" style="flex: 1; min-width: 150px;">
                             <option value="">장소/시간 선택 안함</option>
@@ -107,6 +108,46 @@
                             <button id="generateScheduleBtn"
                                 style="flex: 1; background: var(--accent-color); color: #0f172a; padding: 15px; font-size: 1.1rem; border: none; font-weight: 800; box-shadow: 0 4px 12px rgba(56, 189, 248, 0.3);">👥
                                 대진표 생성</button>
+                        </div>
+                        <div
+                            style="margin-top: 15px; padding: 12px; border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 8px; background: rgba(56, 189, 248, 0.03);">
+                            <div style="display: flex; gap: 15px; align-items: center; justify-content: center;">
+                                <span style="font-size: 0.95rem; color: var(--accent-color); font-weight: bold;">🎯 대진
+                                    방식 결정:</span>
+                                <label
+                                    style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.95rem;">
+                                    <input type="radio" name="matchMode" value="group"> 조별 방식
+                                </label>
+                                <label
+                                    style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.95rem;">
+                                    <input type="radio" name="matchMode" value="court" checked> 코트별 랜덤
+                                </label>
+                            </div>
+                            <p
+                                style="font-size: 0.75rem; color: var(--text-secondary); margin: 8px 0 0 0; text-align: center;">
+                                * 방식을 변경하면 모든 사용자의 참가신청 화면이 즉시 업데이트됩니다.
+                            </p>
+                        </div>
+                        <!-- 대진표 생성 미리보기 섹션 추가 -->
+                        <div id="schedulePreviewArea"
+                            style="display: none; margin-top: 20px; padding: 15px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--accent-color); border-radius: 8px;">
+                            <h4 style="margin: 0 0 15px 0; color: var(--accent-color); text-align: center;">📊 대진 생성 결과
+                                (검토 후 확정)</h4>
+                            <div id="previewStatsGrid"
+                                style="display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 10px; margin-bottom: 20px;">
+                                <!-- 선수별 경기 수 동적 생성 -->
+                            </div>
+                            <div
+                                style="text-align: center; font-size: 0.9rem; margin-bottom: 15px; color: var(--text-secondary);">
+                                평균 경기 수: <span id="previewAvgGames"
+                                    style="color: var(--accent-color); font-weight: bold;">0</span>게임
+                            </div>
+                            <div style="display: flex; gap: 10px;">
+                                <button id="regenerateBtn" class="secondary" style="flex: 1;">🔄 다시 생성</button>
+                                <button id="finalizeScheduleBtn" class="primary"
+                                    style="flex: 1; background: var(--success); color: white; border: none;">✅ 대진표
+                                    확정</button>
+                            </div>
                         </div>
                     </div>
                 </div>
