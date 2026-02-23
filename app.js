@@ -89,12 +89,23 @@ function initFirebase() {
     const settingsPath = currentClubId === 'Default' ? "system/settings" : `clubs/${currentClubId}/config/settings`;
     const settingsRef = doc(db, settingsPath);
 
-    // 먼저 settings를 한 번 읽어서 활성 DB를 확인 (Default DB 불필요 참조 방지)
+    // 먼저 localStorage 또는 settings를 읽어서 활성 DB를 확인
+    const cachedDb = localStorage.getItem(`ace_active_db_${currentClubId}`);
+    if (cachedDb) {
+        currentDbName = cachedDb;
+        updateDbDisplay();
+        subscribeToCluster(cachedDb);
+    }
+
     getDoc(settingsRef).then(snap => {
         if (snap.exists()) {
             const activeDb = snap.data().active_cluster || 'Default';
-            currentDbName = activeDb;
-            updateDbDisplay();
+            if (activeDb !== currentDbName) {
+                currentDbName = activeDb;
+                localStorage.setItem(`ace_active_db_${currentClubId}`, activeDb);
+                updateDbDisplay();
+                subscribeToCluster(activeDb);
+            }
         }
     }).catch(() => { }).finally(() => {
         // settings 리스너 등록 (이후 실시간 변경 감지)
@@ -103,9 +114,12 @@ function initFirebase() {
                 systemSettings = snapshot.data();
                 const globalActiveDb = systemSettings.active_cluster || 'Default';
 
-                // 전역 활성 DB가 변경되었을 경우에만 리스너 재구독
+                // 전역 활성 DB가 변경되었을 경우에만 리스너 재구독 및 로컬 저장
                 if (globalActiveDb !== currentDbName || !clusterUnsubscribe) {
                     console.log(`[Global Sync] Switching to Active DB: ${globalActiveDb}`);
+                    currentDbName = globalActiveDb;
+                    localStorage.setItem(`ace_active_db_${currentClubId}`, globalActiveDb);
+                    updateDbDisplay();
                     subscribeToCluster(globalActiveDb);
                 }
             } else {
@@ -293,10 +307,25 @@ function initUIEvents() {
 
     const sessionInfoSelect = document.getElementById('sessionInfoSelect');
     if (sessionInfoSelect) {
-        sessionInfoSelect.onchange = () => {
+        sessionInfoSelect.onchange = async () => {
             const manualInput = document.getElementById('manualSessionInfo');
             if (manualInput) {
                 manualInput.style.display = sessionInfoSelect.value === 'manual' ? 'block' : 'none';
+            }
+            // 접수 중일 때 장소 변경 시 즉시 반영
+            if (isAdmin && currentSessionState.status === 'recruiting') {
+                const newInfo = sessionInfoSelect.value === 'manual' ? (manualInput ? manualInput.value : '') : sessionInfoSelect.value;
+                await window.saveSessionState(currentSessionState.status, currentSessionState.sessionNum, newInfo, currentSessionState.matchMode);
+            }
+        };
+    }
+
+    const manualSessionInfoInput = document.getElementById('manualSessionInfo');
+    if (manualSessionInfoInput) {
+        manualSessionInfoInput.oninput = async () => {
+            if (isAdmin && currentSessionState.status === 'recruiting' && sessionInfoSelect?.value === 'manual') {
+                // 디바운스 필요할 수 있지만 일단 즉시 반영
+                await window.saveSessionState(currentSessionState.status, currentSessionState.sessionNum, manualSessionInfoInput.value, currentSessionState.matchMode);
             }
         };
     }
@@ -601,6 +630,8 @@ function updateAdminUI() {
         status.classList.add('success');
         adminAreas.forEach(el => el.style.display = 'block');
         guestAreas.forEach(el => el.style.display = 'none');
+        const exportBtn = document.getElementById('exportCsvBtn');
+        if (exportBtn) exportBtn.style.display = 'block';
         fetchDbList(); // DB 관리 리스트 갱신
     } else {
         status.innerText = "관리자 로그인";
@@ -2344,9 +2375,11 @@ function exportHistoryToCsv() {
     if (!isAdmin) { alert('관리자 기능입니다.'); return; }
     if (matchHistory.length === 0) { alert('내보낼 기록이 없습니다.'); return; }
 
-    let csv = "\uFEFF회차,날짜,팀1,팀2,점수1,점수2,ELO변동\n";
+    let csv = "\uFEFF회차,날짜,팀1,팀2,점수1,점수2,기대승률(%),ELO변동\n";
     matchHistory.slice().sort((a, b) => b.sessionNum - a.sessionNum).forEach(h => {
-        csv += `${h.sessionNum},${h.date},"${h.t1_names.join(',')}","${h.t2_names.join(',')}",${h.score1},${h.score2},${h.elo_at_match?.change.toFixed(1) || 0}\n`;
+        const expected = h.elo_at_match?.expected ? (h.elo_at_match.expected * 100).toFixed(0) : 50;
+        const eloChange = h.elo_at_match?.change1?.toFixed(1) || 0;
+        csv += `${h.sessionNum},${h.date},"${h.t1_names.join(',')}","${h.t2_names.join(',')}",${h.score1},${h.score2},${expected}%,${eloChange}\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
