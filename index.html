@@ -5,6 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>도토리 키재기 | ACE 랭킹 시스템</title>
+    <!-- favicon 404 에러 방지 -->
+    <link rel="icon" href="data:,">
     <link rel="stylesheet" href="style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
@@ -460,6 +462,22 @@
                                 style="flex: 1; font-size: 0.8rem;">
                             <button id="switchDbBtn" class="primary"
                                 style="padding: 8px 12px; font-size: 0.8rem;">생성/이동</button>
+                        </div>
+                    </div>
+                    <div
+                        style="background: rgba(255,165,0,0.05); padding: 15px; border-radius: 8px; border: 1px dashed rgba(255,165,0,0.3); margin-top: 10px;">
+                        <label
+                            style="font-size: 0.8rem; display: block; margin-bottom: 8px; color: #ff9800; font-weight: bold;">⚡
+                            데이터 긴급 복구 (CSV)</label>
+                        <p style="font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 8px;">
+                            백업받은 .csv 파일을 선택하면 데이터를 복원합니다.
+                        </p>
+                        <div style="display: flex; flex-direction: column; gap: 8px;">
+                            <input type="file" id="restoreCsvFile" accept=".csv"
+                                style="font-size: 0.8rem; width: 100%;">
+                            <button id="restoreCsvBtn" class="secondary"
+                                style="padding: 8px; font-size: 0.8rem; background: rgba(255,165,0,0.2) !important; color: #ff9800 !important; border-color: #ff9800 !important;">CSV에서
+                                복구하기</button>
                         </div>
                     </div>
                 </div>
