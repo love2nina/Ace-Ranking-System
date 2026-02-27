@@ -11,6 +11,8 @@ let systemSettings = { admin_pw: "ace_admin" };
 
 // 콜백 저장소 (app.js에서 주입)
 let _callbacks = {};
+// 데이터 로드 여부 추적 (세션 자동 생성 방어용)
+let _dataLoadedForDb = '';
 
 /**
  * 모듈 내 currentDbName 게터
@@ -118,8 +120,17 @@ export function initFirebase(callbacks) {
                     subscribeToCluster(globalActiveDb);
                 }
             } else {
-                // 초기 설정 (클럽별 독립 설정)
-                setDoc(settingsRef, { admin_pw: "ace_admin", active_cluster: "Default" });
+                // ⚠️ 설정 문서가 존재하지 않음
+                // 이미 활성 DB가 있는 경우: 네트워크 일시 단절로 인한 false-negative일 수 있음
+                // → 기존 DB를 유지하면서 설정 문서를 복원
+                if (currentDbName && currentDbName !== 'Default') {
+                    console.warn(`[Settings] ⚠️ Settings document not found but active DB is '${currentDbName}'. Restoring settings instead of resetting to Default.`);
+                    setDoc(settingsRef, { admin_pw: systemSettings.admin_pw || "ace_admin", active_cluster: currentDbName });
+                } else {
+                    // 최초 초기화인 경우에만 Default로 생성
+                    console.log("[Settings] Creating initial settings document with Default.");
+                    setDoc(settingsRef, { admin_pw: "ace_admin", active_cluster: "Default" });
+                }
             }
         });
     });
@@ -150,6 +161,7 @@ export function subscribeToCluster(dbName) {
         if (isEmpty && currentDbName.toLowerCase() === 'default') {
             if (_callbacks.onEmptyDefault) await _callbacks.onEmptyDefault();
         } else if (snapshot.exists()) {
+            _dataLoadedForDb = currentDbName; // 데이터 로드 성공 기록
             if (_callbacks.onDataLoaded) _callbacks.onDataLoaded(data);
         } else {
             // ⚠️ 문서가 존재하지 않는 경우: 빈 데이터를 자동 저장하지 않음 (데이터 소실 방지)
@@ -168,7 +180,14 @@ export function subscribeToCluster(dbName) {
         if (snap.exists()) {
             if (_callbacks.onSessionUpdate) _callbacks.onSessionUpdate(snap.data());
         } else if (currentDbName.toLowerCase() !== 'default') {
-            if (_callbacks.onNewClusterSession) _callbacks.onNewClusterSession(sessionStatusDocPath);
+            // ⚠️ 세션 문서가 없을 때: 데이터가 로드된 DB에서만 자동 생성
+            // 데이터가 아직 로드되지 않았으면 네트워크 지연/일시 오류일 수 있으므로 건너뜀
+            if (_dataLoadedForDb === currentDbName) {
+                console.log(`[Session] Creating initial session state for DB: ${currentDbName}`);
+                if (_callbacks.onNewClusterSession) _callbacks.onNewClusterSession(sessionStatusDocPath);
+            } else {
+                console.warn(`[Session] ⚠️ Session status not found for DB: ${currentDbName}, but data not yet loaded. Skipping auto-create.`);
+            }
         }
     });
 }
