@@ -95,9 +95,12 @@ function initFirebase() {
         onEmptyDefault: async () => {
             await fbHandleMigration();
         },
-        onEmptyCluster: async () => {
+        onEmptyClusterSafe: () => {
+            // Firebase에 저장하지 않고 UI만 빈 상태로 초기화
+            console.log('[App] Empty cluster detected - UI only reset (no save)');
             members = []; matchHistory = []; currentSchedule = []; applicants = [];
-            await window.saveToCloud();
+            recalculateAll();
+            updateUI();
         },
         onSessionUpdate: (state) => {
             currentSessionState = state;
@@ -123,8 +126,8 @@ function initFirebase() {
     });
 }
 
-window.saveToCloud = async () => {
-    await fbSaveToCloud({ members, matchHistory, currentSchedule, sessionNum, applicants });
+window.saveToCloud = async (caller = 'unknown') => {
+    await fbSaveToCloud({ members, matchHistory, currentSchedule, sessionNum, applicants }, caller);
 };
 
 // --- 관리자 인증 로직 ---
@@ -167,7 +170,7 @@ function initUIEvents() {
     });
     bindClick('exportCsvBtn', exportHistoryToCsv);
     bindClick('savePreviewBtn', async () => {
-        await window.saveToCloud();
+        await window.saveToCloud('savePreviewBtn');
         alert('조편성 구성이 저장되었습니다. 모든 사용자에게 실시간 반영됩니다.');
         renderApplicants();
     });
@@ -256,7 +259,7 @@ async function openRegistration() {
         await window.saveSessionState('recruiting', num, info, matchMode);
         // 기존 참가자 명단 초기화 여부는 선택사항이나, 새 회차 시작 시 보통 초기화함
         applicants = [];
-        await window.saveToCloud();
+        await window.saveToCloud('openRegistration');
     }
 
     // 미리보기 영역 숨김 (초기화)
@@ -370,7 +373,7 @@ async function addPlayer() {
     }
 
     nameInput.value = '';
-    await window.saveToCloud();
+    await window.saveToCloud('addPlayer');
     renderApplicants(); // 로컬 즉시 반영
 }
 
@@ -410,7 +413,7 @@ window.removeApplicant = async (id) => {
     console.log(`[Admin] Removing applicant ID: ${id}`);
     applicants = applicants.filter(a => String(a.id) !== String(id));
     previewGroups = null; // 인원 변경 시 미리보기 초기화
-    await window.saveToCloud();
+    await window.saveToCloud('removeApplicant');
     // 로컬 즉시 반영 (선택 사항이나 체감 속도 향상 위해)
     renderApplicants();
 };
@@ -470,7 +473,7 @@ async function finalizeSchedule() {
     }
 
     await window.saveSessionState('playing', sessionNum, currentSessionState.info, mode);
-    await window.saveToCloud();
+    await window.saveToCloud('finalizeSchedule');
 
     // 미리보기 영역 숨김
     const area = document.getElementById('schedulePreviewArea');
@@ -494,7 +497,7 @@ async function cancelSchedule() {
 
     // 상태를 다시 'recruiting'으로 변경 (기존 장소 및 방식 유지)
     await window.saveSessionState('recruiting', currentSessionState.sessionNum, currentSessionState.info, currentSessionState.matchMode);
-    await window.saveToCloud();
+    await window.saveToCloud('cancelSchedule');
 
     alert('대진표가 초기화되었습니다. 참가신청 탭에서 명단을 수정할 수 있습니다.');
 
@@ -522,7 +525,7 @@ window.updateLiveScore = async (id, team, val) => {
     const m = currentSchedule.find(x => x.id === id);
     if (m) {
         if (team === 1) m.s1 = score; else m.s2 = score;
-        await window.saveToCloud();
+        await window.saveToCloud('updateLiveScore');
     }
 };
 
@@ -578,7 +581,7 @@ async function commitSession() {
 
         currentSchedule = [];
         applicants = []; // 랭킹전 최종 종료 시에만 명단 초기화
-        await window.saveToCloud();
+        await window.saveToCloud('commitSession');
 
         // 랭킹전 종료 후 상태를 IDLE로 변경하고 다음 회차 번호 준비
         await window.saveSessionState('idle', parseInt(sessionNum) + 1);
@@ -623,7 +626,7 @@ window.deleteHistory = async (id) => {
     matchHistory = matchHistory.filter(h => h.id !== id);
     recalculateAll();
     updateUI();
-    await window.saveToCloud();
+    await window.saveToCloud('deleteHistory');
 };
 window.openEditModal = (id) => {
     if (!isAdmin) return;
@@ -697,7 +700,7 @@ async function saveScheduleEdit() {
         });
 
         closeModal();
-        await window.saveToCloud();
+        await window.saveToCloud('saveScheduleEdit');
     }
 }
 
@@ -734,7 +737,7 @@ async function saveEdit() {
         closeModal();
         recalculateAll(); // 수정 즉시 데이터 재계산
         updateUI();       // UI 갱신
-        await window.saveToCloud();
+        await window.saveToCloud('saveEdit');
     }
 }
 
@@ -877,7 +880,7 @@ async function handleRestoreCsv() {
 
         // 재계산 및 저장
         recalculateAll();
-        await window.saveToCloud();
+        await window.saveToCloud('handleRestoreCsv');
         await window.saveSessionState('idle', sessionNum);
 
         alert(`데이터 복구가 완료되었습니다!\n총 ${newHistory.length}개의 경기와 ${newMembers.length}명의 선수가 복구되었습니다.`);

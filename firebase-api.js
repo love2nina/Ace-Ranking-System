@@ -143,7 +143,7 @@ export function subscribeToCluster(dbName) {
     const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
     const docRef = doc(db, clusterPath, currentDbName);
     clusterUnsubscribe = onSnapshot(docRef, async (snapshot) => {
-        console.log(`[Firebase] Snapshot received for DB: ${currentDbName}`);
+        console.log(`[Firebase] Snapshot received for DB: ${currentDbName}, exists: ${snapshot.exists()}`);
         let data = snapshot.exists() ? snapshot.data() : null;
         let isEmpty = !data || (Array.isArray(data.members) && data.members.length === 0);
 
@@ -152,7 +152,10 @@ export function subscribeToCluster(dbName) {
         } else if (snapshot.exists()) {
             if (_callbacks.onDataLoaded) _callbacks.onDataLoaded(data);
         } else {
-            if (_callbacks.onEmptyCluster) await _callbacks.onEmptyCluster();
+            // ⚠️ 문서가 존재하지 않는 경우: 빈 데이터를 자동 저장하지 않음 (데이터 소실 방지)
+            console.warn(`[Firebase] Document does not exist for DB: ${currentDbName}. Skipping auto-save to prevent data loss.`);
+            // 빈 상태로 UI만 초기화 (Firebase에는 저장하지 않음)
+            if (_callbacks.onEmptyClusterSafe) _callbacks.onEmptyClusterSafe();
         }
     });
 
@@ -211,8 +214,22 @@ export async function handleMigration() {
 /**
  * 전체 상태를 Firestore에 저장
  * @param {Object} appState - { members, matchHistory, currentSchedule, sessionNum, applicants }
+ * @param {string} caller - 호출 경로 식별용 문자열
  */
-export async function saveToCloud(appState) {
+export async function saveToCloud(appState, caller = 'unknown') {
+    // --- 안전장치: 빈 데이터 덮어쓰기 방지 ---
+    const memberCount = (appState.members || []).length;
+    const historyCount = (appState.matchHistory || []).length;
+
+    if (memberCount === 0 && historyCount === 0) {
+        console.warn(`[SaveToCloud] ⚠️ BLOCKED: 빈 데이터 저장 시도 차단됨 (caller: ${caller}, DB: ${currentDbName})`);
+        console.warn(`[SaveToCloud] members: ${memberCount}, matchHistory: ${historyCount}`);
+        console.trace('[SaveToCloud] 호출 스택:');
+        return; // 빈 데이터를 저장하지 않음
+    }
+
+    console.log(`[SaveToCloud] 저장 실행 (caller: ${caller}, DB: ${currentDbName}, members: ${memberCount}, history: ${historyCount})`);
+
     const { doc, setDoc } = window.FB_SDK;
     const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
     try {
