@@ -1050,7 +1050,7 @@ export function renderPlayerTrend(context) {
     }
 }
 
-export function renderCasterReport(context) {
+export function renderAnalystReport(context) {
     const { reports, matchHistory, isAdmin } = context;
     const contentArea = document.getElementById('casterReportContent');
     const select = document.getElementById('reportSessionSelect');
@@ -1083,7 +1083,7 @@ export function renderCasterReport(context) {
     if (!report) {
         contentArea.innerHTML = `
             <div style="text-align:center; padding:60px 20px; color:var(--text-secondary); background:rgba(255,255,255,0.02); border-radius:12px; border:1px dashed rgba(255,255,255,0.1);">
-                <div style="font-size:3rem; margin-bottom:20px; opacity:0.5;">🎤</div>
+                <div style="font-size:3rem; margin-bottom:20px; opacity:0.5;">📊</div>
                 <h3 style="font-weight:400;">제 ${targetSession}회차 리포트가 아직 없습니다.</h3>
                 <p style="font-size:0.9rem; opacity:0.7;">관리자가 리포트를 작성 중일 수 있습니다.</p>
             </div>
@@ -1125,30 +1125,47 @@ function parseMarkdown(text) {
     // 수평선
     html = html.replace(/^---$/gim, '<hr style="border:0; border-top:1px solid var(--border-color); margin:30px 0;">');
 
-    // 테이블 (심플 버전)
+    // 테이블 및 단락 처리
     const lines = html.split('\n');
     let inTable = false;
+    let resultRows = [];
 
-    const processedLines = lines.map(line => {
-        if (line.includes('|')) {
-            const cells = line.split('|').filter(c => c.trim() !== '' || line.trim().startsWith('|') || line.trim().endsWith('|')).map(c => c.trim());
-            // 구분선 행 제외
-            if (cells.every(c => c.match(/^[-:| ]+$/))) return "";
+    lines.forEach(line => {
+        const trimmed = line.trim();
+
+        if (trimmed.includes('|')) {
+            const cells = trimmed.split('|').filter(c => c.trim() !== '' || trimmed.startsWith('|') || trimmed.endsWith('|')).map(c => c.trim());
+            if (cells.every(c => c.match(/^[-:| ]+$/))) return;
 
             if (!inTable) {
                 inTable = true;
-                return '<div class="table-responsive"><table><thead><tr>' + cells.map(c => `<th>${c}</th>`).join('') + '</tr></thead><tbody>';
+                resultRows.push('<div class="table-responsive"><table><thead><tr>' + cells.map(c => `<th>${c}</th>`).join('') + '</tr></thead><tbody>');
             } else {
-                return '<tr>' + cells.map(c => `<td>${c}</td>`).join('') + '</tr>';
+                resultRows.push('<tr>' + cells.map(c => `<td>${c}</td>`).join('') + '</tr>');
             }
+        } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+            // 리스트 처리
+            if (inTable) {
+                inTable = false;
+                resultRows.push('</tbody></table></div>');
+            }
+            const listContent = trimmed.substring(2);
+            resultRows.push(`<li>${listContent}</li>`);
         } else {
             if (inTable) {
                 inTable = false;
-                return '</tbody></table></div>' + line;
+                resultRows.push('</tbody></table></div>');
             }
-            return line + '<br>';
+
+            if (trimmed === "") {
+                // 빈 줄은 패스
+            } else {
+                resultRows.push(`<p>${trimmed}</p>`);
+            }
         }
     });
 
-    return processedLines.join('\n');
+    if (inTable) resultRows.push('</tbody></table></div>');
+
+    return resultRows.join('\n');
 }

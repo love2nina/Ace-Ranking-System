@@ -28,9 +28,10 @@ let eloChart = null;
 let trendChart = null;
 let rankMap = new Map(); // 현재 랭킹 순위 저장용
 let tempSchedule = null; // 대진표 생성 미리보기용 임시 저장
-let sessionRankSnapshots = {}; // 회차별(세션별) 시작 시점의 랭킹 스냅샷
+let sessionRankSnapshots = {}; // 회차별(세션별) 종료 시점의 랭킹 스냅샷
 let historyViewMode = 'match'; // 'match' or 'player'
 let sessionStartRatings = {}; // 회차별 시작 시점의 레이팅 스냅샷
+let sessionEndRatings = {};   // 회차별 종료 시점의 레이팅 스냅샷
 let previewGroups = null; // v7.0: 조 편성 미리보기 상태 (null이면 자동)
 
 import { ELO_INITIAL, K_FACTOR, GAME_COUNTS, MATCH_PATTERNS, getSplits, recalculateAll as engineRecalculateAll, generateSchedule as engineGenerateSchedule } from './engine.js';
@@ -53,7 +54,7 @@ import {
     renderEloChart as uiRenderEloChart,
     updatePlayerSelect as uiUpdatePlayerSelect,
     renderPlayerTrend as uiRenderPlayerTrend,
-    renderCasterReport
+    renderAnalystReport
 } from './ui.js';
 import {
     initFirebase as fbInitFirebase,
@@ -390,7 +391,7 @@ function updateApplyButtonState() {
 // --- 기존 핵심 엔진 로직 (클라우드 환경 대응) ---
 
 function recalculateAll() {
-    engineRecalculateAll({ members, matchHistory, rankMap, sessionRankSnapshots, sessionStartRatings });
+    engineRecalculateAll({ members, matchHistory, rankMap, sessionRankSnapshots, sessionStartRatings, sessionEndRatings });
 }
 
 function updateUI() {
@@ -406,7 +407,7 @@ function updateUI() {
     updateStatistics(); // 통계 업데이트 추가
     renderStatsDashboard(); // 대시보드 렌더링 엔진 가동
     renderSessionStatus(); // 세션 상태 렌더링 추가
-    window.renderCasterReport(); // 리포트 렌더링 추가
+    window.renderAnalystReport(); // 리포트 렌더링 추가
 }
 async function handleSaveReport() {
     if (!isAdmin) return;
@@ -446,22 +447,61 @@ async function handleCopyAIData() {
         return;
     }
 
-    // AI에게 전달할 데이터 구조화 (프롬프트 포함)
-    // 랭킹 정렬 로직 동기화 (대시보드와 동일)
-    const sortedMembers = [...members].filter(m => m.matchCount > 0).sort((a, b) => {
-        if (b.rating !== a.rating) return b.rating - a.rating;
-        if (b.wins !== a.wins) return b.wins - a.wins;
-        const bWinRate = b.matchCount > 0 ? b.wins / b.matchCount : 0;
-        const aWinRate = a.matchCount > 0 ? a.wins / a.matchCount : 0;
-        if (bWinRate !== aWinRate) return bWinRate - aWinRate;
-        if (b.scoreDiff !== a.scoreDiff) return b.scoreDiff - a.scoreDiff;
-        return String(a.name).localeCompare(String(b.name));
-    });
+    // AI에게 전달할 데이터 구조화 (더 상세한 회차별 분석을 위해)
+    // [전략 변경] 과거 시점 복구 대신, 현재의 최신 누적 성적과 랭킹을 기반으로 데이터 추출
+    // 사용자 요청: "최신의 누적결과를 바탕으로 가장 최근의 회차를 분석"
+
+    const startRatings = sessionStartRatings[targetSession] || {};
+    const endRatings = sessionEndRatings[targetSession] || members.reduce((acc, m) => { acc[m.id] = m.rating; return acc; }, {});
+
+    // 전체 멤버를 현재 랭킹 순서대로 정렬하여 추출
+    const snapshotMembers = members
+        .filter(m => m.matchCount > 0)
+        .map(m => {
+            return {
+                ...m,
+                snapshotRating: Math.round(m.rating),
+                snapshotWins: m.wins,
+                snapshotDraws: m.draws,
+                snapshotLosses: m.losses,
+                snapshotScoreDiff: m.scoreDiff,
+                snapshotRank: rankMap.get(String(m.id)) || 999
+            };
+        })
+        .sort((a, b) => a.snapshotRank - b.snapshotRank);
+
+    // 1. 해당 회차에서의 선수별 요약 성적 계산
+    const todayPerformance = snapshotMembers.map(m => {
+        const sMatches = sessionMatches.filter(match => match.t1_ids.concat(match.t2_ids).includes(m.id));
+        if (sMatches.length === 0) return null;
+
+        const wins = sMatches.filter(match => {
+            const isT1 = match.t1_ids.includes(m.id);
+            return isT1 ? match.score1 > match.score2 : match.score2 > match.score1;
+        }).length;
+        const draws = sMatches.filter(match => match.score1 === match.score2).length;
+        const losses = sMatches.length - wins - draws;
+
+        const startR = startRatings[m.id] || ELO_INITIAL;
+        const endR = endRatings[m.id] || ELO_INITIAL;
+        const ratingDiff = endR - startR;
+
+        return {
+            name: m.name,
+            record: `${wins}승 ${draws}무 ${losses}패`,
+            ratingChange: (ratingDiff > 0 ? '+' : '') + Math.round(ratingDiff),
+            scoreDiff: sMatches.reduce((acc, match) => {
+                const isT1 = match.t1_ids.includes(m.id);
+                return acc + (isT1 ? match.score1 - match.score2 : match.score2 - match.score1);
+            }, 0)
+        };
+    }).filter(Boolean).sort((a, b) => parseFloat(b.ratingChange) - parseFloat(a.ratingChange));
 
     const reportData = {
         title: `ACE 테니스 클럽 제 ${targetSession}회차 랭킹전 결과`,
         sessionNumber: targetSession,
-        sessionDate: new Date().toLocaleDateString('ko-KR'), // 현재 날짜 추가
+        sessionDate: new Date().toLocaleDateString('ko-KR'),
+        // 오늘의 경기 결과 (상세)
         matchResults: sessionMatches.map(m => ({
             round: m.groupRound ? `${m.groupRound}회전` : '기타',
             team1: m.t1_names.join(', '),
@@ -469,30 +509,35 @@ async function handleCopyAIData() {
             score: `${m.score1}:${m.score2}`,
             winner: m.score1 > m.score2 ? 'Team 1' : (m.score2 > m.score1 ? 'Team 2' : 'Draw')
         })),
-        rankingBoard: sortedMembers.map((m, i) => ({
-            rank: i + 1,
+        // 오늘 하루만의 성적 (레이팅 변동순 정렬)
+        todayPerformance: todayPerformance,
+        // [타임머신] 해당 회차 종료 시점의 누적 랭킹 보드
+        cumulativeRankingAtSnapshot: snapshotMembers.map(m => ({
+            rank: m.snapshotRank,
             name: m.name,
-            elo: Math.round(m.rating),
-            record: `${m.wins}승 ${m.draws}무 ${m.losses}패`,
-            winRate: m.matchCount > 0 ? Math.round((m.wins / m.matchCount) * 100) + '%' : '0%',
-            scoreDiff: m.scoreDiff
+            elo: Math.round(m.snapshotRating),
+            overallRecord: `${m.snapshotWins}승 ${m.snapshotDraws}무 ${m.snapshotLosses}패`
         }))
     };
 
     const prompt = `
-# 역할: 평촌ACE 테니스 클럽 전속 위트 있는 스포츠 캐스터
-# 목표: 아래 제공된 랭킹전 데이터를 분석하여 회원들의 흥미를 유발하는 역동적인 요약 리포트 작성
+# 역할: 평촌ACE 수석 데이터 분석관 (Senior Data Analyst)
+# 목표: 제공된 [경기 데이터]를 바탕으로 전력 분석 리포트를 작성하십시오.
 
-## 분석 대상 데이터
+## 분석 지침
+1. **데이터 기반 통찰**: 'todayPerformance' 선수들의 승률, 점수 차, 레이팅 변화를 객관적으로 분석하십시오.
+2. **핵심 분석 대상**: 오늘 경기에 출전한 선수들의 기술적 우위나 전략적 포인트를 설명하십시오. (미참여 선수는 개별 언급 제외)
+3. **리포트 구성**:
+    - **세션 총평**: 오늘의 전반적인 경기 수준과 랭킹 구도의 특징.
+    - **전력 분석**: 두드러진 활약을 보인 선수들의 지표상 강점 분석.
+    - **향후 전망**: 현재의 기세가 다음 회차 랭킹에 미칠 영향 예측.
+4. **톤앤매너**: 분석 전문가답게 냉철하면서도 신뢰감 있는 문체를 사용하되, 회원들이 즐길 수 있도록 한 스푼의 위트와 유머러스함을 섞으십시오.
+5. **모바일 최적화**: 화면이 작은 모바일에서도 한눈에 읽히도록 간결한 문장과 리스트 형식을 사용하십시오. (가로가 너무 긴 표는 지양)
+
+## 분석 데이터 (JSON)
 ${JSON.stringify(reportData, null, 2)}
 
-## 리포트 작성 가이드라인
-- 말투: 격식은 차리되 위트 있고 약간의 '도발'과 '칭찬'을 섞은 전문 캐스터 톤.
-- 이모지(Emoji)를 적절히 활용하여 가독성을 높일 것.
-- 단순히 점수만 나열하지 말고, 해당 선수의 활약상에 '별명'이나 '스토리'를 부여할 것.
-- 마지막에 회차와 날짜를 포함할 것.
-
-작성된 마크다운 리포트를 즉시 출력해주세요.
+작성된 전문 분석 리포트 본문만을 즉시 출력하십시오.
 `;
 
     try {
@@ -504,8 +549,9 @@ ${JSON.stringify(reportData, null, 2)}
     }
 }
 
-window.renderCasterReport = () => {
-    renderCasterReport({ reports, matchHistory, isAdmin });
+window.renderAnalystReport = () => {
+    // ui.js에서 임포트된 renderAnalystReport를 명시적으로 호출 (무한 루프 방지)
+    renderAnalystReport({ reports, matchHistory, isAdmin });
 };
 
 function renderApplicants() {
@@ -914,8 +960,10 @@ async function handleRestoreCsv() {
         const file = fileInput.files[0];
         // 한글 깨짐 방지를 위한 인코딩 처리 (UTF-8 시도 후 실패 시 EUC-KR 시도)
         let text = await file.text();
-        if (text.includes('') || !/[가-힣]/.test(text)) {
-            console.log("[Restore] UTF-8 decoding may have failed. Retrying with EUC-KR...");
+
+        // v7.6: UTF-8 디코딩 시 깨짐 현상()이 있거나 한글이 감지되지 않으면 EUC-KR로 재시도
+        if (text.includes('\ufffd') || !/[가-힣]/.test(text)) {
+            console.log("[Restore] Potential encoding issue detected. Retrying with EUC-KR...");
             text = await new Promise((resolve) => {
                 const reader = new FileReader();
                 reader.onload = (e) => resolve(e.target.result);
@@ -936,12 +984,24 @@ async function handleRestoreCsv() {
         const nameSet = new Set();
 
         dataRows.forEach((line, idx) => {
-            // 따옴표 내 쉼표 처리 (예: "홍길동,김철수")
-            const parts = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g);
-            if (!parts || parts.length < 6) return; // 필수 항목 부족
+            // v7.5: 정규표현식 대신 따옴표를 인식하는 Robust한 CSV 파싱 로직 도입
+            const parts = [];
+            let current = '';
+            let inQuotes = false;
+            for (let i = 0; i < line.length; i++) {
+                const char = line[i];
+                if (char === '"') inQuotes = !inQuotes;
+                else if (char === ',' && !inQuotes) {
+                    parts.push(current.trim());
+                    current = '';
+                } else current += char;
+            }
+            parts.push(current.trim());
+
+            if (parts.length < 6) return; // 필수 항목 부족
 
             const sessionNum = parseInt(parts[0]) || 0;
-            const date = parts[1];
+            const date = parts[1].replace(/"/g, '').trim();
             const t1_names = parts[2].replace(/"/g, '').split(',').map(n => n.trim());
             const t2_names = parts[3].replace(/"/g, '').split(',').map(n => n.trim());
             const score1 = parseInt(parts[4]) || 0;

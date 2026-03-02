@@ -147,6 +147,31 @@ export function recalculateAll(context) {
                     else { p.draws++; }
                 });
             });
+
+            // [핵심 개선] 세션 경기 처리 후(종료 시점)의 랭킹 스냅샷 기록
+            // 대시보드와 동일한 정렬 로직 적용
+            const sessionEndSorted = [...members].sort((a, b) => {
+                const aActive = a.matchCount > 0;
+                const bActive = b.matchCount > 0;
+                if (aActive !== bActive) return bActive ? 1 : -1;
+
+                if (b.rating !== a.rating) return b.rating - a.rating;
+                if (b.wins !== a.wins) return b.wins - a.wins;
+                const bWinRate = b.matchCount > 0 ? b.wins / b.matchCount : 0;
+                const aWinRate = a.matchCount > 0 ? a.wins / a.matchCount : 0;
+                if (bWinRate !== aWinRate) return bWinRate - aWinRate;
+                if (b.scoreDiff !== a.scoreDiff) return b.scoreDiff - a.scoreDiff;
+                return String(a.name).localeCompare(String(b.name));
+            });
+
+            sessionRankSnapshots[sId] = {};
+            sessionEndSorted.forEach((m, idx) => {
+                sessionRankSnapshots[sId][m.id] = idx + 1;
+            });
+
+            // 세션 종료 시점의 레이팅 기록
+            if (!context.sessionEndRatings) context.sessionEndRatings = {};
+            context.sessionEndRatings[sId] = members.reduce((acc, m) => { acc[m.id] = m.rating; return acc; }, {});
         });
 
         const currentRanking = [...members].sort((a, b) => {
