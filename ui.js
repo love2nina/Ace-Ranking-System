@@ -1036,7 +1036,6 @@ export function renderPlayerTrend(context) {
                 ]
             },
             options: {
-                responsive: true,
                 maintainAspectRatio: false,
                 scales: {
                     y: {
@@ -1049,4 +1048,107 @@ export function renderPlayerTrend(context) {
             }
         });
     }
+}
+
+export function renderCasterReport(context) {
+    const { reports, matchHistory, isAdmin } = context;
+    const contentArea = document.getElementById('casterReportContent');
+    const select = document.getElementById('reportSessionSelect');
+    if (!contentArea || !select) return;
+
+    // 회차 목록 업데이트 (한 번만)
+    const uniqueSessions = [...new Set(matchHistory.map(h => String(h.sessionNum)))].sort((a, b) => parseInt(b) - parseInt(a));
+    const currentOptions = Array.from(select.options).map(opt => opt.value);
+
+    uniqueSessions.forEach(sNum => {
+        if (!currentOptions.includes(sNum)) {
+            const opt = document.createElement('option');
+            opt.value = sNum;
+            opt.text = `제 ${sNum}회차`;
+            select.add(opt);
+        }
+    });
+
+    const targetSession = select.value || (uniqueSessions.length > 0 ? uniqueSessions[0] : null);
+
+    if (!targetSession) {
+        contentArea.innerHTML = '<p style="text-align:center; color:var(--text-secondary); padding:40px;">등록된 경기 기록이 없습니다.</p>';
+        return;
+    }
+
+    // 선택 박스 동기화 (초기 렌더링 시 최신 회차 선택)
+    if (!select.value && targetSession) select.value = targetSession;
+
+    const report = reports[targetSession];
+    if (!report) {
+        contentArea.innerHTML = `
+            <div style="text-align:center; padding:60px 20px; color:var(--text-secondary); background:rgba(255,255,255,0.02); border-radius:12px; border:1px dashed rgba(255,255,255,0.1);">
+                <div style="font-size:3rem; margin-bottom:20px; opacity:0.5;">🎤</div>
+                <h3 style="font-weight:400;">제 ${targetSession}회차 리포트가 아직 없습니다.</h3>
+                <p style="font-size:0.9rem; opacity:0.7;">관리자가 리포트를 작성 중일 수 있습니다.</p>
+            </div>
+        `;
+    } else {
+        // 심플 마크다운 렌더링
+        contentArea.innerHTML = `
+            <div class="markdown-body">
+                ${parseMarkdown(report)}
+            </div>
+        `;
+    }
+
+    // 관리자 입력창 회차 동기화
+    if (isAdmin) {
+        const postInput = document.getElementById('reportPostSessionNum');
+        if (postInput && !postInput.value) postInput.value = targetSession;
+    }
+}
+
+function parseMarkdown(text) {
+    if (!text) return "";
+
+    // 이스케이프 및 기본 치환
+    let html = text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+
+    // 헤더
+    html = html.replace(/^### (.*$)/gim, '<h4 style="color:var(--accent-color); margin:20px 0 10px 0;">$1</h4>');
+    html = html.replace(/^## (.*$)/gim, '<h3 style="color:var(--accent-color); border-bottom:1px solid var(--border-color); padding-bottom:10px; margin:30px 0 15px 0;">$1</h3>');
+    html = html.replace(/^# (.*$)/gim, '<h2 style="text-align:center; color:var(--accent-color); margin-bottom:30px;">$1</h2>');
+
+    // 강조
+    html = html.replace(/\*\*(.*)\*\*/gim, '<strong>$1</strong>');
+    html = html.replace(/\*(.*)\*/gim, '<em>$1</em>');
+
+    // 수평선
+    html = html.replace(/^---$/gim, '<hr style="border:0; border-top:1px solid var(--border-color); margin:30px 0;">');
+
+    // 테이블 (심플 버전)
+    const lines = html.split('\n');
+    let inTable = false;
+
+    const processedLines = lines.map(line => {
+        if (line.includes('|')) {
+            const cells = line.split('|').filter(c => c.trim() !== '' || line.trim().startsWith('|') || line.trim().endsWith('|')).map(c => c.trim());
+            // 구분선 행 제외
+            if (cells.every(c => c.match(/^[-:| ]+$/))) return "";
+
+            if (!inTable) {
+                inTable = true;
+                return '<div class="table-responsive"><table><thead><tr>' + cells.map(c => `<th>${c}</th>`).join('') + '</tr></thead><tbody>';
+            } else {
+                return '<tr>' + cells.map(c => `<td>${c}</td>`).join('') + '</tr>';
+            }
+        } else {
+            if (inTable) {
+                inTable = false;
+                return '</tbody></table></div>' + line;
+            }
+            return line + '<br>';
+        }
+    });
+
+    return processedLines.join('\n');
 }

@@ -23,6 +23,7 @@ let activeGroupTab = 'A';
 let editingMatchId = null;
 let sessionNum = 1;
 let currentSessionState = { status: 'idle', sessionNum: 0, matchMode: 'court' };
+let reports = {}; // 회차별 리포트 데이터
 let eloChart = null;
 let trendChart = null;
 let rankMap = new Map(); // 현재 랭킹 순위 저장용
@@ -51,7 +52,8 @@ import {
     renderStatsDashboard as uiRenderStatsDashboard,
     renderEloChart as uiRenderEloChart,
     updatePlayerSelect as uiUpdatePlayerSelect,
-    renderPlayerTrend as uiRenderPlayerTrend
+    renderPlayerTrend as uiRenderPlayerTrend,
+    renderCasterReport
 } from './ui.js';
 import {
     initFirebase as fbInitFirebase,
@@ -64,7 +66,8 @@ import {
     getCurrentClubId as fbGetCurrentClubId,
     getSystemSettings as fbGetSystemSettings,
     getDb as fbGetDb,
-    initNewClusterSession as fbInitNewClusterSession
+    initNewClusterSession as fbInitNewClusterSession,
+    saveReport as fbSaveReport
 } from './firebase-api.js';
 // --- 설정 및 상수 ---
 // engine.js 로 분리됨
@@ -89,6 +92,7 @@ function initFirebase() {
             currentSchedule = data.currentSchedule || [];
             sessionNum = data.sessionNum || 1;
             applicants = data.applicants || [];
+            reports = data.reports || {};
             recalculateAll();
             updateUI();
         },
@@ -127,7 +131,7 @@ function initFirebase() {
 }
 
 window.saveToCloud = async (caller = 'unknown') => {
-    await fbSaveToCloud({ members, matchHistory, currentSchedule, sessionNum, applicants }, caller);
+    await fbSaveToCloud({ members, matchHistory, currentSchedule, sessionNum, applicants, reports }, caller);
 };
 
 // --- 관리자 인증 로직 ---
@@ -174,6 +178,8 @@ function initUIEvents() {
         alert('조편성 구성이 저장되었습니다. 모든 사용자에게 실시간 반영됩니다.');
         renderApplicants();
     });
+    bindClick('saveReportBtn', handleSaveReport);
+    bindClick('copyAIBtn', handleCopyAIData);
 
     const splitInput = document.getElementById('customSplitInput');
     if (splitInput) splitInput.oninput = validateCustomSplit;
@@ -400,7 +406,107 @@ function updateUI() {
     updateStatistics(); // 통계 업데이트 추가
     renderStatsDashboard(); // 대시보드 렌더링 엔진 가동
     renderSessionStatus(); // 세션 상태 렌더링 추가
+    window.renderCasterReport(); // 리포트 렌더링 추가
 }
+async function handleSaveReport() {
+    if (!isAdmin) return;
+    const sessNum = document.getElementById('reportPostSessionNum').value;
+    const content = document.getElementById('reportPostContent').value.trim();
+
+    if (!sessNum || !content) {
+        alert('회차 번호와 리포트 내용을 입력해주세요.');
+        return;
+    }
+
+    if (confirm(`제 ${sessNum}회차 리포트를 게시하시겠습니까?`)) {
+        try {
+            await fbSaveReport(sessNum, content);
+            alert('리포트가 게시되었습니다!');
+            document.getElementById('reportPostContent').value = '';
+        } catch (e) {
+            alert('게시 실패: ' + e.message);
+        }
+    }
+}
+
+async function handleCopyAIData() {
+    const select = document.getElementById('reportSessionSelect');
+    const targetSession = select ? select.value : currentSessionState.sessionNum;
+
+    if (!targetSession) {
+        alert('분석할 회차를 선택해주세요.');
+        return;
+    }
+
+    // 해당 회차의 경기 필터링
+    const sessionMatches = matchHistory.filter(m => String(m.sessionNum) === String(targetSession));
+
+    if (sessionMatches.length === 0) {
+        alert('해당 회차의 경기 결과가 없습니다.');
+        return;
+    }
+
+    // AI에게 전달할 데이터 구조화 (프롬프트 포함)
+    // 랭킹 정렬 로직 동기화 (대시보드와 동일)
+    const sortedMembers = [...members].filter(m => m.matchCount > 0).sort((a, b) => {
+        if (b.rating !== a.rating) return b.rating - a.rating;
+        if (b.wins !== a.wins) return b.wins - a.wins;
+        const bWinRate = b.matchCount > 0 ? b.wins / b.matchCount : 0;
+        const aWinRate = a.matchCount > 0 ? a.wins / a.matchCount : 0;
+        if (bWinRate !== aWinRate) return bWinRate - aWinRate;
+        if (b.scoreDiff !== a.scoreDiff) return b.scoreDiff - a.scoreDiff;
+        return String(a.name).localeCompare(String(b.name));
+    });
+
+    const reportData = {
+        title: `ACE 테니스 클럽 제 ${targetSession}회차 랭킹전 결과`,
+        sessionNumber: targetSession,
+        sessionDate: new Date().toLocaleDateString('ko-KR'), // 현재 날짜 추가
+        matchResults: sessionMatches.map(m => ({
+            round: m.groupRound ? `${m.groupRound}회전` : '기타',
+            team1: m.t1_names.join(', '),
+            team2: m.t2_names.join(', '),
+            score: `${m.score1}:${m.score2}`,
+            winner: m.score1 > m.score2 ? 'Team 1' : (m.score2 > m.score1 ? 'Team 2' : 'Draw')
+        })),
+        rankingBoard: sortedMembers.map((m, i) => ({
+            rank: i + 1,
+            name: m.name,
+            elo: Math.round(m.rating),
+            record: `${m.wins}승 ${m.draws}무 ${m.losses}패`,
+            winRate: m.matchCount > 0 ? Math.round((m.wins / m.matchCount) * 100) + '%' : '0%',
+            scoreDiff: m.scoreDiff
+        }))
+    };
+
+    const prompt = `
+# 역할: 평촌ACE 테니스 클럽 전속 위트 있는 스포츠 캐스터
+# 목표: 아래 제공된 랭킹전 데이터를 분석하여 회원들의 흥미를 유발하는 역동적인 요약 리포트 작성
+
+## 분석 대상 데이터
+${JSON.stringify(reportData, null, 2)}
+
+## 리포트 작성 가이드라인
+- 말투: 격식은 차리되 위트 있고 약간의 '도발'과 '칭찬'을 섞은 전문 캐스터 톤.
+- 이모지(Emoji)를 적절히 활용하여 가독성을 높일 것.
+- 단순히 점수만 나열하지 말고, 해당 선수의 활약상에 '별명'이나 '스토리'를 부여할 것.
+- 마지막에 회차와 날짜를 포함할 것.
+
+작성된 마크다운 리포트를 즉시 출력해주세요.
+`;
+
+    try {
+        await navigator.clipboard.writeText(prompt.trim());
+        alert('AI 분석용 데이터와 프롬프트가 클립보드에 복사되었습니다!\nGemini나 ChatGPT에 붙여넣어 리포트를 생성하세요.');
+    } catch (err) {
+        console.error('클립보드 복사 실패:', err);
+        alert('복사 중 오류가 발생했습니다.');
+    }
+}
+
+window.renderCasterReport = () => {
+    renderCasterReport({ reports, matchHistory, isAdmin });
+};
 
 function renderApplicants() {
     uiRenderApplicants({

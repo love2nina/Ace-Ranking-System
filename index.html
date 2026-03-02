@@ -35,6 +35,7 @@
         <!-- 탭 네비게이션 -->
         <div class="tab-container">
             <button class="tab-btn active" data-tab="stats" onclick="switchTab('stats')">대시보드</button>
+            <button class="tab-btn" data-tab="caster" onclick="switchTab('caster')">중계석</button>
             <button class="tab-btn" data-tab="rank" onclick="switchTab('rank')">종합랭킹</button>
             <button class="tab-btn" data-tab="apply" onclick="switchTab('apply')">참가신청</button>
             <button class="tab-btn" data-tab="match" onclick="switchTab('match')">대진표</button>
@@ -274,6 +275,45 @@
                 </div>
                 <div style="height: 300px; position: relative;">
                     <canvas id="trendChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- 6. 캐스터 중계석 섹션 -->
+        <div id="tab-caster" class="tab-content">
+            <div class="card caster-card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h3 style="color: var(--accent-color);">🎙️ 캐스터 중계석</h3>
+                    <select id="reportSessionSelect" style="max-width: 150px; font-size: 0.85rem;"
+                        onchange="renderCasterReport()">
+                        <option value="">회차 선택</option>
+                    </select>
+                </div>
+
+                <div id="casterReportContent" class="report-display-area">
+                    <p style="text-align: center; color: var(--text-secondary); padding: 40px;">리포트를 불러오는 중입니다...</p>
+                </div>
+
+                <!-- Admin Report Post Area -->
+                <div class="admin-only"
+                    style="display: none; margin-top: 30px; padding-top: 20px; border-top: 1px dashed var(--border-color);">
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <h4 style="color: var(--accent-color); margin: 0;">👮 리포트 게시 (관리자)</h4>
+                        <button id="copyAIBtn" class="secondary" style="font-size: 0.75rem; padding: 5px 10px;">📋 AI
+                            분석용 데이터 복사</button>
+                    </div>
+                    <div style="margin-bottom: 10px; display: flex; gap: 10px; align-items: center;">
+                        <span style="font-size: 0.9rem;">대상 회차:</span>
+                        <input type="number" id="reportPostSessionNum" style="width: 80px; text-align: center;"
+                            placeholder="N">
+                    </div>
+                    <textarea id="reportPostContent"
+                        style="width: 100%; height: 200px; padding: 12px; font-family: inherit; font-size: 0.9rem; margin-bottom: 10px;"
+                        placeholder="AI가 생성한 리포트 내용을 여기에 붙여넣으세요..."></textarea>
+                    <button id="saveReportBtn"
+                        style="width: 100%; background: var(--accent-color); color: #0f172a; font-weight: bold;">리포트
+                        게시하기</button>
                 </div>
             </div>
         </div>

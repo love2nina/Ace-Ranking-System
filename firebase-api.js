@@ -7,7 +7,7 @@ let currentDbName = '';
 let currentClubId = 'Default';
 let clusterUnsubscribe = null;
 let statusUnsubscribe = null;
-let systemSettings = { admin_pw: "ace_admin" };
+let systemSettings = { admin_pw: "ace_dot" };
 
 // 콜백 저장소 (app.js에서 주입)
 let _callbacks = {};
@@ -257,7 +257,8 @@ export async function saveToCloud(appState, caller = 'unknown') {
             matchHistory: appState.matchHistory,
             currentSchedule: appState.currentSchedule,
             sessionNum: appState.sessionNum,
-            applicants: appState.applicants
+            applicants: appState.applicants,
+            reports: appState.reports || {}
         });
     } catch (e) {
         console.error("Cloud Error:", e);
@@ -350,5 +351,31 @@ export async function initNewClusterSession(sessionStatusDocPath, initialState) 
         await setDoc(doc(db, sessionStatusDocPath), initialState);
     } catch (e) {
         console.error("Init New Cluster Session Error:", e);
+    }
+}
+
+/**
+ * 중계석 리포트 저장
+ * @param {number} sessionNum 
+ * @param {string} content 
+ */
+export async function saveReport(sessionNum, content) {
+    try {
+        const { doc, getDoc, updateDoc } = window.FB_SDK;
+        const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
+        const docRef = doc(db, clusterPath, currentDbName);
+
+        const snap = await getDoc(docRef);
+        let reports = {};
+        if (snap.exists() && snap.data().reports) {
+            reports = snap.data().reports;
+        }
+
+        reports[String(sessionNum)] = content;
+        await updateDoc(docRef, { reports });
+        console.log(`[Firebase] Report saved for session ${sessionNum}`);
+    } catch (e) {
+        console.error("Save Report Error:", e);
+        throw e;
     }
 }
