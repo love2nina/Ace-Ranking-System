@@ -623,6 +623,14 @@ td {
     margin-left: 4px;
 }
 
+.ranking-footer-note {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    text-align: center;
+    margin-top: 15px;
+    opacity: 0.8;
+}
+
 /* Form (L5) Styles */
 .form-container {
     display: flex;

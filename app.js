@@ -486,8 +486,13 @@ async function handleCopyAIData() {
         const endR = endRatings[m.id] || ELO_INITIAL;
         const ratingDiff = endR - startR;
 
+        // [정교화] 해당 분석 회차가 선수의 첫 출전인지 판별
+        const isNewInThisSession = m.participationArr && m.participationArr.length > 0 &&
+            Math.min(...m.participationArr.map(s => parseInt(s))) === parseInt(targetSession);
+        const displayName = m.name + (isNewInThisSession ? " (NEW)" : "");
+
         return {
-            name: m.name,
+            name: displayName,
             record: `${wins}승 ${draws}무 ${losses}패`,
             ratingChange: (ratingDiff > 0 ? '+' : '') + Math.round(ratingDiff),
             scoreDiff: sMatches.reduce((acc, match) => {
@@ -512,12 +517,16 @@ async function handleCopyAIData() {
         // 오늘 하루만의 성적 (레이팅 변동순 정렬)
         todayPerformance: todayPerformance,
         // [타임머신] 해당 회차 종료 시점의 누적 랭킹 보드
-        cumulativeRankingAtSnapshot: snapshotMembers.map(m => ({
-            rank: m.snapshotRank,
-            name: m.name,
-            elo: Math.round(m.snapshotRating),
-            overallRecord: `${m.snapshotWins}승 ${m.snapshotDraws}무 ${m.snapshotLosses}패`
-        }))
+        cumulativeRankingAtSnapshot: snapshotMembers.map(m => {
+            const isNewInThisSession = m.participationArr && m.participationArr.length > 0 &&
+                Math.min(...m.participationArr.map(s => parseInt(s))) === parseInt(targetSession);
+            return {
+                rank: m.snapshotRank,
+                name: m.name + (isNewInThisSession ? " (NEW)" : ""),
+                elo: Math.round(m.snapshotRating),
+                overallRecord: `${m.snapshotWins}승 ${m.snapshotDraws}무 ${m.snapshotLosses}패`
+            };
+        })
     };
 
     const prompt = `
@@ -529,14 +538,17 @@ async function handleCopyAIData() {
 2. **핵심 분석 대상**: 오늘 경기에 출전한 선수들의 기술적 우위나 전략적 포인트를 설명하십시오. (미참여 선수는 개별 언급 제외)
 3. **리포트 구성**:
     - **세션 총평**: 오늘의 전반적인 경기 수준과 랭킹 구도의 특징.
-    - **전력 분석**: 두드러진 활약을 보인 선수들의 지표상 강점 분석.
+    - **전력 분석**: 두드러진 활약을 보인 선수(특히 신규 회원 포함)의 지표상 강점 분석.
     - **향후 전망**: 현재의 기세가 다음 회차 랭킹에 미칠 영향 예측.
-4. **톤앤매너**: 분석 전문가답게 냉철하면서도 신뢰감 있는 문체를 사용하되, 회원들이 즐길 수 있도록 한 스푼의 위트와 유머러스함을 섞으십시오.
+4. **톤앤매너**: 분석 전문성이 느껴지는 진중하고 신뢰감 있는 문체. 유머러스함과 위트를 섞으십시오.
 5. **모바일 최적화**: 화면이 작은 모바일에서도 한눈에 읽히도록 간결한 문장과 리스트 형식을 사용하십시오. (가로가 너무 긴 표는 지양)
 
-## 분석 데이터 (JSON)
+## [경기 데이터]
+\`\`\`json
 ${JSON.stringify(reportData, null, 2)}
+\`\`\`
 
+---
 작성된 전문 분석 리포트 본문만을 즉시 출력하십시오.
 `;
 
@@ -894,7 +906,7 @@ async function saveEdit() {
 }
 
 function renderRanking() {
-    uiRenderRanking({ members, matchHistory, rankMap, currentSessionState });
+    uiRenderRanking({ members, matchHistory, rankMap, currentSessionState, applicants, currentSchedule });
 }
 
 window.switchTab = (id) => {

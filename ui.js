@@ -794,11 +794,39 @@ export function toggleHistoryContent(header) {
 }
 
 export function renderRanking(context) {
-    const { members, matchHistory, rankMap, currentSessionState } = context;
+    const { members, matchHistory, rankMap, currentSessionState, applicants, currentSchedule } = context;
     const tbody = document.querySelector('#rankingTable tbody'); if (!tbody) return;
     tbody.innerHTML = '';
-    const uSess = [...new Set(matchHistory.map(h => (h.sessionNum || '').toString()))].filter(Boolean);
-    const sorted = members.filter(m => m.matchCount > 0).sort((a, b) => {
+
+    // 모든 세션 ID 추출 (오름차순: [1, 2, 3...])
+    const allSessionsSorted = [...new Set(matchHistory.map(h => (h.sessionNum || '').toString()))]
+        .filter(Boolean)
+        .sort((a, b) => parseInt(a) - parseInt(b));
+
+    // 가장 최근 세션 ID (마지막 요소)
+    const latestSessionId = allSessionsSorted[allSessionsSorted.length - 1];
+
+    // 최근 3회차 세션 ID 추출 (내림차순 정렬: [3, 2, 1...])
+    const recent3 = [...allSessionsSorted].reverse().slice(0, 3);
+
+    // 활동성 기반 필터링: 최근 3회차 참여 기록이 있거나, 현재 회차에 참여 중인 회원만 선별
+    const filteredMembers = members.filter(m => {
+        // [수정] 경기를 한 번이라도 치른 선수만 노출 (사용자 요청)
+        if (m.matchCount === 0) return false;
+
+        // 최근 3회차 참여 여부 확인
+        const isRecentlyActive = m.participationArr?.some(s => recent3.includes(s.toString()));
+
+        // 복귀 규칙: 현재 참여 중인 경우 (dormant였더라도) 활성으로 간주
+        const isCurrentParticipant = (applicants && applicants.some(a => String(a.id) === String(m.id))) ||
+            (currentSchedule && currentSchedule.some(match =>
+                [...match.t1, ...match.t2].some(p => String(p.id) === String(m.id))
+            ));
+
+        return isRecentlyActive || isCurrentParticipant;
+    });
+
+    const sorted = filteredMembers.sort((a, b) => {
         if (b.rating !== a.rating) return b.rating - a.rating;
         if (b.wins !== a.wins) return b.wins - a.wins;
         const bWinRate = b.matchCount > 0 ? b.wins / b.matchCount : 0;
@@ -809,16 +837,18 @@ export function renderRanking(context) {
     });
 
     sorted.forEach((p, i) => {
-        const att = ((p.participationArr?.length || 0) / (uSess.length || 1) * 100).toFixed(0);
+        const att = ((p.participationArr?.length || 0) / (allSessionsSorted.length || 1) * 100).toFixed(0);
         const tr = document.createElement('tr');
         const rInfo = rankMap.get(String(p.id));
 
         let rankChangeIcon = '';
         const currentSessionNum = currentSessionState.sessionNum;
-        const isFirstTime = !p.participationArr || p.participationArr.length === 0 ||
-            (p.participationArr.length === 1 && p.participationArr[0].toString() === currentSessionNum.toString());
 
-        if (isFirstTime && p.matchCount > 0) rankChangeIcon = `<span class="rank-new">NEW</span>`;
+        // [정교화] 신규 회원 판별: 참여 세션이 단 하나고, 그게 전체 역사상 마지막 세션인 경우
+        const isFirstTime = p.participationArr && p.participationArr.length === 1 &&
+            p.participationArr[0].toString() === (latestSessionId || '').toString();
+
+        if (isFirstTime) rankChangeIcon = `<span class="rank-new">NEW</span>`;
         else if (rInfo && rInfo.change > 0) rankChangeIcon = `<span class="rank-up">▲${rInfo.change}</span>`;
         else if (rInfo && rInfo.change < 0) rankChangeIcon = `<span class="rank-down">▼${Math.abs(rInfo.change)}</span>`;
 
@@ -835,6 +865,21 @@ export function renderRanking(context) {
         `;
         tbody.appendChild(tr);
     });
+
+    // 랭킹 보드 하단 안내 문구 추가
+    let footerNote = document.getElementById('rankingFooterNote');
+    if (!footerNote) {
+        footerNote = document.createElement('div');
+        footerNote.id = 'rankingFooterNote';
+        footerNote.className = 'ranking-footer-note';
+        const tableResponsive = tbody.closest('.table-responsive');
+        if (tableResponsive) {
+            tableResponsive.parentNode.appendChild(footerNote);
+        }
+    }
+    if (footerNote) {
+        footerNote.innerText = "※ 최근 3회차 연속 불참자는 순위에서 제외됩니다.";
+    }
 }
 
 export function switchTab(id, context) {
