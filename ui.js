@@ -1,3 +1,5 @@
+import { calculateBadges, getPlayerInsights } from './statsService.js';
+
 export function updateAdminUI(context) {
     const { isAdmin } = context;
     const status = document.getElementById('adminLoginBtn');
@@ -925,7 +927,175 @@ export function renderStatsDashboard(context) {
         renderEloChart(context);
         updatePlayerSelect(context);
         renderPlayerTrend(context);
+
+        // [추가] 고도화 통계 렌더링
+        renderBadgeHall(context);
+        updateInsightPlayerSelect(context);
     }
+}
+
+/**
+ * 🏆 명예의 전당 (Badge Hall) 렌더링
+ */
+export function renderBadgeHall(context) {
+    const { members, matchHistory } = context;
+    const badgeContainer = document.getElementById('badgeGrid');
+    if (!badgeContainer) return;
+
+    const badges = calculateBadges(members, matchHistory);
+
+    const badgeHTML = `
+        <div class="stat-card badge-card">
+            <div class="card-icon">🥇</div>
+            <div class="card-content">
+                <h3>베이글 장인</h3>
+                <p class="card-desc">6:0 완승 기록 보유자</p>
+                <div class="player-list">
+                    ${badges.bagelMasters.length > 0
+            ? badges.bagelMasters.map(name => `<span class="player-name">${name}</span>`).join('')
+            : '<span class="empty-msg">대상자 없음</span>'}
+                </div>
+            </div>
+        </div>
+        <div class="stat-card badge-card">
+            <div class="card-icon">🔥</div>
+            <div class="card-content">
+                <h3>불타는 연승</h3>
+                <p class="card-desc">현재 3연승 이상 순항 중</p>
+                <div class="player-list">
+                    ${badges.hotStreaks.length > 0
+            ? badges.hotStreaks.map(name => `<span class="player-name">${name}</span>`).join('')
+            : '<span class="empty-msg">대상자 없음</span>'}
+                </div>
+            </div>
+        </div>
+        <div class="stat-card badge-card">
+            <div class="card-icon">🛡️</div>
+            <div class="card-content">
+                <h3>늪지대 방어군</h3>
+                <p class="card-desc">끈질긴 5:5 무승부 최다</p>
+                <div class="player-list">
+                    ${badges.swampGuards.length > 0
+            ? badges.swampGuards.map(name => `<span class="player-name">${name}</span>`).join('')
+            : '<span class="empty-msg">대상자 없음</span>'}
+                </div>
+            </div>
+        </div>
+        <div class="stat-card badge-card">
+            <div class="card-icon">🏋️‍♂️</div>
+            <div class="card-content">
+                <h3>코트의 철인</h3>
+                <p class="card-desc">최다 매치 소화 리스펙</p>
+                <div class="player-list">
+                    ${badges.ironMen.length > 0
+            ? badges.ironMen.map(name => `<span class="player-name">${name}</span>`).join('')
+            : '<span class="empty-msg">대상자 없음</span>'}
+                </div>
+            </div>
+        </div>
+    `;
+    badgeContainer.innerHTML = badgeHTML;
+}
+
+/**
+ * 🔍 개인 통계 선수 선택 업데이트
+ */
+export function updateInsightPlayerSelect(context) {
+    const { members } = context;
+    const select = document.getElementById('insightPlayerSelect');
+    if (!select) return;
+
+    // 초기화 및 정렬
+    const currentVal = select.value;
+    select.innerHTML = '<option value="" disabled selected>선수 선택</option>';
+
+    const activeMembers = members.filter(m => m.matchCount > 0).sort((a, b) => a.name.localeCompare(b.name));
+    activeMembers.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        opt.innerText = m.name;
+        select.appendChild(opt);
+    });
+
+    // 이벤트 리스너 (중복 방지)
+    select.onchange = () => renderPlayerInsights(select.value, context);
+
+    // 기본값 설정 (최상위 랭커)
+    if (!currentVal && activeMembers.length > 0) {
+        const topPlayer = [...activeMembers].sort((a, b) => b.rating - a.rating)[0];
+        select.value = topPlayer.id;
+        renderPlayerInsights(topPlayer.id, context);
+    } else if (currentVal) {
+        select.value = currentVal;
+        renderPlayerInsights(currentVal, context);
+    }
+}
+
+/**
+ * 🔍 개인별 인맥 통계 (User Insights) 렌더링
+ */
+export function renderPlayerInsights(playerId, context) {
+    const { members, matchHistory } = context;
+    const insightContainer = document.getElementById('insightGrid');
+    if (!insightContainer) return;
+
+    const insights = getPlayerInsights(playerId, members, matchHistory);
+    if (!insights) {
+        insightContainer.innerHTML = '<p class="no-data-msg">데이터 분석 중...</p>';
+        return;
+    }
+
+    const { nemesis, bestPartner, worstPartner } = insights;
+
+    const nemesisHTML = `
+        <div class="stat-card insight-card danger">
+            <div class="card-header">
+                <span class="card-label">주의대상 (천적)</span>
+                <span class="card-emoji">🏹</span>
+            </div>
+            <div class="card-body">
+                <h3>나의 천적</h3>
+                <div class="target-name">${nemesis ? nemesis.name : '---'}</div>
+            </div>
+            <div class="card-footer">
+                ${nemesis ? `${Math.round(nemesis.eloLost)} ELO 탈취당함` : '기록 없음'}
+            </div>
+        </div>
+    `;
+
+    const bestPartnerHTML = `
+        <div class="stat-card insight-card success">
+            <div class="card-header">
+                <span class="card-label">최고승률 파트너</span>
+                <span class="card-emoji">🤝</span>
+            </div>
+            <div class="card-body">
+                <h3>환상의 파트너</h3>
+                <div class="target-name">${bestPartner ? bestPartner.name : '---'}</div>
+            </div>
+            <div class="card-footer">
+                ${bestPartner ? `승률 ${(bestPartner.winRate * 100).toFixed(0)}% / +${Math.round(bestPartner.eloGain)} ELO` : '조건에 맞는 파트너 부족'}
+            </div>
+        </div>
+    `;
+
+    const worstPartnerHTML = `
+        <div class="stat-card insight-card warning">
+            <div class="card-header">
+                <span class="card-label">웃픈조합 파트너</span>
+                <span class="card-emoji">🚫</span>
+            </div>
+            <div class="card-body">
+                <h3>환장하는 파트너</h3>
+                <div class="target-name">${worstPartner ? worstPartner.name : '---'}</div>
+            </div>
+            <div class="card-footer">
+                ${worstPartner ? `${worstPartner.losses}패 / ${Math.round(worstPartner.eloGain)} ELO 손실` : '조건에 맞는 파트너 부족'}
+            </div>
+        </div>
+    `;
+
+    insightContainer.innerHTML = nemesisHTML + bestPartnerHTML + worstPartnerHTML;
 }
 
 let eloChart = null;

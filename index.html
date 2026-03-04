@@ -242,31 +242,35 @@
         </div>
         <!-- 5. 데이터 분석 섹션 -->
         <div id="tab-stats" class="tab-content active">
-            <div class="stats-grid">
-                <div class="card stat-card best-player-card">
-                    <div class="stat-label">👑 최고의 도토리</div>
-                    <div id="statBestPlayer" class="stat-value">---</div>
+            <!-- 🏆 1. 기록 달성 뱃지 섹션 (Badge Hall) -->
+            <section class="dashboard-section">
+                <h3 class="section-title">🏆 명예의 전당 (Badge Hall)</h3>
+                <div id="badgeGrid" class="badge-grid">
+                    <!-- statsService.js 기반으로 동적 생성됨 -->
+                    <p class="loading-msg">데이터 분석 중...</p>
                 </div>
-                <div class="card stat-card shadow-sm">
-                    <div class="stat-label">총 선수</div>
-                    <div id="statTotalPlayers" class="stat-value">0</div>
-                </div>
-                <div class="card stat-card shadow-sm">
-                    <div class="stat-label">대회 횟수</div>
-                    <div id="statTotalSessions" class="stat-value">0</div>
-                </div>
-                <div class="card stat-card shadow-sm">
-                    <div class="stat-label">누적 매치</div>
-                    <div id="statTotalMatches" class="stat-value">0</div>
-                </div>
-            </div>
+            </section>
 
             <div class="card">
-                <h3>📊 도토리 키재기</h3>
+                <h3>📊 도토리 키재기 (실력 분포)</h3>
                 <div style="height: 300px; position: relative;">
                     <canvas id="eloChart"></canvas>
                 </div>
             </div>
+
+            <!-- 🔍 2. 개인별 인맥 통계 섹션 (Personal Insights) -->
+            <section class="dashboard-section">
+                <div class="section-header"
+                    style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3 class="section-title" style="margin-bottom: 0;">🔍 개인 분석 리스트</h3>
+                    <select id="insightPlayerSelect" class="player-select-insight">
+                        <option value="">선수 선택</option>
+                    </select>
+                </div>
+                <div id="insightGrid" class="insight-grid">
+                    <p class="no-data-msg">분석할 선수를 선택해 주세요.</p>
+                </div>
+            </section>
 
             <div class="card">
                 <h3>📈 도토리 성장 추이</h3>

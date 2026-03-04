@@ -918,7 +918,11 @@ function updateStatistics() {
 }
 
 function renderStatsDashboard() {
-    uiRenderStatsDashboard({ actions: { renderEloChart, updatePlayerSelect, renderPlayerTrend: window.renderPlayerTrend } });
+    uiRenderStatsDashboard({
+        members,
+        matchHistory,
+        actions: { renderEloChart, updatePlayerSelect, renderPlayerTrend: window.renderPlayerTrend }
+    });
 }
 
 function renderEloChart() {
