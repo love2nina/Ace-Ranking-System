@@ -1,5 +1,8 @@
 import { calculateBadges, getPlayerInsights } from './statsService.js';
 
+let eloChart = null;
+let trendChart = null;
+
 export function updateAdminUI(context) {
     const { isAdmin } = context;
     const status = document.getElementById('adminLoginBtn');
@@ -945,6 +948,18 @@ export function renderBadgeHall(context) {
     const badges = calculateBadges(members, matchHistory);
 
     const badgeHTML = `
+        <div class="stat-card badge-card accent">
+            <div class="card-icon">💎</div>
+            <div class="card-content">
+                <h3>최고의 도토리</h3>
+                <p class="card-desc">현재 랭킹 1위 (ELO 최고)</p>
+                <div class="player-list">
+                    ${badges.topAcorns.length > 0
+            ? badges.topAcorns.map(name => `<span class="player-name highlight">${name}</span>`).join('')
+            : '<span class="empty-msg">대상자 없음</span>'}
+                </div>
+            </div>
+        </div>
         <div class="stat-card badge-card">
             <div class="card-icon">🥇</div>
             <div class="card-content">
@@ -1017,17 +1032,24 @@ export function updateInsightPlayerSelect(context) {
         select.appendChild(opt);
     });
 
-    // 이벤트 리스너 (중복 방지)
-    select.onchange = () => renderPlayerInsights(select.value, context);
+    // 이벤트 리스너 (중복 방지 및 통합 연동)
+    select.onchange = () => {
+        renderPlayerInsights(select.value, context);
+        if (typeof renderPlayerTrend === 'function') {
+            renderPlayerTrend(context);
+        }
+    };
 
     // 기본값 설정 (최상위 랭커)
     if (!currentVal && activeMembers.length > 0) {
         const topPlayer = [...activeMembers].sort((a, b) => b.rating - a.rating)[0];
         select.value = topPlayer.id;
         renderPlayerInsights(topPlayer.id, context);
+        renderPlayerTrend(context);
     } else if (currentVal) {
         select.value = currentVal;
         renderPlayerInsights(currentVal, context);
+        renderPlayerTrend(context);
     }
 }
 
@@ -1097,9 +1119,6 @@ export function renderPlayerInsights(playerId, context) {
 
     insightContainer.innerHTML = nemesisHTML + bestPartnerHTML + worstPartnerHTML;
 }
-
-let eloChart = null;
-let trendChart = null;
 
 export function renderEloChart(context) {
     const { members } = context;
@@ -1172,7 +1191,7 @@ export function updatePlayerSelect(context) {
 export function renderPlayerTrend(context) {
     const { members, matchHistory, ELO_INITIAL } = context;
     const ctx = document.getElementById('trendChart')?.getContext('2d');
-    const playerId = document.getElementById('playerSelect')?.value;
+    const playerId = document.getElementById('insightPlayerSelect')?.value;
     if (!ctx) return;
 
     if (!playerId) {
@@ -1191,36 +1210,45 @@ export function renderPlayerTrend(context) {
     const sessionIds = [...new Set(matchHistory.map(h => (h.sessionNum || '').toString()))].filter(Boolean).sort((a, b) => parseInt(a) - parseInt(b));
 
     let memberRatingsSim = {};
-    members.forEach(mem => memberRatingsSim[mem.id] = ELO_INITIAL);
+    members.forEach(mem => {
+        if (mem.id) {
+            memberRatingsSim[mem.id.toString()] = ELO_INITIAL;
+        }
+    });
 
     sessionIds.forEach(sId => {
         const sessionMatches = matchHistory.filter(h => (h.sessionNum || '').toString() === sId);
 
         sessionMatches.forEach(h => {
-            const isT1 = h.t1_ids.includes(m.id);
-            const isT2 = h.t2_ids.includes(m.id);
+            const isT1 = h.t1_ids && h.t1_ids.map(id => id.toString()).includes(m.id.toString());
+            const isT2 = h.t2_ids && h.t2_ids.map(id => id.toString()).includes(m.id.toString());
 
-            if (isT1) currentRating += (h.elo_at_match?.change1 || 0);
-            if (isT2) currentRating += (h.elo_at_match?.change2 || 0);
+            if (isT1) currentRating += Number(h.elo_at_match?.change1 || 0);
+            if (isT2) currentRating += Number(h.elo_at_match?.change2 || 0);
 
-            h.t1_ids.forEach(pid => {
-                if (memberRatingsSim[pid] !== undefined) memberRatingsSim[pid] += (h.elo_at_match?.change1 || 0);
+            if (isNaN(currentRating)) currentRating = ELO_INITIAL;
+
+            (h.t1_ids || []).forEach(pid => {
+                const pKey = pid.toString();
+                if (memberRatingsSim[pKey] !== undefined) {
+                    memberRatingsSim[pKey] += Number(h.elo_at_match?.change1 || 0);
+                }
             });
-            h.t2_ids.forEach(pid => {
-                if (memberRatingsSim[pid] !== undefined) memberRatingsSim[pid] += (h.elo_at_match?.change2 || 0);
+            (h.t2_ids || []).forEach(pid => {
+                const pKey = pid.toString();
+                if (memberRatingsSim[pKey] !== undefined) {
+                    memberRatingsSim[pKey] += Number(h.elo_at_match?.change2 || 0);
+                }
             });
         });
 
         labels.push(`${sId}회`);
         data.push(Math.round(currentRating));
 
-        const sum = Object.values(memberRatingsSim).reduce((a, b) => a + b, 0);
-        const avg = sum / members.length;
+        const values = Object.values(memberRatingsSim).filter(v => !isNaN(v));
+        const avg = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : ELO_INITIAL;
         averageData.push(Math.round(avg));
     });
-
-    const allRatings = members.map(m => m.rating);
-    const maxRating = Math.ceil(Math.max(...allRatings, ELO_INITIAL) / 50) * 50 + 50;
 
     if (trendChart) trendChart.destroy();
     if (typeof Chart !== 'undefined') {
@@ -1234,19 +1262,22 @@ export function renderPlayerTrend(context) {
                         data: data,
                         borderColor: '#22c55e',
                         backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                        borderWidth: 4,
+                        pointRadius: 6,
+                        pointBackgroundColor: '#22c55e',
                         tension: 0.3,
                         fill: true,
-                        zIndex: 2
+                        order: 1
                     },
                     {
-                        label: '평균(1500)',
-                        data: Array(labels.length).fill(1500),
+                        label: '평균 점수',
+                        data: averageData,
                         borderColor: '#fbbf24',
                         borderWidth: 2,
                         borderDash: [5, 5],
                         pointRadius: 0,
                         fill: false,
-                        zIndex: 1
+                        order: 2
                     }
                 ]
             },
@@ -1254,9 +1285,13 @@ export function renderPlayerTrend(context) {
                 maintainAspectRatio: false,
                 scales: {
                     y: {
-                        min: 1200,
-                        max: Math.max(maxRating, 1800),
-                        grid: { color: 'rgba(255,255,255,0.05)' }
+                        min: 1300,
+                        max: 1700,
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                        ticks: {
+                            stepSize: 100,
+                            color: 'rgba(255,255,255,0.6)'
+                        }
                     },
                     x: { grid: { display: false } }
                 }

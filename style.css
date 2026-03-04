@@ -628,6 +628,23 @@ td {
     font-weight: bold;
 }
 
+.player-name.highlight {
+    background: #facc15;
+    /* Yellow/Gold for top players */
+    box-shadow: 0 0 8px rgba(250, 204, 21, 0.4);
+}
+
+.badge-card.accent {
+    background: rgba(250, 204, 21, 0.08);
+    border: 1px solid rgba(250, 204, 21, 0.3);
+}
+
+.badge-card.accent .card-icon {
+    background: linear-gradient(135deg, #facc15, #eab308);
+    color: #0f172a;
+    box-shadow: 0 0 15px rgba(250, 204, 21, 0.4);
+}
+
 .empty-msg {
     font-size: 0.75rem;
     opacity: 0.5;
@@ -699,16 +716,28 @@ td {
     }
 }
 
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    flex-wrap: wrap;
+    /* 제목과 선택박스 겹침 방지 */
+    gap: 10px;
+}
+
 .player-select-insight {
-    max-width: 200px;
-    padding: 6px 12px;
+    width: 100%;
+    /* 모바일 대응 */
+    max-width: 180px;
+    padding: 8px 12px;
     border-radius: 8px;
     background: #1e293b;
-    /* --card-bg 와 유사한 어두운 배경 */
     color: white;
     border: 1px solid var(--accent-color);
     font-size: 0.9rem;
     cursor: pointer;
+    min-width: 120px;
 }
 
 .player-select-insight option {

@@ -15,10 +15,10 @@ export const calculateBadges = (members, matchHistory) => {
     // [🥇 베이글 장인]: 6:0 또는 0:6 경기가 있는 선수
     const bagelMasters = members.filter(member => {
         return matchHistory.some(match => {
-            const isParticipating = [...match.t1_ids, ...match.t2_ids].includes(member.id);
+            const isParticipating = [...match.t1_ids, ...match.t2_ids].map(id => id.toString()).includes(member.id.toString());
             if (!isParticipating) return false;
 
-            const isT1 = match.t1_ids.includes(member.id);
+            const isT1 = match.t1_ids.map(id => id.toString()).includes(member.id.toString());
             const myScore = isT1 ? match.score1 : match.score2;
             const opScore = isT1 ? match.score2 : match.score1;
 
@@ -28,20 +28,19 @@ export const calculateBadges = (members, matchHistory) => {
 
     // [🔥 불타는 연승]: 현재 3연승 이상 진행 중인 선수
     const hotStreaks = members.filter(member => {
-        // 해당 멤버의 경기를 최신순으로 정렬
         const myMatches = matchHistory
-            .filter(m => [...m.t1_ids, ...m.t2_ids].includes(member.id))
+            .filter(m => [...m.t1_ids, ...m.t2_ids].map(id => id.toString()).includes(member.id.toString()))
             .sort((a, b) => b.sessionNum - a.sessionNum || b.id - a.id);
 
         let streak = 0;
         for (const match of myMatches) {
-            const isT1 = match.t1_ids.includes(member.id);
+            const isT1 = match.t1_ids.map(id => id.toString()).includes(member.id.toString());
             const isWin = isT1 ? match.score1 > match.score2 : match.score2 > match.score1;
             const isDraw = match.score1 === match.score2;
 
             if (isWin) streak++;
-            else if (isDraw) continue; // 무승부는 연승 유지에 영향 미치지 않거나 중단 (여기선 중단으로 가정 가능하나 보통 유지)
-            else break; // 패배 시 중단
+            else if (isDraw) continue;
+            else break;
         }
         return streak >= WIN_STREAK_THRESHOLD;
     });
@@ -49,7 +48,7 @@ export const calculateBadges = (members, matchHistory) => {
     // [🛡️ 늪지대 방어군]: 5:5 무승부 기록이 가장 많은 선수
     const drawCounts = members.map(m => {
         const count = matchHistory.filter(match => {
-            const isParticipating = [...match.t1_ids, ...match.t2_ids].includes(m.id);
+            const isParticipating = [...match.t1_ids, ...match.t2_ids].map(id => id.toString()).includes(m.id.toString());
             return isParticipating && match.score1 === 5 && match.score2 === 5;
         }).length;
         return { id: m.id, name: m.name, count };
@@ -61,11 +60,17 @@ export const calculateBadges = (members, matchHistory) => {
     const maxMatches = Math.max(...members.map(m => m.matchCount || 0));
     const ironMen = maxMatches > 0 ? members.filter(m => m.matchCount === maxMatches) : [];
 
+    // [💎 최고의 도토리]: 현재 전체 1위 (ELO 최고점)
+    const activeMembers = members.filter(m => m.matchCount > 0);
+    const maxRating = Math.max(...activeMembers.map(m => m.rating || 0));
+    const topAcorns = maxRating > 0 ? activeMembers.filter(m => m.rating === maxRating) : [];
+
     return {
         bagelMasters: bagelMasters.map(m => m.name),
         hotStreaks: hotStreaks.map(m => m.name),
         swampGuards: swampGuards.map(m => m.name),
-        ironMen: ironMen.map(m => m.name)
+        ironMen: ironMen.map(m => m.name),
+        topAcorns: topAcorns.map(m => m.name)
     };
 };
 
@@ -75,27 +80,29 @@ export const calculateBadges = (members, matchHistory) => {
 export const getPlayerInsights = (targetId, members, matchHistory) => {
     if (!targetId || !members || !matchHistory) return null;
 
-    const myMatches = matchHistory.filter(m => [...m.t1_ids, ...m.t2_ids].includes(targetId));
+    const myMatches = matchHistory.filter(m =>
+        m.t1_ids.some(id => id.toString() === targetId.toString()) ||
+        m.t2_ids.some(id => id.toString() === targetId.toString())
+    );
 
     // 파트너 및 상대 분석용 맵
     const partnerStats = new Map(); // key: partnerId, value: { wins, losses, eloGain }
     const antagonistStats = new Map(); // key: opponentId, value: { eloLost }
 
     myMatches.forEach(match => {
-        const isT1 = match.t1_ids.includes(targetId);
+        const isT1 = match.t1_ids.map(id => id.toString()).includes(targetId.toString());
         const myTeamIds = isT1 ? match.t1_ids : match.t2_ids;
         const opTeamIds = isT1 ? match.t2_ids : match.t1_ids;
 
         const isWin = isT1 ? match.score1 > match.score2 : match.score2 > match.score1;
         const isLoss = isT1 ? match.score1 < match.score2 : match.score2 < match.score1;
 
-        // ELO 기준 (matchHistory에 elo_at_match 정보가 있다고 가정)
-        // change1은 팀1의 변동폭, change2는 팀2의 변동폭
+        // ELO 기준
         const eloChange = match.elo_at_match ? (isT1 ? match.elo_at_match.change1 : match.elo_at_match.change2) : 0;
 
         // 파트너 분석
         myTeamIds.forEach(id => {
-            if (id === targetId) return;
+            if (id.toString() === targetId.toString()) return;
             const stats = partnerStats.get(id) || { wins: 0, losses: 0, eloGain: 0, games: 0 };
             if (isWin) stats.wins++;
             if (isLoss) stats.losses++;
@@ -108,7 +115,6 @@ export const getPlayerInsights = (targetId, members, matchHistory) => {
         if (isLoss) {
             opTeamIds.forEach(id => {
                 const stats = antagonistStats.get(id) || { eloLost: 0 };
-                // 내가 잃은 만큼 상대가 가져간 것으로 간주 (절대값 합산)
                 stats.eloLost += Math.abs(eloChange);
                 antagonistStats.set(id, stats);
             });

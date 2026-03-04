@@ -921,6 +921,7 @@ function renderStatsDashboard() {
     uiRenderStatsDashboard({
         members,
         matchHistory,
+        ELO_INITIAL,
         actions: { renderEloChart, updatePlayerSelect, renderPlayerTrend: window.renderPlayerTrend }
     });
 }
