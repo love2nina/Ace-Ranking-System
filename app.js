@@ -68,7 +68,8 @@ import {
     getSystemSettings as fbGetSystemSettings,
     getDb as fbGetDb,
     initNewClusterSession as fbInitNewClusterSession,
-    saveReport as fbSaveReport
+    saveReport as fbSaveReport,
+    getServerData as fbGetServerData
 } from './firebase-api.js';
 // --- 설정 및 상수 ---
 // engine.js 로 분리됨
@@ -681,7 +682,10 @@ function renderCurrentMatches() {
     });
 }
 
-window.updateLiveScore = async (id, team, val) => {
+// --- 미저장 경기 추적 ---
+const dirtyMatches = new Set();
+
+window.updateLiveScore = (id, team, val) => {
     let score = val === '' ? null : (parseInt(val) || 0); // 빈칸이면 null
     if (score !== null) {
         if (score < 0) score = 0; if (score > 6) score = 6;
@@ -689,7 +693,85 @@ window.updateLiveScore = async (id, team, val) => {
     const m = currentSchedule.find(x => x.id === id);
     if (m) {
         if (team === 1) m.s1 = score; else m.s2 = score;
-        await window.saveToCloud('updateLiveScore');
+        dirtyMatches.add(id); // 미저장 표시
+        // UI에 미저장 상태 반영 (저장 버튼 활성화)
+        const card = document.querySelector(`[data-match-id="${id}"]`);
+        if (card) {
+            card.classList.add('unsaved');
+            const btn = card.querySelector('.save-score-btn');
+            if (btn) btn.style.display = 'inline-flex';
+        }
+    }
+};
+
+window.saveMatchScore = async (id) => {
+    if (!dirtyMatches.has(id)) return;
+    const m = currentSchedule.find(x => x.id === id);
+    if (!m) return;
+
+    const btn = document.querySelector(`[data-match-id="${id}"] .save-score-btn`);
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = '저장 중...';
+    }
+
+    try {
+        // 서버의 최신 데이터를 읽어서 현재 경기 점수만 병합
+        const serverData = await fbGetServerData();
+        if (serverData && serverData.currentSchedule) {
+            // 서버의 최신 스케줄에 이 경기의 점수만 덮어쓰기
+            const serverSchedule = serverData.currentSchedule;
+            const serverMatch = serverSchedule.find(x => x.id === id);
+            if (serverMatch) {
+                serverMatch.s1 = m.s1;
+                serverMatch.s2 = m.s2;
+            }
+            // 서버 스케줄의 나머지 경기 점수도 로컬에 동기화 (다른 사람이 입력한 점수 반영)
+            serverSchedule.forEach(sm => {
+                if (sm.id !== id) {
+                    const localM = currentSchedule.find(x => x.id === sm.id);
+                    if (localM && !dirtyMatches.has(sm.id)) {
+                        localM.s1 = sm.s1;
+                        localM.s2 = sm.s2;
+                    }
+                }
+            });
+            // 병합된 서버 스케줄로 교체 후 저장
+            currentSchedule = serverSchedule;
+            // 이 경기의 점수를 다시 확실히 반영
+            const finalMatch = currentSchedule.find(x => x.id === id);
+            if (finalMatch) {
+                finalMatch.s1 = m.s1;
+                finalMatch.s2 = m.s2;
+            }
+        }
+        await window.saveToCloud('saveMatchScore');
+        dirtyMatches.delete(id);
+        // 성공 시 UI 업데이트
+        const card = document.querySelector(`[data-match-id="${id}"]`);
+        if (card) {
+            card.classList.remove('unsaved');
+            card.classList.add('saved-flash');
+            const saveBtn = card.querySelector('.save-score-btn');
+            if (saveBtn) {
+                saveBtn.innerText = '✅ 저장 완료';
+                saveBtn.disabled = true;
+                setTimeout(() => {
+                    saveBtn.style.display = 'none';
+                    saveBtn.innerText = '💾 점수 저장';
+                    saveBtn.disabled = false;
+                    card.classList.remove('saved-flash');
+                }, 1500);
+            }
+        }
+        console.log(`[SaveMatch] ✅ 경기 ${id} 점수 저장 완료 (병합 방식)`);
+    } catch (e) {
+        console.error('[SaveMatch] 저장 실패:', e);
+        alert('점수 저장 중 오류가 발생했습니다. 다시 시도해주세요.');
+        if (btn) {
+            btn.disabled = false;
+            btn.innerText = '💾 점수 저장';
+        }
     }
 };
 

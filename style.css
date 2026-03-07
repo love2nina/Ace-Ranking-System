@@ -1119,3 +1119,43 @@ td {
     color: var(--text-secondary);
     font-style: italic;
 }
+
+/* --- 경기 점수 저장 관련 스타일 --- */
+.match-card.unsaved {
+    border: 1.5px solid #ff9800 !important;
+    box-shadow: 0 0 8px rgba(255, 152, 0, 0.15);
+}
+
+.match-card.saved-flash {
+    border: 1.5px solid var(--success) !important;
+    box-shadow: 0 0 12px rgba(34, 197, 94, 0.3);
+    transition: all 0.3s ease;
+}
+
+.save-score-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 12px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #fff;
+    background: linear-gradient(135deg, #ff9800, #f57c00);
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    margin-top: 4px;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 6px rgba(255, 152, 0, 0.3);
+}
+
+.save-score-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 3px 10px rgba(255, 152, 0, 0.5);
+}
+
+.save-score-btn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+    transform: none;
+}

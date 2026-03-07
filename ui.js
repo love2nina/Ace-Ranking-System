@@ -516,6 +516,7 @@ export function renderCurrentMatches(context) {
 
         const div = document.createElement('div');
         div.className = 'match-card';
+        div.setAttribute('data-match-id', m.id);
         div.innerHTML = `
             <div style="flex:1; display:flex; flex-direction:column; justify-content:center; gap:2px;">
                 <div><strong>${m.t1[0].name}${getRank(m.t1[0])}</strong></div>
@@ -528,6 +529,7 @@ export function renderCurrentMatches(context) {
                     <input type="number" class="score-input" value="${m.s2 !== null ? m.s2 : ''}" placeholder="-" min="0" max="6" inputmode="numeric" onchange="updateLiveScore('${m.id}',2,this.value)" style="width:55px; font-size:1.1rem; padding:5px 0;">
                 </div>
                 <div style="font-size:0.7rem; color:var(--text-secondary); opacity:0.8;">(기대승률 ${expPcnt}%)</div>
+                <button class="save-score-btn" style="display:none;" onclick="saveMatchScore('${m.id}')">💾 점수 저장</button>
             </div>
             <div style="flex:1; text-align:right; display:flex; flex-direction:column; justify-content:center; gap:2px;">
                 <div><strong>${m.t2[0].name}${getRank(m.t2[0])}</strong></div>

@@ -266,6 +266,26 @@ export async function saveToCloud(appState, caller = 'unknown') {
 }
 
 /**
+ * 서버의 최신 데이터를 읽어옵니다 (병합 저장 시 사용)
+ * @returns {Object|null} 서버의 최신 데이터 또는 null
+ */
+export async function getServerData() {
+    const { doc, getDoc } = window.FB_SDK;
+    const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
+    try {
+        const snapshot = await getDoc(doc(db, clusterPath, currentDbName));
+        if (snapshot.exists()) {
+            return snapshot.data();
+        }
+        return null;
+    } catch (e) {
+        console.error("[getServerData] 서버 데이터 읽기 실패:", e);
+        return null;
+    }
+}
+
+
+/**
  * localStorage → Cloud 마이그레이션
  */
 export async function tryMigrateLocalToCloud() {
