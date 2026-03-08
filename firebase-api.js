@@ -7,6 +7,7 @@ let currentDbName = '';
 let currentClubId = 'Default';
 let clusterUnsubscribe = null;
 let statusUnsubscribe = null;
+let videosUnsubscribe = null;
 let systemSettings = { admin_pw: "ace_dot" };
 
 // 콜백 저장소 (app.js에서 주입)
@@ -145,6 +146,7 @@ export function subscribeToCluster(dbName) {
     // 기존 리스너 해제
     if (clusterUnsubscribe) clusterUnsubscribe();
     if (statusUnsubscribe) statusUnsubscribe();
+    if (videosUnsubscribe) videosUnsubscribe();
 
     currentDbName = dbName;
     if (_callbacks.onDbNameChange) _callbacks.onDbNameChange(currentDbName);
@@ -228,6 +230,45 @@ export async function handleMigration() {
     } catch (e) {
         console.error("[Migration] Error:", e);
     }
+}
+
+// --- 비디오(영상 자료실) 데이터 통신 ---
+export async function subscribeToVideos(callback) {
+    if (!window.FB_SDK) return;
+    const { collection, onSnapshot } = window.FB_SDK;
+    const videoPath = currentClubId === 'Default' ? "videos" : `clubs/${currentClubId}/videos`;
+
+    videosUnsubscribe = onSnapshot(collection(db, videoPath), (snapshot) => {
+        const videos = [];
+        snapshot.forEach(doc => {
+            videos.push({ id: doc.id, ...doc.data() });
+        });
+        videos.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        callback(videos);
+    }, (error) => {
+        console.error("Error subscribing to videos:", error);
+    });
+}
+
+export async function addVideo(videoData) {
+    if (!window.FB_SDK) return;
+    const { doc, setDoc } = window.FB_SDK;
+    const videoPath = currentClubId === 'Default' ? "videos" : `clubs/${currentClubId}/videos`;
+
+    const videoId = String(Date.now());
+    videoData.timestamp = Date.now();
+
+    const docRef = doc(db, videoPath, videoId);
+    await setDoc(docRef, videoData);
+}
+
+export async function deleteVideo(videoId) {
+    if (!window.FB_SDK) return;
+    const { doc, deleteDoc } = window.FB_SDK;
+    const videoPath = currentClubId === 'Default' ? "videos" : `clubs/${currentClubId}/videos`;
+
+    const docRef = doc(db, videoPath, videoId);
+    await deleteDoc(docRef);
 }
 
 /**

@@ -1421,3 +1421,101 @@ function parseMarkdown(text) {
 
     return resultRows.join('\n');
 }
+
+/**
+ * 📺 영상 자료실 화면 렌더링
+ */
+export function renderVideoGallery(context) {
+    const { videos, isAdmin, deleteVideo } = context;
+    const container = document.getElementById('videoGalleryContent');
+    if (!container) return;
+
+    container.innerHTML = '';
+
+    if (!videos || videos.length === 0) {
+        container.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 40px; grid-column: 1 / -1;">등록된 영상이 없습니다. 추천 영상을 등록해 보세요!</p>';
+        return;
+    }
+
+    const getYouTubeId = (url) => {
+        const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+        const match = url.match(regExp);
+        return (match && match[2].length === 11) ? match[2] : null;
+    };
+
+    videos.forEach(video => {
+        const videoId = getYouTubeId(video.url);
+        const card = document.createElement('div');
+        card.className = 'card video-list-item';
+        card.style.display = 'flex';
+        card.style.flexDirection = 'column';
+        card.style.padding = '12px 15px';
+        card.style.background = 'var(--card-bg)';
+        card.style.borderRadius = '8px';
+        card.style.border = '1px solid var(--border-color)';
+
+        const dateStr = video.timestamp ? new Date(video.timestamp).toLocaleDateString('ko-KR') : '';
+
+        // 아코디언 헤더 (제목 + 날짜 + 아이콘)
+        const header = document.createElement('div');
+        header.style.display = 'flex';
+        header.style.justifyContent = 'space-between';
+        header.style.alignItems = 'center';
+        header.style.cursor = 'pointer';
+
+        header.innerHTML = `
+            <div style="flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding-right: 10px;">
+                <h4 style="margin: 0; color: var(--text-primary); font-size: 1rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis;">${video.title || '테니스 추천 영상'}</h4>
+                <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px;">${dateStr}</div>
+            </div>
+            <div class="toggle-icon" style="color: var(--text-secondary); font-size: 0.9rem; transition: transform 0.2s;">▼</div>
+        `;
+
+        // 아코디언 본문 (영상 + 요약 + 삭제버튼)
+        const content = document.createElement('div');
+        content.className = 'video-accordion-content';
+        content.style.display = 'none';
+        content.style.marginTop = '15px';
+        content.style.borderTop = '1px solid var(--border-color)';
+        content.style.paddingTop = '15px';
+
+        let iframeHtml = '';
+        if (videoId) {
+            iframeHtml = `
+                <div style="position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; max-width: 100%; border-radius: 6px; margin-bottom: 15px;">
+                    <iframe src="https://www.youtube.com/embed/${videoId}" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+                </div>
+            `;
+        } else {
+            iframeHtml = `<div style="padding: 20px; background: rgba(255,255,255,0.05); text-align: center; margin-bottom: 15px; border-radius: 6px;">
+                <a href="${video.url}" target="_blank" style="color: var(--accent-color);">🔗 영상 보러가기</a>
+            </div>`;
+        }
+
+        const summaryHtml = video.summary ? `<div class="markdown-body" style="font-size: 0.85rem; color: var(--text-secondary);">${parseMarkdown(video.summary)}</div>` : '';
+        const deleteBtnHtml = isAdmin ? `<div style="text-align: right; margin-top: 10px;"><button class="danger-btn" style="padding: 4px 8px; font-size: 0.75rem;" onclick="window.deleteVideo('${video.id}')">🗑️ 삭제</button></div>` : '';
+
+        content.innerHTML = `
+            ${iframeHtml}
+            ${summaryHtml}
+            ${deleteBtnHtml}
+        `;
+
+        header.onclick = () => {
+            const isVisible = content.style.display === 'block';
+
+            // 하나만 열리도록 기존에 열려있는 다른 아코디언 모두 닫기
+            if (!isVisible) {
+                document.querySelectorAll('.video-accordion-content').forEach(el => el.style.display = 'none');
+                document.querySelectorAll('.video-list-item .toggle-icon').forEach(el => el.style.transform = 'rotate(0deg)');
+            }
+
+            content.style.display = isVisible ? 'none' : 'block';
+            header.querySelector('.toggle-icon').style.transform = isVisible ? 'rotate(0deg)' : 'rotate(180deg)';
+        };
+
+        card.appendChild(header);
+        card.appendChild(content);
+        container.appendChild(card);
+    });
+}

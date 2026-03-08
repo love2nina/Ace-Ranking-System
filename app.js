@@ -24,6 +24,7 @@ let editingMatchId = null;
 let sessionNum = 1;
 let currentSessionState = { status: 'idle', sessionNum: 0, matchMode: 'court' };
 let reports = {}; // 회차별 리포트 데이터
+let videos = []; // 신규: 테니스 영상 자료실 리스트
 let eloChart = null;
 let trendChart = null;
 let rankMap = new Map(); // 현재 랭킹 순위 저장용
@@ -54,7 +55,8 @@ import {
     renderEloChart as uiRenderEloChart,
     updatePlayerSelect as uiUpdatePlayerSelect,
     renderPlayerTrend as uiRenderPlayerTrend,
-    renderAnalystReport
+    renderAnalystReport,
+    renderVideoGallery as uiRenderVideoGallery
 } from './ui.js';
 import {
     initFirebase as fbInitFirebase,
@@ -69,7 +71,10 @@ import {
     getDb as fbGetDb,
     initNewClusterSession as fbInitNewClusterSession,
     saveReport as fbSaveReport,
-    getServerData as fbGetServerData
+    getServerData as fbGetServerData,
+    subscribeToVideos as fbSubscribeToVideos,
+    addVideo as fbAddVideo,
+    deleteVideo as fbDeleteVideo
 } from './firebase-api.js';
 // --- 설정 및 상수 ---
 // engine.js 로 분리됨
@@ -84,6 +89,14 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
     // DB 이름 표시 업데이트
     updateDbDisplay();
+
+    // 비디오 실시간 데이터 구독 시작
+    setTimeout(() => {
+        fbSubscribeToVideos((data) => {
+            videos = data;
+            uiRenderVideoGallery({ videos, isAdmin, deleteVideo: window.deleteVideo });
+        });
+    }, 1500); // SDK 초기화 대기
 });
 
 function initFirebase() {
@@ -141,6 +154,116 @@ function initUIEvents() {
     const bindClick = (id, fn) => {
         const el = document.getElementById(id);
         if (el) el.onclick = fn;
+    };
+
+    // --- 비디오 자료실 미니탭 전환 ---
+    window.switchCasterSubTab = (tabName) => {
+        const reportBtn = document.getElementById('subtab-report-btn');
+        const videoBtn = document.getElementById('subtab-video-btn');
+        const reportContent = document.getElementById('subtab-report');
+        const videoContent = document.getElementById('subtab-video');
+
+        if (tabName === 'report') {
+            reportBtn.classList.add('active');
+            reportBtn.style.color = 'var(--accent-color)';
+            reportBtn.style.fontWeight = 'bold';
+
+            videoBtn.classList.remove('active');
+            videoBtn.style.color = 'var(--text-secondary)';
+            videoBtn.style.fontWeight = 'normal';
+
+            reportContent.style.display = 'block';
+            videoContent.style.display = 'none';
+        } else {
+            videoBtn.classList.add('active');
+            videoBtn.style.color = 'var(--accent-color)';
+            videoBtn.style.fontWeight = 'bold';
+
+            reportBtn.classList.remove('active');
+            reportBtn.style.color = 'var(--text-secondary)';
+            reportBtn.style.fontWeight = 'normal';
+
+            reportContent.style.display = 'none';
+            videoContent.style.display = 'block';
+
+            uiRenderVideoGallery({ videos, isAdmin, deleteVideo: window.deleteVideo });
+        }
+    };
+
+    // --- 비디오 자료실 모달 및 업로드 제어 ---
+    bindClick('openVideoModalBtn', () => {
+        document.getElementById('videoUrlInput').value = '';
+        document.getElementById('videoTitleInput').value = '';
+        document.getElementById('videoSummaryInput').value = '';
+        document.getElementById('videoModal').classList.remove('hidden');
+    });
+
+    bindClick('closeVideoModalBtn', () => {
+        document.getElementById('videoModal').classList.add('hidden');
+    });
+
+    // 유튜브 URL에서 제목 자동 파싱 (blur 이벤트)
+    const videoUrlInput = document.getElementById('videoUrlInput');
+    if (videoUrlInput) {
+        videoUrlInput.addEventListener('blur', async () => {
+            const url = videoUrlInput.value.trim();
+            const titleInput = document.getElementById('videoTitleInput');
+            if (url && (url.includes('youtu.be') || url.includes('youtube.com')) && !titleInput.value.trim()) {
+                try {
+                    titleInput.placeholder = '제목을 불러오는 중...';
+                    const res = await fetch(`https://noembed.com/embed?url=${encodeURIComponent(url)}`);
+                    const data = await res.json();
+                    if (data && data.title) {
+                        titleInput.value = data.title;
+                    }
+                } catch (e) {
+                    console.error('유튜브 제목 가져오기 실패', e);
+                } finally {
+                    titleInput.placeholder = '영상 제목을 입력하세요';
+                }
+            }
+        });
+    }
+
+    bindClick('submitVideoBtn', async () => {
+        const url = document.getElementById('videoUrlInput').value.trim();
+        const title = document.getElementById('videoTitleInput').value.trim();
+        const summary = document.getElementById('videoSummaryInput').value.trim();
+
+        if (!url || !url.includes('youtu')) {
+            alert('올바른 유튜브 링크를 입력해주세요.');
+            return;
+        }
+        if (!title) {
+            alert('영상 제목을 입력해주세요.');
+            return;
+        }
+
+        try {
+            document.getElementById('submitVideoBtn').disabled = true;
+            document.getElementById('submitVideoBtn').innerText = '등록 중...';
+
+            await fbAddVideo({ url, title, summary });
+
+            document.getElementById('videoModal').classList.add('hidden');
+            alert('영상이 성공적으로 등록되었습니다!');
+        } catch (e) {
+            alert('영상 등록 중 오류가 발생했습니다: ' + e.message);
+        } finally {
+            document.getElementById('submitVideoBtn').disabled = false;
+            document.getElementById('submitVideoBtn').innerText = '영상 등록';
+        }
+    });
+
+    window.deleteVideo = async (videoId) => {
+        if (!isAdmin) return;
+        if (confirm('이 영상을 삭제하시겠습니까?')) {
+            try {
+                await fbDeleteVideo(videoId);
+            } catch (e) {
+                alert('삭제 중 오류 발생: ' + e.message);
+            }
+        }
     };
 
     bindClick('adminLoginBtn', openAdminModal);
@@ -532,17 +655,21 @@ async function handleCopyAIData() {
 
     const prompt = `
 # 역할: 평촌ACE 수석 데이터 분석관 (Senior Data Analyst)
-# 목표: 제공된 [경기 데이터]를 바탕으로 전력 분석 리포트를 작성하십시오.
+# 목표: [경기 데이터]를 바탕으로 모든 참가자의 활약상을 담은 '입체적' 분석 리포트를 작성하라.
 
-## 분석 지침
-1. **데이터 기반 통찰**: 'todayPerformance' 선수들의 승률, 점수 차, 레이팅 변화를 객관적으로 분석하십시오.
-2. **핵심 분석 대상**: 오늘 경기에 출전한 선수들의 기술적 우위나 전략적 포인트를 설명하십시오. (미참여 선수는 개별 언급 제외)
+## 분석 및 작성 지침
+1. **광범위한 인물 분석**: 'todayPerformance'에 포함된 모든 선수를 최소 한 번씩 언급할 것. 상위권뿐만 아니라 중위권의 분전, 하위권의 '아쉬운 데이터'도 위트 있게 다뤄라.
+2. **데이터 기반 스토리텔링**: 
+    - 승률, 레이팅 변화, 득실차(scoreDiff)를 조합하여 선수의 오늘 '컨디션'을 정의하라.
+    - 예: 득실차는 높으나 승률이 낮은 경우 "효율의 끝판왕", 무승부가 많은 경우 "평화주의자" 등.
 3. **리포트 구성**:
-    - **세션 총평**: 오늘의 전반적인 경기 수준과 랭킹 구도의 특징.
-    - **전력 분석**: 두드러진 활약을 보인 선수(특히 신규 회원 포함)의 지표상 강점 분석.
-    - **향후 전망**: 현재의 기세가 다음 회차 랭킹에 미칠 영향 예측.
-4. **톤앤매너**: 분석 전문성이 느껴지는 진중하고 신뢰감 있는 문체. 유머러스함과 위트를 섞으십시오.
-5. **모바일 최적화**: 화면이 작은 모바일에서도 한눈에 읽히도록 간결한 문장과 리스트 형식을 사용하십시오. (가로가 너무 긴 표는 지양)
+    - **세션 총평**: 오늘 세션의 전체적인 온도와 랭킹 판도의 큰 변화.
+    - **전력 분석 (In-Depth)**: 
+        - [승리의 주역] 압도적 지표를 보인 상위권 분석.
+        - [존재감 발산] 신규 회원, 순위 급등자, 혹은 득실차에서 두각을 나타낸 이들 분석.
+        - [반전 필요] 레이팅이 하락했으나 경기 내용상 희망이 보이는 이들을 향한 위트 있는 격려.
+    - **향후 전망**: 다음 회차에서 주목해야 할 '다크호스' 선정 및 랭킹 변화 예측.
+4. **톤앤매너**: 분석 전문가의 냉철한 시각 90% + 회원들의 사기를 북돋우는 유머 한 스푼 10%. (모바일 최적화 형식 유지)
 
 ## [경기 데이터]
 \`\`\`json

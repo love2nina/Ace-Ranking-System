@@ -280,42 +280,73 @@
             </div>
         </div>
 
-        <!-- 6. 캐스터 중계석 섹션 -->
+        <!-- 6. 전력분석실 섹션 -->
         <div id="tab-caster" class="tab-content">
             <div class="card caster-card">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                    <h3 style="color: var(--accent-color);">경기 분석 리포트</h3>
-                    <select id="reportSessionSelect" style="max-width: 150px; font-size: 0.85rem;"
-                        onchange="renderAnalystReport()">
-                        <option value="">회차 선택</option>
-                    </select>
+                <div
+                    style="display: flex; gap: 15px; margin-bottom: 20px; border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">
+                    <button id="subtab-report-btn" class="sub-tab-btn active" onclick="switchCasterSubTab('report')"
+                        style="background:none; border:none; color:var(--accent-color); cursor:pointer; font-weight:bold; font-size:1.1rem; padding:5px 10px;">📊
+                        분석 리포트</button>
+                    <button id="subtab-video-btn" class="sub-tab-btn" onclick="switchCasterSubTab('video')"
+                        style="background:none; border:none; color:var(--text-secondary); cursor:pointer; font-size:1.1rem; padding:5px 10px;">📺
+                        영상 자료실</button>
                 </div>
 
-                <div id="casterReportContent" class="report-display-area">
-                    <p style="text-align: center; color: var(--text-secondary); padding: 40px;">수석 분석관이 데이터를 정밀 분석
-                        중입니다...</p>
-                </div>
-
-                <!-- Admin Report Post Area -->
-                <div class="admin-only"
-                    style="display: none; margin-top: 30px; padding-top: 20px; border-top: 1px dashed var(--border-color);">
+                <!-- 6-1. 리포트 탭 내용 -->
+                <div id="subtab-report" style="display: block;">
                     <div
-                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                        <h4 style="color: var(--accent-color); margin: 0;">👮 리포트 게시 (관리자)</h4>
-                        <button id="copyAIBtn" class="secondary" style="font-size: 0.75rem; padding: 5px 10px;">📋 AI
-                            분석용 데이터 복사</button>
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h3 style="color: var(--accent-color);">경기 분석 리포트</h3>
+                        <select id="reportSessionSelect" style="max-width: 150px; font-size: 0.85rem;"
+                            onchange="renderAnalystReport()">
+                            <option value="">회차 선택</option>
+                        </select>
                     </div>
-                    <div style="margin-bottom: 10px; display: flex; gap: 10px; align-items: center;">
-                        <span style="font-size: 0.9rem;">대상 회차:</span>
-                        <input type="number" id="reportPostSessionNum" style="width: 80px; text-align: center;"
-                            placeholder="N">
+
+                    <div id="casterReportContent" class="report-display-area">
+                        <p style="text-align: center; color: var(--text-secondary); padding: 40px;">수석 분석관이 데이터를 정밀 분석
+                            중입니다...</p>
                     </div>
-                    <textarea id="reportPostContent"
-                        style="width: 100%; height: 200px; padding: 12px; font-family: inherit; font-size: 0.9rem; margin-bottom: 10px;"
-                        placeholder="AI가 생성한 리포트 내용을 여기에 붙여넣으세요..."></textarea>
-                    <button id="saveReportBtn"
-                        style="width: 100%; background: var(--accent-color); color: #0f172a; font-weight: bold;">리포트
-                        게시하기</button>
+
+                    <!-- Admin Report Post Area (Moved inside subtab-report) -->
+                    <div class="admin-only"
+                        style="display: none; margin-top: 30px; padding-top: 20px; border-top: 1px dashed var(--border-color);">
+                        <div
+                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                            <h4 style="color: var(--accent-color); margin: 0;">👮 리포트 게시 (관리자)</h4>
+                            <button id="copyAIBtn" class="secondary" style="font-size: 0.75rem; padding: 5px 10px;">📋
+                                AI
+                                분석용 데이터 복사</button>
+                        </div>
+                        <div style="margin-bottom: 10px; display: flex; gap: 10px; align-items: center;">
+                            <span style="font-size: 0.9rem;">대상 회차:</span>
+                            <input type="number" id="reportPostSessionNum" style="width: 80px; text-align: center;"
+                                placeholder="N">
+                        </div>
+                        <textarea id="reportPostContent"
+                            style="width: 100%; height: 200px; padding: 12px; font-family: inherit; font-size: 0.9rem; margin-bottom: 10px;"
+                            placeholder="AI가 생성한 리포트 내용을 여기에 붙여넣으세요..."></textarea>
+                        <button id="saveReportBtn"
+                            style="width: 100%; background: var(--accent-color); color: #0f172a; font-weight: bold;">리포트
+                            게시하기</button>
+                    </div>
+                </div>
+
+                <!-- 6-2. 비디오 갤러리 탭 내용 (신규) -->
+                <div id="subtab-video" style="display: none;">
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h3 style="color: var(--accent-color);">테니스 영상 자료실</h3>
+                        <button id="openVideoModalBtn" class="primary-btn"
+                            style="padding: 6px 15px; font-size: 0.85rem;">+ 추천 영상 올리기</button>
+                    </div>
+                    <div id="videoGalleryContent"
+                        style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 15px;">
+                        <p
+                            style="text-align: center; color: var(--text-secondary); padding: 40px; grid-column: 1 / -1;">
+                            등록된 영상이 없습니다.</p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -530,6 +561,32 @@
                     * 새로운 환경이 필요할 때만 사용하세요.<br>
                     데이터베이스를 전환하면 페이지가 새로고침됩니다.
                 </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 비디오 추가 모달 (신규) -->
+    <div id="videoModal" class="modal hidden">
+        <div class="modal-content" style="max-width: 500px;">
+            <h3>🎥 추천 영상 올리기</h3>
+            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 15px;">유튜브 링크와 함께 모두에게 도움이 될 요약
+                내용을 적어주세요. <br /><span style="color:#ef4444">* 삭제는 관리자만 가능합니다.</span></p>
+
+            <label style="display:block; margin-bottom: 5px; font-weight: bold;">유튜브 링크 주소 (URL) *</label>
+            <input type="text" id="videoUrlInput" placeholder="예: https://youtu.be/..."
+                style="width: 100%; padding: 10px; margin-bottom: 15px; background: var(--bg-color); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px;">
+
+            <label style="display:block; margin-bottom: 5px; font-weight: bold;">영상 제목 *</label>
+            <input type="text" id="videoTitleInput" placeholder="영상 제목을 입력하세요"
+                style="width: 100%; padding: 10px; margin-bottom: 15px; background: var(--bg-color); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px;">
+
+            <label style="display:block; margin-bottom: 5px; font-weight: bold;">핵심 요약 (Markdown 지원)</label>
+            <textarea id="videoSummaryInput" placeholder="이 영상의 핵심 포인트나 느낀 점을 적어주세요."
+                style="width: 100%; height: 100px; padding: 10px; margin-bottom: 15px; background: var(--bg-color); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; resize: vertical;"></textarea>
+
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button id="submitVideoBtn" class="primary-btn" style="flex:1;">영상 등록</button>
+                <button id="closeVideoModalBtn" class="secondary-btn" style="flex:1;">취소</button>
             </div>
         </div>
     </div>
