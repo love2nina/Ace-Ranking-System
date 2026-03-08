@@ -79,25 +79,86 @@ import {
 // --- 설정 및 상수 ---
 // engine.js 로 분리됨
 
+// --- 로딩 UI 제어 ---
+let _dataReceived = false;
+let _loadingTimeoutId = null;
+
+function showLoading(text) {
+    const overlay = document.getElementById('loadingOverlay');
+    const textEl = document.getElementById('loadingText');
+    const retryBtn = document.getElementById('retryBtn');
+    if (overlay) {
+        overlay.classList.remove('fade-out');
+        overlay.style.display = 'flex';
+    }
+    if (textEl) textEl.textContent = text || '데이터를 불러오는 중입니다...';
+    if (retryBtn) retryBtn.style.display = 'none';
+}
+
+function hideLoading() {
+    _dataReceived = true;
+    if (_loadingTimeoutId) clearTimeout(_loadingTimeoutId);
+    const overlay = document.getElementById('loadingOverlay');
+    if (overlay) {
+        overlay.classList.add('fade-out');
+        setTimeout(() => { overlay.style.display = 'none'; }, 500);
+    }
+}
+
+function showRetry() {
+    const textEl = document.getElementById('loadingText');
+    const retryBtn = document.getElementById('retryBtn');
+    const spinner = document.querySelector('.loading-spinner');
+    if (textEl) textEl.textContent = '연결에 시간이 걸리고 있습니다. 네트워크를 확인해주세요.';
+    if (retryBtn) retryBtn.style.display = 'inline-block';
+    if (spinner) spinner.style.display = 'none';
+}
+
+window.retryFirebaseInit = () => {
+    const spinner = document.querySelector('.loading-spinner');
+    if (spinner) spinner.style.display = 'block';
+    showLoading('재연결 중입니다...');
+    startFirebaseInit();
+};
+
 // --- 앱 초기화 로직 ---
-window.addEventListener('DOMContentLoaded', async () => {
-    initFirebase();
+window.addEventListener('DOMContentLoaded', () => {
     initUIEvents();
     checkAdminLogin();
-    if (document.getElementById('tab-stats').classList.contains('active')) {
-        renderStatsDashboard();
-    }
-    // DB 이름 표시 업데이트
     updateDbDisplay();
 
-    // 비디오 실시간 데이터 구독 시작
-    setTimeout(() => {
-        fbSubscribeToVideos((data) => {
-            videos = data;
-            uiRenderVideoGallery({ videos, isAdmin, deleteVideo: window.deleteVideo });
-        });
-    }, 1500); // SDK 초기화 대기
+    // Firebase SDK가 준비된 후에만 DB 연결 시작
+    if (window.FB_SDK) {
+        startFirebaseInit();
+    } else {
+        showLoading('Firebase SDK를 로드하는 중...');
+        window.addEventListener('firebase-sdk-ready', () => startFirebaseInit(), { once: true });
+        // SDK 자체가 10초 안에 로드되지 않으면 안내
+        setTimeout(() => {
+            if (!window.FB_SDK) showRetry();
+        }, 10000);
+    }
 });
+
+function startFirebaseInit() {
+    showLoading('데이터를 불러오는 중입니다...');
+    _dataReceived = false;
+    initFirebase();
+
+    // 비디오 구독 (setTimeout 제거, SDK 준비 상태에서 즉시)
+    fbSubscribeToVideos((data) => {
+        videos = data;
+        uiRenderVideoGallery({ videos, isAdmin, deleteVideo: window.deleteVideo });
+    });
+
+    // 타임아웃 안전장치: 15초 이내 데이터 미수신 시 "다시 시도" 표시
+    _loadingTimeoutId = setTimeout(() => {
+        if (!_dataReceived) {
+            console.warn('[App] ⚠️ 15초 타임아웃: 데이터 수신 없음');
+            showRetry();
+        }
+    }, 15000);
+}
 
 function initFirebase() {
     fbInitFirebase({
@@ -110,6 +171,7 @@ function initFirebase() {
             reports = data.reports || {};
             recalculateAll();
             updateUI();
+            hideLoading(); // 로딩 오버레이 제거
         },
         onEmptyDefault: async () => {
             await fbHandleMigration();
@@ -120,6 +182,7 @@ function initFirebase() {
             members = []; matchHistory = []; currentSchedule = []; applicants = [];
             recalculateAll();
             updateUI();
+            hideLoading(); // 빈 클러스터여도 로딩 완료 처리
         },
         onSessionUpdate: (state) => {
             currentSessionState = state;
