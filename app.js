@@ -11,7 +11,7 @@ window.onerror = function (msg, url, line, col, error) {
 
 // --- 상태 관리 ---
 let isAdmin = false;
-let systemSettings = { admin_pw: "ace_admin" };
+let systemSettings = { admin_pw: "ace_dot" };
 let currentDbName = ''; // firebase-api.js에서 콜백으로 갱신됨
 
 // --- 핵심 도메인 데이터 ---
@@ -162,6 +162,7 @@ function startFirebaseInit() {
 
 function initFirebase() {
     fbInitFirebase({
+        getMembers: () => members,
         onDataLoaded: (data) => {
             members = data.members || [];
             matchHistory = data.matchHistory || [];
@@ -413,6 +414,15 @@ function initUIEvents() {
     if (restoreCsvBtn) {
         restoreCsvBtn.onclick = handleRestoreCsv;
     }
+
+    // --- 시즌 고도화: 생성 옵션 UI 토글 ---
+    const seasonRadios = document.querySelectorAll('input[name="seasonOption"]');
+    seasonRadios.forEach(radio => {
+        radio.onchange = () => {
+            const container = document.getElementById('prevDbSelectContainer');
+            if (container) container.style.display = radio.value === 'carryover' ? 'block' : 'none';
+        };
+    });
 }
 
 function updateDbDisplay() {
@@ -423,6 +433,20 @@ function updateDbDisplay() {
         el.innerText = `${clubText}DB: ${currentDbName}`;
     }
 }
+
+async function openDbModal() {
+    if (!isAdmin) return;
+    const modal = document.getElementById('dbModal');
+    if (modal) modal.classList.remove('hidden');
+    
+    // 모달 열 때 DB 목록 갱신
+    await fbFetchDbList();
+}
+
+window.closeDbModal = () => {
+    const modal = document.getElementById('dbModal');
+    if (modal) modal.classList.add('hidden');
+};
 
 async function fetchDbList() {
     if (!isAdmin) return;
@@ -478,9 +502,9 @@ function validateCustomSplit() {
 function openAdminModal() {
     if (isAdmin) {
         if (confirm('관리자 로그아웃 하시겠습니까?')) {
-            isAdmin = false;
             localStorage.removeItem('ace_admin');
-            updateAdminUI();
+            alert('로그아웃 되었습니다.');
+            location.reload(); // 확실한 상태 초기화를 위해 새로고침
         }
         return;
     }
@@ -493,11 +517,7 @@ function openHelpModal() {
 }
 window.closeHelpModal = () => document.getElementById('helpModal').classList.add('hidden');
 
-function openDbModal() {
-    document.getElementById('dbModal').classList.remove('hidden');
-    fetchDbList();
-}
-window.closeDbModal = () => document.getElementById('dbModal').classList.add('hidden');
+// openDbModal/closeDbModal은 위에서 통합 선언됨
 
 function tryAdminLogin() {
     const pw = document.getElementById('adminPassword').value;
@@ -505,7 +525,7 @@ function tryAdminLogin() {
     if (!systemSettings || !systemSettings.admin_pw) {
         console.warn("System settings not loaded yet. Using default.");
     }
-    const correctPw = systemSettings?.admin_pw || "ace_admin"; // 로드 실패 시 기본값
+    const correctPw = systemSettings?.admin_pw || "ace_dot"; // 로드 실패 시 기본값
 
     if (pw === correctPw) {
         isAdmin = true;
@@ -1214,24 +1234,63 @@ window.renderPlayerTrend = () => {
 
 function exportHistoryToCsv() {
     if (!isAdmin) { alert('관리자 기능입니다.'); return; }
-    if (matchHistory.length === 0) { alert('내보낼 기록이 없습니다.'); return; }
+    
+    // 데이터 로딩 확인
+    if (!matchHistory || !members) {
+        alert('데이터를 불러오는 중입니다. 잠시 후 다시 시도해주세요.');
+        return;
+    }
+    if (matchHistory.length === 0 && members.length === 0) {
+        alert('내보낼 데이터가 없습니다.');
+        return;
+    }
 
-    let csv = "\uFEFF회차,날짜,팀1,팀2,점수1,점수2,기대승률(%),ELO변동\n";
-    matchHistory.slice().sort((a, b) => b.sessionNum - a.sessionNum).forEach(h => {
-        const expected = h.elo_at_match?.expected ? (h.elo_at_match.expected * 100).toFixed(0) : 50;
-        const eloChange = h.elo_at_match?.change1?.toFixed(1) || 0;
-        csv += `${h.sessionNum},${h.date},"${h.t1_names.join(',')}","${h.t2_names.join(',')}",${h.score1},${h.score2},${expected}%,${eloChange}\n`;
-    });
+    try {
+        let csv = "\uFEFF회차,날짜,팀1,팀2,점수1,점수2,기대승률(%),ELO변동\n";
+        matchHistory.slice().sort((a, b) => (b.sessionNum || 0) - (a.sessionNum || 0)).forEach(h => {
+            const expected = h.elo_at_match?.expected ? (h.elo_at_match.expected * 100).toFixed(0) : 50;
+            const eloChange = h.elo_at_match?.change1?.toFixed(1) || 0;
+            const t1 = (h.t1_names || []).join(',');
+            const t2 = (h.t2_names || []).join(',');
+            csv += `${h.sessionNum || 0},${h.date || ''},"${t1}","${t2}",${h.score1 || 0},${h.score2 || 0},${expected}%,${eloChange}\n`;
+        });
 
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `ACE_Ranking_History_${new Date().toISOString().slice(0, 10)}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+        // v5: 통합 백업을 위한 멤버 데이터 섹션 추가
+        csv += "\n---MEMBER_DATA---\n";
+        csv += "id,name,rating,mmr,prevSeasonStats\n";
+        members.forEach(m => {
+            let statsStr = "{}";
+            try {
+                if (m.prevSeasonStats) statsStr = JSON.stringify(m.prevSeasonStats).replace(/"/g, '""');
+            } catch (e) {
+                console.error("Stats Serialize Error for", m.name, e);
+            }
+            // id와 name에 쉼표가 들어있을 경우를 대비해 따옴표 처리
+            csv += `"${m.id}","${m.name}",${m.rating || 1500},${m.mmr || 1500},"${statsStr}"\n`;
+        });
+
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const filename = `ACE_Integrated_Backup_${new Date().toISOString().slice(0, 10)}.csv`;
+
+        const link = document.createElement("a");
+        link.href = url;
+        link.setAttribute('download', filename);
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        
+        // 지연 후 정리 (브라우저가 다운로드를 감지할 시간 확보)
+        setTimeout(() => {
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        }, 100);
+        
+        console.log("[Export] CSV Exported successfully.");
+    } catch (err) {
+        console.error("Export Error:", err);
+        alert('CSV 내보내기 중 오류가 발생했습니다: ' + err.message);
+    }
 }
 
 // --- 데이터 복구 엔진 (CSV 기반) ---
@@ -1259,35 +1318,45 @@ async function handleRestoreCsv() {
                 reader.readAsText(file, 'euc-kr');
             });
         }
-        const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        // v5: 통합 백업 포맷 대응 분할
+        const sections = text.split("---MEMBER_DATA---");
+        const matchDataText = sections[0].trim();
+        const memberDataText = sections.length > 1 ? sections[1].trim() : null;
 
+        const lines = matchDataText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
         if (lines.length < 2) {
             alert('파일 내용이 너무 적거나 형식이 맞지 않습니다.');
             return;
         }
 
-        // CSV 헤더 확인 (회차,날짜,팀1,팀2,점수1,점수2,...)
         const dataRows = lines.slice(1);
-
         const newHistory = [];
         const nameSet = new Set();
-
-        dataRows.forEach((line, idx) => {
-            // v7.5: 정규표현식 대신 따옴표를 인식하는 Robust한 CSV 파싱 로직 도입
+        
+        // CSV 파싱 유틸리티 (따옴표 대응)
+        const parseCsvLine = (line) => {
             const parts = [];
             let current = '';
             let inQuotes = false;
             for (let i = 0; i < line.length; i++) {
                 const char = line[i];
-                if (char === '"') inQuotes = !inQuotes;
+                if (char === '"') {
+                    if (inQuotes && line[i+1] === '"') { // Double quote inside
+                        current += '"'; i++;
+                    } else inQuotes = !inQuotes;
+                }
                 else if (char === ',' && !inQuotes) {
                     parts.push(current.trim());
                     current = '';
                 } else current += char;
             }
             parts.push(current.trim());
+            return parts;
+        };
 
-            if (parts.length < 6) return; // 필수 항목 부족
+        dataRows.forEach((line, idx) => {
+            const parts = parseCsvLine(line);
+            if (parts.length < 6) return;
 
             const sessionNum = parseInt(parts[0]) || 0;
             const date = parts[1].replace(/"/g, '').trim();
@@ -1301,30 +1370,34 @@ async function handleRestoreCsv() {
 
             newHistory.push({
                 id: Date.now() + Math.random() + idx,
-                sessionNum,
-                date,
-                t1_names,
-                t2_names,
-                t1_ids: t1_names, // 이름 기반 ID 매핑
-                t2_ids: t2_names,
-                score1,
-                score2
+                sessionNum, date, t1_names, t2_names, t1_ids: t1_names, t2_ids: t2_names, score1, score2
             });
         });
 
-        if (newHistory.length === 0) {
-            alert('복구할 수 있는 유효한 대진 기록을 찾지 못했습니다.');
-            return;
+        // 맴버 명단 구성
+        let newMembers = [];
+        if (memberDataText) {
+            const mLines = memberDataText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+            const mRows = mLines.slice(1); // skip header (id,name,rating,mmr,prevSeasonStats)
+            newMembers = mRows.map(line => {
+                const p = parseCsvLine(line);
+                let stats = {};
+                try { stats = JSON.parse(p[4] || "{}"); } catch(e) { console.warn("Failed to parse stats for", p[1]); }
+                return {
+                    id: p[0],
+                    name: p[1],
+                    rating: parseFloat(p[2]) || 1500,
+                    mmr: parseFloat(p[3]) || 1500,
+                    prevSeasonStats: stats,
+                    matchCount: 0, wins: 0, losses: 0, draws: 0
+                };
+            });
+        } else {
+            // 구버전 CSV 대응: 이름 기반 생성
+            newMembers = Array.from(nameSet).map(name => ({
+                id: name, name, rating: 1500, mmr: 1500, matchCount: 0, wins: 0, losses: 0, draws: 0
+            }));
         }
-
-        // 맴버 명단 재구성
-        const newMembers = Array.from(nameSet).map(name => ({
-            id: name,
-            name: name,
-            rating: 1500,
-            matchCount: 0,
-            wins: 0, losses: 0, draws: 0
-        }));
 
         // 전역 상태 업데이트
         matchHistory = newHistory;

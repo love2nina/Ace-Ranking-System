@@ -57,6 +57,7 @@ export function recalculateAll(context) {
         rankMap.clear();
         members.forEach(m => {
             m.rating = ELO_INITIAL; m.matchCount = 0; m.wins = 0; m.losses = 0; m.draws = 0; m.scoreDiff = 0;
+            m.mmr = m.mmr || ELO_INITIAL; // 누적 MMR: 기존값 유지 (첫 시즌은 초기값)
             m.participationArr = [];
             m.prevRating = ELO_INITIAL;
             delete m.vRank;
@@ -81,7 +82,11 @@ export function recalculateAll(context) {
 
             const sessionMatches = matchHistory.filter(h => (h.sessionNum || '').toString() === sId);
             const ratingSnapshot = {};
-            members.forEach(m => { ratingSnapshot[m.id] = m.rating; });
+            const mmrSnapshot = {};
+            members.forEach(m => {
+                ratingSnapshot[m.id] = m.rating;
+                mmrSnapshot[m.id] = m.mmr || ELO_INITIAL;
+            });
 
             const existingMembers = members.filter(m => m.matchCount > 0);
             const newMembers = members.filter(m => m.matchCount === 0);
@@ -103,14 +108,17 @@ export function recalculateAll(context) {
                 const team2 = h.t2_ids.map(id => memberMap.get(String(id))).filter(Boolean);
                 if (team1.length < 2 || team2.length < 2) return;
 
+                // [시즌제 고도화] 기대승률은 MMR(누적 실력) 기준으로 계산
+                const mmr1 = ((mmrSnapshot[team1[0].id] || ELO_INITIAL) + (mmrSnapshot[team1[1].id] || ELO_INITIAL)) / 2;
+                const mmr2 = ((mmrSnapshot[team2[0].id] || ELO_INITIAL) + (mmrSnapshot[team2[1].id] || ELO_INITIAL)) / 2;
                 const avg1 = ((ratingSnapshot[team1[0].id] || ELO_INITIAL) + (ratingSnapshot[team1[1].id] || ELO_INITIAL)) / 2;
                 const avg2 = ((ratingSnapshot[team2[0].id] || ELO_INITIAL) + (ratingSnapshot[team2[1].id] || ELO_INITIAL)) / 2;
-                const expected = 1 / (1 + Math.pow(10, (avg2 - avg1) / 400));
+                const expected = 1 / (1 + Math.pow(10, (mmr2 - mmr1) / 400));
                 let actual = h.score1 > h.score2 ? 1 : (h.score1 < h.score2 ? 0 : 0.5);
                 const diff = Math.abs(h.score1 - h.score2);
 
-                const exp1 = 1 / (1 + Math.pow(10, (avg2 - avg1) / 400));
-                const exp2 = 1 / (1 + Math.pow(10, (avg1 - avg2) / 400));
+                const exp1 = 1 / (1 + Math.pow(10, (mmr2 - mmr1) / 400));
+                const exp2 = 1 / (1 + Math.pow(10, (mmr1 - mmr2) / 400));
 
                 let act1 = 0.5;
                 let act2 = 0.5;
@@ -125,7 +133,7 @@ export function recalculateAll(context) {
                     changeT2 *= 1.5;
                 }
 
-                h.elo_at_match = { t1_before: avg1, t2_before: avg2, expected, change1: changeT1, change2: changeT2 };
+                h.elo_at_match = { t1_before: avg1, t2_before: avg2, mmr1_before: mmr1, mmr2_before: mmr2, expected, change1: changeT1, change2: changeT2 };
 
                 [...team1, ...team2].forEach(p => {
                     p.matchCount++;
@@ -134,6 +142,7 @@ export function recalculateAll(context) {
 
                 team1.forEach(p => {
                     p.rating += changeT1;
+                    p.mmr += changeT1;  // MMR 동시 업데이트
                     p.scoreDiff += (h.score1 - h.score2);
                     if (actual === 1) { p.wins++; }
                     else if (actual === 0) { p.losses++; }
@@ -141,6 +150,7 @@ export function recalculateAll(context) {
                 });
                 team2.forEach(p => {
                     p.rating += changeT2;
+                    p.mmr += changeT2;  // MMR 동시 업데이트
                     p.scoreDiff += (h.score2 - h.score1);
                     if (actual === 0) { p.wins++; }
                     else if (actual === 1) { p.losses++; }

@@ -126,11 +126,11 @@ export function initFirebase(callbacks) {
                 // → 기존 DB를 유지하면서 설정 문서를 복원
                 if (currentDbName && currentDbName !== 'Default') {
                     console.warn(`[Settings] ⚠️ Settings document not found but active DB is '${currentDbName}'. Restoring settings instead of resetting to Default.`);
-                    setDoc(settingsRef, { admin_pw: systemSettings.admin_pw || "ace_admin", active_cluster: currentDbName });
+                    setDoc(settingsRef, { admin_pw: systemSettings.admin_pw || "ace_dot", active_cluster: currentDbName });
                 } else {
                     // 최초 초기화인 경우에만 Default로 생성
                     console.log("[Settings] Creating initial settings document with Default.");
-                    setDoc(settingsRef, { admin_pw: "ace_admin", active_cluster: "Default" });
+                    setDoc(settingsRef, { admin_pw: "ace_dot", active_cluster: "Default" });
                 }
             }
         });
@@ -363,22 +363,34 @@ export async function saveSessionState(status, sessionNum, info = '', matchMode 
  * DB 목록 가져오기 (관리자 전용)
  */
 export async function fetchDbList() {
+    if (!db) {
+        console.warn("[Firebase] DB not initialized yet. Skipping fetchDbList.");
+        return;
+    }
     try {
         const { collection, getDocs } = window.FB_SDK;
         const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
         const querySnapshot = await getDocs(collection(db, clusterPath));
         const select = document.getElementById('dbListSelect');
+        const prevSelect = document.getElementById('prevDbSelect'); // 신규: 이전 시즌 이관용 선택창
         if (!select) return;
-
-        // 초기화 (첫 번째 옵션 제외)
-        while (select.options.length > 1) select.remove(1);
+        select.innerHTML = '<option value="">데이터베이스 선택...</option>';
+        if (prevSelect) prevSelect.innerHTML = '<option value="">이관할 이전 DB(시즌) 선택...</option>';
 
         querySnapshot.forEach((docSnap) => {
             const opt = document.createElement('option');
             opt.value = docSnap.id;
-            opt.text = docSnap.id;
+            opt.textContent = docSnap.id;
             if (docSnap.id === currentDbName) opt.selected = true;
             select.add(opt);
+
+            // 이전 DB 선택창에도 추가
+            if (prevSelect) {
+                const optPrev = document.createElement('option');
+                optPrev.value = docSnap.id;
+                optPrev.textContent = docSnap.id;
+                prevSelect.add(optPrev);
+            }
         });
     } catch (e) {
         console.error("Fetch DB List Error:", e);
@@ -391,15 +403,109 @@ export async function fetchDbList() {
 export async function switchDatabase() {
     const newName = document.getElementById('newDbInput').value.trim();
     if (!newName) { alert('DB 이름을 입력해주세요.'); return; }
-    if (confirm(`'${newName}' 데이터베이스를 생성하고 모든 사용자의 기본 DB로 설정하시겠습니까?`)) {
+
+    const option = document.querySelector('input[name="seasonOption"]:checked')?.value || 'carryover';
+    const prevDbName = document.getElementById('prevDbSelect')?.value;
+
+    if (option === 'carryover' && !prevDbName) {
+        alert('이관할 이전 시즌 DB를 선택해주세요. 새로 시작하려면 "완전히 새로 시작" 옵션을 선택하세요.');
+        return;
+    }
+
+    const confirmMsg = option === 'carryover' 
+        ? `'${prevDbName}'의 MMR과 전적 요약을 이관하여 신규 시즌 '${newName}'을 생성하시겠습니까?`
+        : `'${newName}' 데이터베이스를 완전히 초기화된 상태로 새로 생성하시겠습니까? (MMR 포함 모든 데이터 초기화)`;
+
+    if (confirm(confirmMsg)) {
         try {
-            const { doc, updateDoc } = window.FB_SDK;
+            const { doc, getDoc, setDoc, updateDoc } = window.FB_SDK;
+            const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
             const settingsPath = currentClubId === 'Default' ? "system/settings" : `clubs/${currentClubId}/config/settings`;
+
+            let newMembers = [];
+
+            if (option === 'carryover') {
+                // 1. 이전 시즌 데이터 로드 및 요약 생성
+                const prevSnap = await getDoc(doc(db, clusterPath, prevDbName));
+                if (prevSnap.exists()) {
+                    const prevData = prevSnap.data();
+                    const prevMembers = prevData.members || [];
+                    const prevHistory = prevData.matchHistory || [];
+
+                    // 2. MMR 이관 및 요약본 생성
+                    newMembers = prevMembers.map(m => {
+                        const stats = {};
+                        const prevSummary = m.prevSeasonStats || {};
+                        const playerMatches = prevHistory.filter(h => 
+                            [...h.t1_ids, ...h.t2_ids].some(id => String(id) === String(m.id))
+                        );
+
+                        playerMatches.forEach(h => {
+                            const isT1 = h.t1_ids.some(id => String(id) === String(m.id));
+                            const opponents = isT1 ? h.t2_ids : h.t1_ids;
+                            const won = (isT1 && h.score1 > h.score2) || (!isT1 && h.score2 > h.score1);
+                            const lost = (isT1 && h.score1 < h.score2) || (!isT1 && h.score2 < h.score1);
+                            const draw = h.score1 === h.score2;
+                            const eloChange = isT1 ? (h.elo_at_match?.change1 || 0) : (h.elo_at_match?.change2 || 0);
+
+                            opponents.forEach(oppId => {
+                                const id = String(oppId);
+                                if (!stats[id]) stats[id] = { wins: 0, losses: 0, draws: 0, eloGain: 0 };
+                                if (won) stats[id].wins++;
+                                if (lost) stats[id].losses++;
+                                if (draw) stats[id].draws++;
+                                stats[id].eloGain += eloChange;
+                            });
+                        });
+
+                        // [추가] 이전 시즌들의 누적 요약(만약 있다면)을 현재 계산된 통계에 병합
+                        Object.entries(prevSummary).forEach(([oppId, val]) => {
+                            const id = String(oppId);
+                            if (!stats[id]) stats[id] = { wins: 0, losses: 0, draws: 0, eloGain: 0 };
+                            stats[id].wins += (val.wins || 0);
+                            stats[id].losses += (val.losses || 0);
+                            stats[id].draws += (val.draws || 0);
+                            stats[id].eloGain += (val.eloGain || 0);
+                        });
+
+                        return {
+                            ...m,
+                            rating: 1500,
+                            mmr: m.mmr || m.rating || 1500,
+                            prevSeasonStats: stats,
+                            matchCount: 0, wins: 0, losses: 0, draws: 0, scoreDiff: 0, participationArr: []
+                        };
+                    });
+                }
+            } else {
+                // 완전히 새로 시작: members 초기화 (기존 members가 있다면 구조만 유지하고 점수 리셋)
+                newMembers = _callbacks.getMembers().map(m => ({
+                    ...m,
+                    rating: 1500,
+                    mmr: 1500,
+                    prevSeasonStats: {},
+                    matchCount: 0, wins: 0, losses: 0, draws: 0, scoreDiff: 0, participationArr: []
+                }));
+            }
+
+            // 3. 새 클러스터 문서 생성 및 활성화
+            await setDoc(doc(db, clusterPath, newName), {
+                members: newMembers,
+                matchHistory: [],
+                sessionStatus: { status: 'idle', sessionNum: 0, matchMode: 'court' },
+                reports: {},
+                createdAt: new Date().toISOString()
+            });
+
             await updateDoc(doc(db, settingsPath), { active_cluster: newName });
+            
             document.getElementById('newDbInput').value = '';
-            alert(`신규 DB '${newName}'이 생성 및 전역 활성 DB로 설정되었습니다.`);
-            if (_callbacks.closeDbModal) _callbacks.closeDbModal();
-        } catch (e) { alert('생성 실패: ' + e.message); }
+            alert(`신규 시즌 '${newName}'이 생성되었습니다. 페이지가 새로고침됩니다.`);
+            location.reload();
+        } catch (e) { 
+            console.error(e);
+            alert('생성 실패: ' + e.message); 
+        }
     }
 }
 

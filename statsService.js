@@ -80,14 +80,32 @@ export const calculateBadges = (members, matchHistory) => {
 export const getPlayerInsights = (targetId, members, matchHistory) => {
     if (!targetId || !members || !matchHistory) return null;
 
+    const targetMember = members.find(m => m.id.toString() === targetId.toString());
+    const prevStats = (targetMember && targetMember.prevSeasonStats) ? targetMember.prevSeasonStats : {};
+
     const myMatches = matchHistory.filter(m =>
         m.t1_ids.some(id => id.toString() === targetId.toString()) ||
         m.t2_ids.some(id => id.toString() === targetId.toString())
     );
 
     // 파트너 및 상대 분석용 맵
-    const partnerStats = new Map(); // key: partnerId, value: { wins, losses, eloGain }
+    const partnerStats = new Map(); // key: partnerId, value: { wins, losses, eloGain, games }
     const antagonistStats = new Map(); // key: opponentId, value: { eloLost }
+
+    // [시즌 고도화] 이전 시즌 요약 데이터(방안 C) 먼저 반영
+    // 이전 시즌 요약에는 '상대팀'으로서의 전적만 압축되어 있음 (천적 위주)
+    Object.entries(prevStats).forEach(([oppId, stats]) => {
+        // 상대 분석 (천적) 초기화
+        const antag = antagonistStats.get(oppId) || { eloLost: 0 };
+        // 이전 시즌에서 잃은 ELO 합산 (eloGain이 음수이면 내가 잃은 것)
+        if (stats.eloGain < 0) {
+            antag.eloLost += Math.abs(stats.eloGain);
+            antagonistStats.set(oppId, antag);
+        }
+
+        // 파트너 데이터는 현재 요약 구조상 포함되어 있지 않으므로 (상대팀 기준), 
+        // 추후 확장이 필요할 수 있으나 현재는 천적(상대) 데이터 위주로 병합
+    });
 
     myMatches.forEach(match => {
         const isT1 = match.t1_ids.map(id => id.toString()).includes(targetId.toString());
@@ -96,6 +114,7 @@ export const getPlayerInsights = (targetId, members, matchHistory) => {
 
         const isWin = isT1 ? match.score1 > match.score2 : match.score2 > match.score1;
         const isLoss = isT1 ? match.score1 < match.score2 : match.score2 < match.score1;
+        const isDraw = match.score1 === match.score2;
 
         // ELO 기준
         const eloChange = match.elo_at_match ? (isT1 ? match.elo_at_match.change1 : match.elo_at_match.change2) : 0;
@@ -103,20 +122,21 @@ export const getPlayerInsights = (targetId, members, matchHistory) => {
         // 파트너 분석
         myTeamIds.forEach(id => {
             if (id.toString() === targetId.toString()) return;
-            const stats = partnerStats.get(id) || { wins: 0, losses: 0, eloGain: 0, games: 0 };
+            const stats = partnerStats.get(id.toString()) || { wins: 0, losses: 0, draws: 0, eloGain: 0, games: 0 };
             if (isWin) stats.wins++;
             if (isLoss) stats.losses++;
+            if (isDraw) stats.draws++;
             stats.eloGain += eloChange;
             stats.games++;
-            partnerStats.set(id, stats);
+            partnerStats.set(id.toString(), stats);
         });
 
         // 상대 분석 (천적)
         if (isLoss) {
             opTeamIds.forEach(id => {
-                const stats = antagonistStats.get(id) || { eloLost: 0 };
+                const stats = antagonistStats.get(id.toString()) || { eloLost: 0 };
                 stats.eloLost += Math.abs(eloChange);
-                antagonistStats.set(id, stats);
+                antagonistStats.set(id.toString(), stats);
             });
         }
     });

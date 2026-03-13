@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- Vercel Analytics -->
-    <script defer src="/_vercel/insights/script.js"></script>
+    <!-- Vercel Insights Removed for local dev -->
 </head>
 
 <body>
@@ -527,7 +527,7 @@
                             style="font-size: 0.8rem; display: block; margin-bottom: 8px; color: var(--text-secondary);">기존
                             DB 선택</label>
                         <div style="display: flex; gap: 5px;">
-                            <select id="dbListSelect" style="flex: 1; font-size: 0.8rem;">
+                            <select id="dbListSelect" style="flex: 1;">
                                 <option value="">데이터베이스 선택...</option>
                             </select>
                             <button id="loadDbBtn" class="secondary"
@@ -536,15 +536,29 @@
                     </div>
 
                     <div style="background: rgba(255,255,255,0.03); padding: 15px; border-radius: 8px;">
-                        <label
-                            style="font-size: 0.8rem; display: block; margin-bottom: 8px; color: var(--text-secondary);">새
-                            DB 생성 또는 이동</label>
-                        <div style="display: flex; gap: 5px;">
-                            <input type="text" id="newDbInput" placeholder="이름 입력 (예: 시즌2)"
-                                style="flex: 1; font-size: 0.8rem;">
-                            <button id="switchDbBtn" class="primary"
-                                style="padding: 8px 12px; font-size: 0.8rem;">생성/이동</button>
+                        <label style="font-size: 0.8rem; display: block; margin-bottom: 8px; color: var(--text-secondary);">새 DB(시즌) 생성</label>
+                        <div style="display: flex; gap: 5px; margin-bottom: 12px;">
+                            <input type="text" id="newDbInput" placeholder="이름 입력 (예: 2026 하반기)" style="flex: 1; font-size: 0.8rem;">
                         </div>
+                        
+                        <div style="font-size: 0.8rem; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.1); padding: 10px; border-radius: 5px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: bold; color: var(--text-primary);">이전 시즌 연결 옵션:</label>
+                            <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 5px; cursor: pointer;">
+                                <input type="radio" name="seasonOption" value="carryover" checked>
+                                <span>이전 시즌 이어가기 <small style="color:var(--text-secondary);">(MMR / 요약 전적 이관)</small></span>
+                            </label>
+                            <div id="prevDbSelectContainer" style="margin-left: 24px; margin-bottom: 10px;">
+                                <select id="prevDbSelect" style="width: 100%;">
+                                    <option value="">이관할 이전 DB(시즌) 선택...</option>
+                                </select>
+                            </div>
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="radio" name="seasonOption" value="reset">
+                                <span>완전히 새로 시작 <small style="color:var(--danger);">(MMR 포함 전면 초기화)</small></span>
+                            </label>
+                        </div>
+                        
+                        <button id="switchDbBtn" class="primary" style="width: 100%; padding: 10px; font-size: 0.9rem;">✨ 시즌 생성 및 이동</button>
                     </div>
                     <div
                         style="background: rgba(255,165,0,0.05); padding: 15px; border-radius: 8px; border: 1px dashed rgba(255,165,0,0.3); margin-top: 10px;">
@@ -603,9 +617,10 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getFirestore, collection, doc, setDoc, getDoc, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
         // Firebase 설정 (app.js에서 접근 가능하도록 window 객체에 바인딩)
-        window.FB_SDK = { initializeApp, getFirestore, collection, doc, setDoc, getDoc, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp };
+        window.FB_SDK = { initializeApp, getFirestore, collection, doc, setDoc, getDoc, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp, getAuth, signInAnonymously };
         // SDK 준비 완료 이벤트 발행
         window.dispatchEvent(new Event('firebase-sdk-ready'));
     </script>
