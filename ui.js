@@ -431,9 +431,12 @@ export function renderSchedulePreview(context) {
 
     grid.innerHTML = '';
     let totalGames = 0;
-    const playerIds = Object.keys(gameCounts);
+    
+    // 레이팅 내림차순(랭킹 순서)으로 정렬
+    const sortedApplicants = [...applicants].sort((a, b) => (b.rating || 1500) - (a.rating || 1500));
+    const sortedPlayerIds = sortedApplicants.map(a => String(a.id)).filter(id => gameCounts[id] !== undefined);
 
-    playerIds.forEach(id => {
+    sortedPlayerIds.forEach(id => {
         const p = applicants.find(a => String(a.id) === String(id));
         if (!p) return;
 
@@ -447,8 +450,8 @@ export function renderSchedulePreview(context) {
         totalGames += gameCounts[id];
     });
 
-    if (playerIds.length > 0) {
-        avgEl.innerText = (totalGames / playerIds.length).toFixed(1);
+    if (sortedPlayerIds.length > 0) {
+        avgEl.innerText = (totalGames / sortedPlayerIds.length).toFixed(1);
     }
 
     area.style.display = 'block';
