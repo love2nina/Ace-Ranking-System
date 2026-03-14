@@ -57,7 +57,8 @@ export function recalculateAll(context) {
         rankMap.clear();
         members.forEach(m => {
             m.rating = ELO_INITIAL; m.matchCount = 0; m.wins = 0; m.losses = 0; m.draws = 0; m.scoreDiff = 0;
-            m.mmr = m.mmr || ELO_INITIAL; // 누적 MMR: 기존값 유지 (첫 시즌은 초기값)
+            // 누적 MMR: baseMmr(시즌 시작 기준값)으로 리셋 후 재계산 (멱등성 보장)
+            m.mmr = m.baseMmr !== undefined ? m.baseMmr : ELO_INITIAL;
             m.participationArr = [];
             m.prevRating = ELO_INITIAL;
             delete m.vRank;

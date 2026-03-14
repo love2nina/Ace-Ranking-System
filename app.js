@@ -160,6 +160,12 @@ function startFirebaseInit() {
     }, 15000);
 }
 
+// 방안 A: matchHistory 변경 감지용 경량 해시
+function _matchHistoryHash(history) {
+    if (!history || history.length === 0) return '0';
+    return history.length + ':' + history.map(h => `${h.id}_${h.score1}_${h.score2}`).join(',');
+}
+
 function initFirebase() {
     fbInitFirebase({
         getMembers: () => members,
@@ -170,9 +176,18 @@ function initFirebase() {
             sessionNum = data.sessionNum || 1;
             applicants = data.applicants || [];
             reports = data.reports || {};
-            recalculateAll();
+
+            // 방안 A: matchHistory가 변경된 경우에만 재계산
+            const newHash = _matchHistoryHash(matchHistory);
+            if (newHash !== _lastMatchHistoryHash) {
+                recalculateAll();
+                _lastMatchHistoryHash = newHash;
+                console.log('[Perf] matchHistory changed → recalculateAll executed');
+            } else {
+                console.log('[Perf] matchHistory unchanged → recalculateAll skipped');
+            }
             updateUI();
-            hideLoading(); // 로딩 오버레이 제거
+            hideLoading();
         },
         onEmptyDefault: async () => {
             await fbHandleMigration();
@@ -605,16 +620,26 @@ function updateUI() {
     const unique = [...new Set(matchHistory.map(h => (h.sessionNum || '').toString()))].filter(Boolean);
     const badge = document.getElementById('sessionBadge');
     if (badge) badge.innerText = `진행된 대회: ${unique.length}회차`;
+
+    // 방안 D: 항상 렌더링해야 하는 핵심 UI
     renderApplicants();
     updateOptimizationInfo();
     renderRanking();
     renderCurrentMatches();
-    renderHistory();
-    updateApplyButtonState(); // 신청 버튼 상태 갱신 추가
-    updateStatistics(); // 통계 업데이트 추가
-    renderStatsDashboard(); // 대시보드 렌더링 엔진 가동
-    renderSessionStatus(); // 세션 상태 렌더링 추가
-    window.renderAnalystReport(); // 리포트 렌더링 추가
+    updateApplyButtonState();
+    renderSessionStatus();
+
+    // 방안 D: 현재 활성 탭에 해당하는 것만 렌더링 (지연 로딩)
+    const activeTab = document.querySelector('.tab-content.active');
+    const activeId = activeTab ? activeTab.id.replace('tab-', '') : '';
+    if (activeId === 'history') {
+        renderHistory();
+    } else if (activeId === 'stats') {
+        updateStatistics();
+        renderStatsDashboard();
+    } else if (activeId === 'cast') {
+        window.renderAnalystReport();
+    }
 }
 async function handleSaveReport() {
     if (!isAdmin) return;
@@ -1203,6 +1228,10 @@ function renderRanking() {
 
 window.switchTab = (id) => {
     uiSwitchTab(id, { actions: { renderStatsDashboard } });
+    // 방안 D: 탭 전환 시 해당 탭 데이터 렌더링
+    if (id === 'history') renderHistory();
+    else if (id === 'stats') { updateStatistics(); renderStatsDashboard(); }
+    else if (id === 'cast') window.renderAnalystReport();
 };
 
 function updateStatistics() {

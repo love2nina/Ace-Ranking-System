@@ -468,10 +468,12 @@ export async function switchDatabase() {
                             stats[id].eloGain += (val.eloGain || 0);
                         });
 
+                        const carriedMmr = m.mmr || m.rating || 1500;
                         return {
                             ...m,
                             rating: 1500,
-                            mmr: m.mmr || m.rating || 1500,
+                            mmr: carriedMmr,
+                            baseMmr: carriedMmr, // recalculateAll용 시즌 시작 기준값
                             prevSeasonStats: stats,
                             matchCount: 0, wins: 0, losses: 0, draws: 0, scoreDiff: 0, participationArr: []
                         };
@@ -483,6 +485,7 @@ export async function switchDatabase() {
                     ...m,
                     rating: 1500,
                     mmr: 1500,
+                    baseMmr: 1500, // recalculateAll용 시즌 시작 기준값
                     prevSeasonStats: {},
                     matchCount: 0, wins: 0, losses: 0, draws: 0, scoreDiff: 0, participationArr: []
                 }));
