@@ -204,18 +204,19 @@ export function recalculateAll(context) {
     } catch (e) { console.error("Recalculate Error:", e); }
 }
 
-export function optimizeCourtRoundLayout(players, partners, opponents) {
+export function optimizeCourtRoundLayout(availablePool, numMatches, partners, opponents, matchMode = 'court', gameCounts) {
     let bestMatches = [];
     let bestScore = -Infinity;
-    const numMatches = players.length / 4;
 
-    for (let i = 0; i < 500; i++) {
-        const shuffled = [...players].sort(() => Math.random() - 0.5);
+    for (let i = 0; i < 2000; i++) {
+        const shuffled = [...availablePool].sort(() => Math.random() - 0.5);
         let currentMatches = [];
         let currentTotalScore = 0;
 
         for (let m = 0; m < numMatches; m++) {
             const p = shuffled.slice(m * 4, m * 4 + 4);
+            if (p.length < 4) continue;
+
             const combinations = [
                 { t1: [p[0], p[1]], t2: [p[2], p[3]] },
                 { t1: [p[0], p[2]], t2: [p[1], p[3]] },
@@ -227,14 +228,26 @@ export function optimizeCourtRoundLayout(players, partners, opponents) {
 
             combinations.forEach(c => {
                 let score = 0;
-                if (partners[c.t1[0].id].has(c.t1[1].id)) score -= 100000;
-                if (partners[c.t2[0].id].has(c.t2[1].id)) score -= 100000;
+                
+                // 파트너 중복: 원천 차단
+                if (partners[c.t1[0].id].has(c.t1[1].id)) score -= 10000000;
+                if (partners[c.t2[0].id].has(c.t2[1].id)) score -= 10000000;
 
                 let oppRepeat = 0;
+                let maxOppRepeat = 0;
                 c.t1.forEach(p1 => c.t2.forEach(p2 => {
-                    oppRepeat += (opponents[p1.id].get(p2.id) || 0);
+                    const times = opponents[p1.id].get(p2.id) || 0;
+                    oppRepeat += times;
+                    if (times > maxOppRepeat) maxOppRepeat = times;
                 }));
-                score -= oppRepeat * 500;
+                
+                // 상대편 중복 방지
+                if (matchMode === 'court') {
+                    if (maxOppRepeat >= 1) score -= 10000000;
+                } else {
+                    if (maxOppRepeat >= 2) score -= 10000000;
+                    else score -= oppRepeat * 1000;
+                }
 
                 const r1 = c.t1[0].rating || 1500;
                 const r2 = c.t1[1].rating || 1500;
@@ -251,6 +264,11 @@ export function optimizeCourtRoundLayout(players, partners, opponents) {
 
             currentMatches.push(bestChoice);
             currentTotalScore += bestMatchScore;
+
+            // 게임 횟수 형평성 유지 (많이 뛴 사람이 걸리면 가차없이 페널티 부여)
+            p.forEach(player => {
+                currentTotalScore -= ((gameCounts[player.id] || 0) * 50000);
+            });
         }
 
         if (currentTotalScore > bestScore) {
@@ -315,23 +333,10 @@ function generateCourtSchedule(context) {
                 if (r === 1 && p.lateJoin) return false; // 1R 지각자 제외
                 return true;
             })
-            .sort((a, b) => {
-                if (gameCounts[a.id] !== gameCounts[b.id]) return gameCounts[a.id] - gameCounts[b.id];
-
-                const noiseA = (Math.random() - 0.5) * 100;
-                const noiseB = (Math.random() - 0.5) * 100;
-                const scoreA = (a.rating || 1500) + noiseA;
-                const scoreB = (b.rating || 1500) + noiseB;
-
-                return scoreB - scoreA;
-            });
-
         const numMatches = Math.min(activeCourtsInRound.length, Math.floor(availablePool.length / 4));
-        const roundPlayers = availablePool.slice(0, numMatches * 4);
-
         if (numMatches === 0) continue;
 
-        const roundMatches = optimizeCourtRoundLayout(roundPlayers, partners, opponents);
+        const roundMatches = optimizeCourtRoundLayout(availablePool, numMatches, partners, opponents, 'court', gameCounts);
 
         for (let i = 0; i < roundMatches.length; i++) {
             const match = roundMatches[i];
@@ -455,62 +460,36 @@ export function generateSchedule(context) {
     groupsArr.forEach((g, groupIdx) => {
         const gLabel = String.fromCharCode(65 + groupIdx);
         const groupSize = g.length;
+        const defaultTarget = groupSize === 4 ? 3 : 4;
+        
+        const targetGamesPerPlayer = {};
+        g.forEach(p => {
+            targetGamesPerPlayer[p.id] = p.lateJoin ? Math.min(3, defaultTarget) : defaultTarget;
+        });
 
-        // 4명 조는 3게임, 5명 이상은 4게임 목표
-        const targetGames = groupSize === 4 ? 3 : 4;
-        const totalSlotsNeeded = groupSize * targetGames;
-        const numRounds = Math.ceil(totalSlotsNeeded / 4);
+        // DFS 백트래킹을 이용한 조별리그 대진 생성
+        let matchSchedule = generateGroupScheduleDFS(g, targetGamesPerPlayer, 2);
+        // 2회 한도 내에서 실패 시 3회 통과 허용 처리 (예: 4명 조 등)
+        if (!matchSchedule) matchSchedule = generateGroupScheduleDFS(g, targetGamesPerPlayer, 3);
+        // 그래도 실패 시 극한 타협안으로 999 횟수 허용 (파트너 중복 0만 최우선 방어)
+        if (!matchSchedule) matchSchedule = generateGroupScheduleDFS(g, targetGamesPerPlayer, 999);
 
-        for (let r = 1; r <= numRounds; r++) {
-            // 가용 풀 추출: 목표 게임 수 미달 & 1R 지각자 제외
-            let availablePool = g.filter(p => {
-                if (gameCounts[p.id] >= targetGames) return false;
-                if (r === 1 && p.lateJoin) return false;
-                return true;
-            });
-
-            // 4명 미만이면 현재 라운드는 매칭 불가(스킵)
-            const numToSelect = Math.min(availablePool.length, 4);
-            if (numToSelect < 4) continue;
-
-            // 정렬 로직 (게임 수, MMR + 노이즈)
-            availablePool.sort((a, b) => {
-                if (gameCounts[a.id] !== gameCounts[b.id]) return gameCounts[a.id] - gameCounts[b.id];
-                const noiseA = (Math.random() - 0.5) * 100;
-                const noiseB = (Math.random() - 0.5) * 100;
-                const scoreA = (a.rating || 1500) + noiseA;
-                const scoreB = (b.rating || 1500) + noiseB;
-                return scoreB - scoreA;
-            });
-
-            const roundPlayers = availablePool.slice(0, 4);
-            const roundMatches = optimizeCourtRoundLayout(roundPlayers, partners, opponents);
-            const match = roundMatches[0];
-
-            if (!match) continue;
-
-            const allInMatch = [...match.team1, ...match.team2];
-            allInMatch.forEach(p => gameCounts[p.id]++);
-
-            partners[match.team1[0].id].add(match.team1[1].id);
-            partners[match.team1[1].id].add(match.team1[0].id);
-            partners[match.team2[0].id].add(match.team2[1].id);
-            partners[match.team2[1].id].add(match.team2[0].id);
-
-            match.team1.forEach(p1 => match.team2.forEach(p2 => {
-                opponents[p1.id].set(p2.id, (opponents[p1.id].get(p2.id) || 0) + 1);
-                opponents[p2.id].set(p1.id, (opponents[p2.id].get(p1.id) || 0) + 1);
-            }));
-
-            tempSchedule.push({
-                id: Math.random().toString(36).substr(2, 9),
-                sessionNum: currentSessionState.sessionNum || sessionNum,
-                group: gLabel,
-                groupRound: r,
-                t1: [{ ...match.team1[0] }, { ...match.team1[1] }],
-                t2: [{ ...match.team2[0] }, { ...match.team2[1] }],
-                s1: null,
-                s2: null
+        if (matchSchedule) {
+            matchSchedule.forEach((m, matchIdx) => {
+                const r = matchIdx + 1;
+                tempSchedule.push({
+                    id: Math.random().toString(36).substr(2, 9),
+                    sessionNum: currentSessionState.sessionNum || sessionNum,
+                    group: gLabel,
+                    groupRound: r,
+                    t1: [{ ...m.t1[0] }, { ...m.t1[1] }],
+                    t2: [{ ...m.t2[0] }, { ...m.t2[1] }],
+                    s1: null,
+                    s2: null
+                });
+                [...m.t1, ...m.t2].forEach(p => {
+                    gameCounts[p.id] = (gameCounts[p.id] || 0) + 1;
+                });
             });
         }
     });
@@ -521,4 +500,104 @@ export function generateSchedule(context) {
         gameCounts,
         previewGroups: null
     };
+}
+
+// ==== 조별리그 전용 DFS 백트래킹 매칭 (파트너 중복 원천 차단 보장) ==== //
+function generateGroupScheduleDFS(group, targetGamesPerPlayer, maxOpponentRepeats = 2) {
+    const totalSlots = group.reduce((acc, p) => acc + targetGamesPerPlayer[p.id], 0);
+    const numMatches = Math.floor(totalSlots / 4);
+
+    const gameCounts = {}; group.forEach(p => gameCounts[p.id] = 0);
+    const partners = {}; group.forEach(p => partners[p.id] = new Set());
+    const opponents = {}; group.forEach(p => opponents[p.id] = new Map());
+
+    const matches = [];
+
+    const validPairs = [];
+    for (let i = 0; i < group.length; i++) {
+        for (let j = i + 1; j < group.length; j++) {
+            validPairs.push([group[i], group[j]]);
+        }
+    }
+
+    function canAddMatch(t1, t2) {
+        // 1R 지각자 제외: 첫 라운드(matches.length === 0)엔 늦자리 제외
+        if (matches.length === 0) {
+            for (let p of [...t1, ...t2]) {
+                if (p.lateJoin) return false;
+            }
+        }
+
+        // 게임 수 초과 확인
+        for (let p of [...t1, ...t2]) {
+            if (gameCounts[p.id] >= targetGamesPerPlayer[p.id]) return false;
+        }
+
+        // 파트너 중복 절대 금지
+        if (partners[t1[0].id].has(t1[1].id)) return false;
+        if (partners[t2[0].id].has(t2[1].id)) return false;
+
+        // 상대편 중복 횟수 상한 확인
+        for (let p1 of t1) {
+            for (let p2 of t2) {
+                if ((opponents[p1.id].get(p2.id) || 0) >= maxOpponentRepeats) return false;
+            }
+        }
+        return true;
+    }
+
+    function addMatch(t1, t2) {
+        t1.forEach(p => gameCounts[p.id]++);
+        t2.forEach(p => gameCounts[p.id]++);
+        partners[t1[0].id].add(t1[1].id); partners[t1[1].id].add(t1[0].id);
+        partners[t2[0].id].add(t2[1].id); partners[t2[1].id].add(t2[0].id);
+        t1.forEach(p1 => t2.forEach(p2 => {
+            opponents[p1.id].set(p2.id, (opponents[p1.id].get(p2.id) || 0) + 1);
+            opponents[p2.id].set(p1.id, (opponents[p2.id].get(p1.id) || 0) + 1);
+        }));
+        matches.push({t1, t2});
+    }
+
+    function removeMatch(t1, t2) {
+        t1.forEach(p => gameCounts[p.id]--);
+        t2.forEach(p => gameCounts[p.id]--);
+        partners[t1[0].id].delete(t1[1].id); partners[t1[1].id].delete(t1[0].id);
+        partners[t2[0].id].delete(t2[1].id); partners[t2[1].id].delete(t2[0].id);
+        t1.forEach(p1 => t2.forEach(p2 => {
+            opponents[p1.id].set(p2.id, opponents[p1.id].get(p2.id) - 1);
+            opponents[p2.id].set(p1.id, opponents[p2.id].get(p1.id) - 1);
+        }));
+        matches.pop();
+    }
+
+    const maxDfSSteps = 50000;
+    let dfsSteps = 0;
+
+    function dfs() {
+        if (matches.length === numMatches) return true;
+        if (dfsSteps++ > maxDfSSteps) return false;
+
+        const shuffledPairs = [...validPairs].sort(() => Math.random() - 0.5);
+
+        for (let i = 0; i < shuffledPairs.length; i++) {
+            const p1 = shuffledPairs[i];
+            for (let j = i + 1; j < shuffledPairs.length; j++) {
+                const p2 = shuffledPairs[j];
+                
+                // 4명 중복 여부 확인
+                if (p1[0].id === p2[0].id || p1[0].id === p2[1].id || 
+                    p1[1].id === p2[0].id || p1[1].id === p2[1].id) continue;
+
+                if (canAddMatch(p1, p2)) {
+                    addMatch(p1, p2);
+                    if (dfs()) return true;
+                    removeMatch(p1, p2);
+                }
+            }
+        }
+        return false;
+    }
+
+    if (dfs()) return matches;
+    return null;
 }
