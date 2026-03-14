@@ -638,7 +638,7 @@ function updateUI() {
     } else if (activeId === 'stats') {
         updateStatistics();
         renderStatsDashboard();
-    } else if (activeId === 'cast') {
+    } else if (activeId === 'caster') {
         window.renderAnalystReport();
     }
 }
@@ -1232,7 +1232,7 @@ window.switchTab = (id) => {
     // 방안 D: 탭 전환 시 해당 탭 데이터 렌더링
     if (id === 'history') renderHistory();
     else if (id === 'stats') { updateStatistics(); renderStatsDashboard(); }
-    else if (id === 'cast') window.renderAnalystReport();
+    else if (id === 'caster') window.renderAnalystReport();
 };
 
 function updateStatistics() {
