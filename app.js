@@ -819,6 +819,16 @@ window.removeApplicant = async (id) => {
     renderApplicants();
 };
 
+window.toggleLateJoin = async (id) => {
+    if (!isAdmin) return;
+    const applicant = applicants.find(a => String(a.id) === String(id));
+    if (!applicant) return;
+    applicant.lateJoin = !applicant.lateJoin;
+    console.log(`[Admin] Toggled lateJoin for ${applicant.name}: ${applicant.lateJoin}`);
+    await window.saveToCloud('toggleLateJoin');
+    renderApplicants();
+};
+
 function updateOptimizationInfo() {
     uiUpdateOptimizationInfo({ currentSessionState, applicants, previewGroups, GAME_COUNTS, getSplits });
 }

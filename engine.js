@@ -310,7 +310,11 @@ function generateCourtSchedule(context) {
         if (activeCourtsInRound.length === 0) continue;
 
         const availablePool = [...players]
-            .filter(p => gameCounts[p.id] < maxGamesPerPlayer)
+            .filter(p => {
+                if (gameCounts[p.id] >= maxGamesPerPlayer) return false;
+                if (r === 1 && p.lateJoin) return false; // 1R 지각자 제외
+                return true;
+            })
             .sort((a, b) => {
                 if (gameCounts[a.id] !== gameCounts[b.id]) return gameCounts[a.id] - gameCounts[b.id];
 
@@ -441,28 +445,74 @@ export function generateSchedule(context) {
     const gameCounts = {};
     applicants.forEach(a => gameCounts[a.id] = 0);
 
+    const partners = {};
+    const opponents = {};
+    applicants.forEach(p => {
+        partners[p.id] = new Set();
+        opponents[p.id] = new Map();
+    });
+
     groupsArr.forEach((g, groupIdx) => {
-        const pattern = MATCH_PATTERNS[g.length]; if (!pattern) return;
-
-        const optimizedGroup = g;
         const gLabel = String.fromCharCode(65 + groupIdx);
+        const groupSize = g.length;
 
-        pattern.forEach((m, matchIdx) => {
-            let roundNum = Math.floor(matchIdx / (g.length === 8 ? 2 : 1)) + 1;
-            const matchData = {
+        // 4명 조는 3게임, 5명 이상은 4게임 목표
+        const targetGames = groupSize === 4 ? 3 : 4;
+        const totalSlotsNeeded = groupSize * targetGames;
+        const numRounds = Math.ceil(totalSlotsNeeded / 4);
+
+        for (let r = 1; r <= numRounds; r++) {
+            // 가용 풀 추출: 목표 게임 수 미달 & 1R 지각자 제외
+            let availablePool = g.filter(p => {
+                if (gameCounts[p.id] >= targetGames) return false;
+                if (r === 1 && p.lateJoin) return false;
+                return true;
+            });
+
+            // 4명 미만이면 현재 라운드는 매칭 불가(스킵)
+            const numToSelect = Math.min(availablePool.length, 4);
+            if (numToSelect < 4) continue;
+
+            // 정렬 로직 (게임 수, MMR + 노이즈)
+            availablePool.sort((a, b) => {
+                if (gameCounts[a.id] !== gameCounts[b.id]) return gameCounts[a.id] - gameCounts[b.id];
+                const noiseA = (Math.random() - 0.5) * 100;
+                const noiseB = (Math.random() - 0.5) * 100;
+                const scoreA = (a.rating || 1500) + noiseA;
+                const scoreB = (b.rating || 1500) + noiseB;
+                return scoreB - scoreA;
+            });
+
+            const roundPlayers = availablePool.slice(0, 4);
+            const roundMatches = optimizeCourtRoundLayout(roundPlayers, partners, opponents);
+            const match = roundMatches[0];
+
+            if (!match) continue;
+
+            const allInMatch = [...match.team1, ...match.team2];
+            allInMatch.forEach(p => gameCounts[p.id]++);
+
+            partners[match.team1[0].id].add(match.team1[1].id);
+            partners[match.team1[1].id].add(match.team1[0].id);
+            partners[match.team2[0].id].add(match.team2[1].id);
+            partners[match.team2[1].id].add(match.team2[0].id);
+
+            match.team1.forEach(p1 => match.team2.forEach(p2 => {
+                opponents[p1.id].set(p2.id, (opponents[p1.id].get(p2.id) || 0) + 1);
+                opponents[p2.id].set(p1.id, (opponents[p2.id].get(p1.id) || 0) + 1);
+            }));
+
+            tempSchedule.push({
                 id: Math.random().toString(36).substr(2, 9),
                 sessionNum: currentSessionState.sessionNum || sessionNum,
-                group: gLabel, groupRound: roundNum,
-                t1: [{ ...optimizedGroup[m[0][0]] }, { ...optimizedGroup[m[0][1]] }],
-                t2: [{ ...optimizedGroup[m[1][0]] }, { ...optimizedGroup[m[1][1]] }],
-                s1: null, s2: null
-            };
-            tempSchedule.push(matchData);
-
-            [...matchData.t1, ...matchData.t2].forEach(p => {
-                gameCounts[p.id] = (gameCounts[p.id] || 0) + 1;
+                group: gLabel,
+                groupRound: r,
+                t1: [{ ...match.team1[0] }, { ...match.team1[1] }],
+                t2: [{ ...match.team2[0] }, { ...match.team2[1] }],
+                s1: null,
+                s2: null
             });
-        });
+        }
     });
 
     return {

@@ -162,9 +162,19 @@ export function renderApplicants(context) {
         setPreviewGroups(null);
         sortedApplicants.forEach(a => {
             const div = document.createElement('div'); div.className = 'player-tag';
+            if (a.lateJoin) div.classList.add('late-join');
             const info = rankMap.get(String(a.id));
             const rankLabel = info ? `<span style="font-size:0.8em; color:var(--text-secondary)">(${info.rank})</span>` : `<span style="font-size:0.8em; color:var(--accent-color)">(New)</span>`;
-            div.innerHTML = `${a.name}${rankLabel}${isAdmin ? ` <span class="remove-btn" onclick="event.stopPropagation(); removeApplicant('${a.id}')">×</span>` : ''}`;
+            
+            let lateBtn = '';
+            if (isAdmin) {
+                const isLate = a.lateJoin;
+                const icon = isLate ? '⏰' : '🕒';
+                const style = isLate ? 'color: var(--accent-color); font-weight: bold;' : 'opacity: 0.5; filter: grayscale(1);';
+                lateBtn = ` <span style="cursor:pointer; margin-left:5px; font-size:1.1em; ${style}" onclick="event.stopPropagation(); window.toggleLateJoin('${a.id}')" title="눌러서 2라운드부터 참여(지각) 토글">${icon}</span>`;
+            }
+            
+            div.innerHTML = `${a.name}${rankLabel}${lateBtn}${isAdmin ? ` <span class="remove-btn" onclick="event.stopPropagation(); removeApplicant('${a.id}')">×</span>` : ''}`;
             list.appendChild(div);
         });
         return;
@@ -268,9 +278,24 @@ export function renderApplicants(context) {
         group.forEach(a => {
             const tag = document.createElement('div');
             tag.className = 'player-tag' + (isAdmin ? ' draggable' : '');
+            if (a.lateJoin) tag.classList.add('late-join');
             const info = rankMap.get(String(a.id));
             const rankLabel = info ? `<span style="font-size:0.8em; color:var(--text-secondary)">(${info.rank})</span>` : `<span style="font-size:0.8em; color:var(--accent-color)">(New)</span>`;
-            tag.innerHTML = `${a.name}${rankLabel}${isAdmin ? ` <span class="remove-btn" onclick="event.stopPropagation(); removeApplicant('${a.id}')">×</span>` : ''}`;
+            
+            let lateBtn = '';
+            if (isAdmin) {
+                const isLate = a.lateJoin;
+                const icon = isLate ? '⏰' : '🕒';
+                const style = isLate ? 'color: var(--accent-color); font-weight: bold;' : 'opacity: 0.5; filter: grayscale(1);';
+                // 4명 조에서는 지각 옵션 비활성화
+                const isDisabled = group.length <= 4;
+                const clickHandler = isDisabled ? `alert('4명 조에서는 지각을 허용할 수 없습니다.')` : `window.toggleLateJoin('${a.id}')`;
+                const disabledStyle = isDisabled ? 'opacity: 0.2; cursor: not-allowed;' : 'cursor: pointer;';
+                
+                lateBtn = ` <span style="${disabledStyle} margin-left:5px; font-size:1.1em; ${isDisabled ? '' : style}" onclick="event.stopPropagation(); ${clickHandler}" title="${isDisabled ? '4명 조 지각 불가' : '눌러서 2라운드부터 참여(지각) 토글'}">${icon}</span>`;
+            }
+
+            tag.innerHTML = `${a.name}${rankLabel}${lateBtn}${isAdmin ? ` <span class="remove-btn" onclick="event.stopPropagation(); removeApplicant('${a.id}')">×</span>` : ''}`;
 
             if (isAdmin) {
                 tag.draggable = true;
