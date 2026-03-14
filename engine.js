@@ -464,7 +464,7 @@ export function generateSchedule(context) {
         
         const targetGamesPerPlayer = {};
         g.forEach(p => {
-            targetGamesPerPlayer[p.id] = p.lateJoin ? Math.min(3, defaultTarget) : defaultTarget;
+            targetGamesPerPlayer[p.id] = defaultTarget;
         });
 
         // DFS 백트래킹을 이용한 조별리그 대진 생성
