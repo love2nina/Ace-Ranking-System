@@ -369,8 +369,9 @@
         <div class="modal-content" style="max-width: 350px;">
             <h3>🔐 관리자 인증</h3>
             <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 15px;">운영 비밀번호를 입력해 주세요.</p>
-            <input type="text" id="adminPassword" class="admin-pw-input" placeholder="비밀번호 입력"
-                style="width: 100%; margin-bottom: 20px;" autocomplete="new-password">
+            <input type="password" id="adminPassword" class="admin-pw-input" placeholder="비밀번호 입력"
+                style="width: 100%; margin-bottom: 10px;" autocomplete="current-password">
+            <p id="adminLoginStatus" style="font-size: 0.8rem; color: #ef4444; margin: 0 0 15px 0; min-height: 1.2em;"></p>
             <div style="display: flex; gap: 10px;">
                 <button onclick="closeAdminModal()" class="secondary" style="flex: 1;">취소</button>
                 <button id="confirmAdminBtn" style="flex: 1;">로그인</button>

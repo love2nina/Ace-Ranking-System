@@ -177,6 +177,11 @@ export function renderApplicants(context) {
             div.innerHTML = `${a.name}${rankLabel}${lateBtn}${isAdmin ? ` <span class="remove-btn" onclick="event.stopPropagation(); removeApplicant('${a.id}')">×</span>` : ''}`;
             list.appendChild(div);
         });
+
+        // [v34] 코트 모드여도 신청 인원이 충분하면 대진표 생성 버튼(Dashboard)을 보여줘야 함
+        if (sortedApplicants.length >= 4) {
+            updateOptimizationInfo(context);
+        }
         return;
     }
 
@@ -423,7 +428,7 @@ export function updateSplitInputFromPreview(context) {
 }
 
 export function renderSchedulePreview(context) {
-    const { gameCounts, applicants } = context;
+    const { gameCounts, applicants, rankMap } = context;
     const area = document.getElementById('schedulePreviewArea');
     const grid = document.getElementById('previewStatsGrid');
     const avgEl = document.getElementById('previewAvgGames');
@@ -432,8 +437,13 @@ export function renderSchedulePreview(context) {
     grid.innerHTML = '';
     let totalGames = 0;
     
-    // 레이팅 내림차순(랭킹 순서)으로 정렬
-    const sortedApplicants = [...applicants].sort((a, b) => (b.rating || 1500) - (a.rating || 1500));
+    // 랭킹 기반 정렬 (New 선수는 하단 배치)
+    const sortedApplicants = [...applicants].sort((a, b) => {
+        const rA = rankMap ? (rankMap.get(String(a.id))?.rank || 9999) : 9999;
+        const rB = rankMap ? (rankMap.get(String(b.id))?.rank || 9999) : 9999;
+        if (rA !== rB) return rA - rB;
+        return (b.rating || 1500) - (a.rating || 1500);
+    });
     const sortedPlayerIds = sortedApplicants.map(a => String(a.id)).filter(id => gameCounts[id] !== undefined);
 
     sortedPlayerIds.forEach(id => {
@@ -496,7 +506,7 @@ export function renderCurrentMatches(context) {
                 const btn = document.createElement('button');
                 btn.className = `sub-tab-btn ${activeGroupTab === rLabel ? 'active' : ''}`;
                 btn.innerText = rLabel;
-                btn.onclick = () => { setActiveGroupTab(rLabel); selfRender(context); };
+                btn.onclick = () => { setActiveGroupTab(rLabel); };
                 tabs.appendChild(btn);
             });
         } else {
@@ -505,7 +515,7 @@ export function renderCurrentMatches(context) {
                 const btn = document.createElement('button');
                 btn.className = `sub-tab-btn ${activeGroupTab === g ? 'active' : ''}`;
                 btn.innerText = `${g}조`;
-                btn.onclick = () => { setActiveGroupTab(g); selfRender(context); };
+                btn.onclick = () => { setActiveGroupTab(g); };
                 tabs.appendChild(btn);
             });
         }
@@ -726,11 +736,8 @@ export function renderHistory(context) {
                 const t2Names = isSwap ? h.t1_names : h.t2_names;
 
                 const getRankStrArr = (ids, names, sId) => {
-                    const prevSId = (parseInt(sId) - 1).toString();
                     return names.map((n, i) => {
-                        const r = (sessionRankSnapshots[prevSId] && sessionRankSnapshots[prevSId][ids[i]]) || null;
-                        const rankHtml = r ? ` <span style="font-size:0.75rem; color:var(--text-secondary)">(${r})</span>` : '';
-                        return `<div style="font-size:0.85rem; white-space:nowrap;"><strong>${n}</strong>${rankHtml}</div>`;
+                        return `<div style="font-size:0.85rem; white-space:nowrap;"><strong>${n}</strong></div>`;
                     });
                 };
 
@@ -840,6 +847,13 @@ export function renderRanking(context) {
     const { members, matchHistory, rankMap, currentSessionState, applicants, currentSchedule } = context;
     const tbody = document.querySelector('#rankingTable tbody'); if (!tbody) return;
     tbody.innerHTML = '';
+
+    // [v43] 세션 배지 업데이트 (총 대회 횟수 표시)
+    const sessionBadge = document.getElementById('sessionBadge');
+    if (sessionBadge) {
+        const uniqueSessionCount = [...new Set(matchHistory.map(h => String(h.sessionNum)))].length;
+        sessionBadge.innerText = `진행된 대회: ${uniqueSessionCount}회차`;
+    }
 
     // 모든 세션 ID 추출 (오름차순: [1, 2, 3...])
     const allSessionsSorted = [...new Set(matchHistory.map(h => (h.sessionNum || '').toString()))]

@@ -243,7 +243,7 @@ window.toggleLateJoin = (id) => {
     const player = applicants.find(p => String(p.id) === String(id));
     if (player) {
         player.lateJoin = !player.lateJoin;
-        fbSaveToCloud({ applicants });
+        fbSaveToCloud({ applicants }, 'toggleLateJoin');
         updateUI();
     }
 };
@@ -337,6 +337,21 @@ function setupEventListeners() {
             }
         };
     }
+
+    // 대진 방식(matchMode) 변경 이벤트 리스너 추가
+    const matchModeRadios = document.querySelectorAll('input[name="matchMode"]');
+    matchModeRadios.forEach(radio => {
+        radio.onchange = async () => {
+            if (isAdmin) {
+                await fbSaveSessionState(
+                    currentSessionState.status,
+                    currentSessionState.sessionNum,
+                    currentSessionState.info,
+                    radio.value
+                );
+            }
+        };
+    });
 }
 
 // --- 코어 UI 동기화 ---
@@ -352,7 +367,7 @@ function updateUI() {
             updateSplitInputFromPreview: () => uiUpdateSplitInputFromPreview(context),
             renderApplicants: () => uiRenderApplicants(context),
             updateOptimizationInfo: () => uiUpdateOptimizationInfo(context),
-            setActiveGroupTab: (val) => { activeGroupTab = val; },
+            setActiveGroupTab: (val) => { activeGroupTab = val; updateUI(); },
             renderCurrentMatches: () => uiRenderCurrentMatches(context),
             openCurrentMatchEditModal: (id) => openCurrentMatchEditModal(id),
             renderStatsDashboard: () => uiRenderStatsDashboard(context),
@@ -382,7 +397,7 @@ function recalculateAll() {
 }
 window.removeApplicant = (id) => {
     applicants = applicants.filter(p => String(p.id) !== String(id));
-    fbSaveToCloud({ applicants });
+    fbSaveToCloud({ applicants }, 'removeApplicant');
     updateUI();
 };
 window.updateLiveScore = (id, team, val) => {
@@ -422,7 +437,7 @@ function generateSchedule() {
     if (result) {
         tempSchedule = result.tempSchedule;
         activeGroupTab = result.activeGroupTab;
-        uiRenderSchedulePreview({ gameCounts: result.gameCounts, applicants });
+        uiRenderSchedulePreview({ gameCounts: result.gameCounts, applicants, rankMap });
 
         const finalizeBtn = document.getElementById('finalizeScheduleBtn');
         if (finalizeBtn) finalizeBtn.style.display = 'block';
@@ -437,7 +452,7 @@ async function finalizeSchedule() {
     const info = document.getElementById('manualSessionInfo')?.value || document.getElementById('sessionInfoSelect')?.value || "";
     const matchMode = currentSessionState.matchMode || 'court';
 
-    await fbSaveToCloud({ currentSchedule: tempSchedule });
+    await fbSaveToCloud({ currentSchedule: tempSchedule }, 'finalizeSchedule');
     await fbSaveSessionState('playing', sessionNum, info, matchMode);
 
     tempSchedule = null;
@@ -449,7 +464,7 @@ async function cancelSchedule() {
     if (!isAdmin) return;
     if (!confirm("현재 진행 중인 대진표를 초기화하시겠습니까? (입력된 점수가 모두 사라집니다)")) return;
 
-    await fbSaveToCloud({ currentSchedule: [] });
+    await fbSaveToCloud({ currentSchedule: [] }, 'cancelSchedule');
     await fbSaveSessionState('recruiting', currentSessionState.sessionNum, currentSessionState.info, currentSessionState.matchMode);
 }
 
@@ -472,7 +487,7 @@ function addPlayer() {
     applicants.push(newPlayer);
     previewGroups = null; // 인원 변경 시 프리뷰 초기화
 
-    fbSaveToCloud({ applicants });
+    fbSaveToCloud({ applicants }, 'addPlayer');
     input.value = '';
     input.focus();
 }
@@ -500,8 +515,24 @@ async function commitSession() {
         await fbAddHistoryItem(historyItem);
     }
 
+    // [v41] 신규 회원 자동 등재: members에 없는 참가자를 자동 저장
+    const currentMemberIds = new Set(members.map(m => String(m.id)));
+    let addedAny = false;
+    currentSchedule.forEach(m => {
+        [...m.t1, ...m.t2].forEach(p => {
+            if (p.id && !currentMemberIds.has(String(p.id))) {
+                members.push({ ...p, matchCount: 0, wins: 0, losses: 0, draws: 0, scoreDiff: 0 });
+                currentMemberIds.add(String(p.id));
+                addedAny = true;
+            }
+        });
+    });
+    if (addedAny) {
+        await fbSaveToCloud({ members }, 'commitSession:autoMember');
+    }
+
     // 상태 초기화
-    await fbSaveToCloud({ currentSchedule: [], applicants: [] });
+    await fbSaveToCloud({ currentSchedule: [], applicants: [] }, 'commitSession');
     await fbSaveSessionState('idle', currentSessionState.sessionNum, "", currentSessionState.matchMode);
     alert("결과가 성공적으로 반영되었습니다.");
 }
@@ -693,23 +724,38 @@ function openAdminModal() {
         }
     } else {
         const modal = document.getElementById('adminModal');
+        const status = document.getElementById('adminLoginStatus');
+        const pwInput = document.getElementById('adminPassword');
+        if (status) status.innerText = '';
+        if (pwInput) pwInput.value = '';
         modal.classList.remove('hidden');
         modal.style.display = 'flex';
+        if (pwInput) setTimeout(() => pwInput.focus(), 100);
     }
 }
 
 function tryAdminLogin() {
-    const pw = document.getElementById('adminPassword').value;
+    const pwInput = document.getElementById('adminPassword');
+    const status = document.getElementById('adminLoginStatus');
+    const pw = pwInput ? pwInput.value.trim() : '';
+
     if (pw === systemSettings.admin_pw) {
         isAdmin = true;
         localStorage.setItem('ace_admin_pw', pw);
         const modal = document.getElementById('adminModal');
         modal.classList.add('hidden');
         modal.style.display = 'none';
-        document.getElementById('adminPassword').value = '';
+        if (pwInput) pwInput.value = '';
+        if (status) status.innerText = '';
         updateUI();
     } else {
-        alert("비밀번호가 올바르지 않습니다.");
+        if (status) {
+            status.innerText = "비밀번호가 올바르지 않습니다.";
+            status.style.color = "#ef4444";
+        }
+        if (pwInput) {
+            pwInput.select(); // 틀렸을 때 바로 수정할 수 있게 선택 상태로 만듦
+        }
     }
 }
 

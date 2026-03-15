@@ -296,31 +296,46 @@ export async function deleteVideo(videoId) {
  * @param {string} caller - 호출 경로 식별용 문자열
  */
 export async function saveToCloud(appState, caller = 'unknown') {
-    // --- 안전장치: 빈 데이터 덮어쓰기 방지 ---
-    const memberCount = (appState.members || []).length;
-    const historyCount = (appState.matchHistory || []).length;
-
-    if (memberCount === 0 && historyCount === 0) {
-        console.warn(`[SaveToCloud] ⚠️ BLOCKED: 빈 데이터 저장 시도 차단됨 (caller: ${caller}, DB: ${currentDbName})`);
-        console.warn(`[SaveToCloud] members: ${memberCount}, matchHistory: ${historyCount}`);
-        console.trace('[SaveToCloud] 호출 스택:');
-        return; // 빈 데이터를 저장하지 않음
-    }
-
-    console.log(`[SaveToCloud] 저장 실행 (caller: ${caller}, DB: ${currentDbName}, members: ${memberCount}, history: ${historyCount})`);
-
     const { doc, setDoc } = window.FB_SDK;
     const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
+
+    // --- 안전장치: 데이터 유실 방지 가드 강화 ---
+    // 1. 전달된 필드 중 하나라도 데이터가 들어있는지 확인
+    const hasPopulatedData = [
+        appState.members,
+        appState.matchHistory,
+        appState.currentSchedule,
+        appState.applicants
+    ].some(arr => Array.isArray(arr) && arr.length > 0);
+
+    // 2. 멤버와 히스토리가 모두 '명시적으로' 포함되어 있는데 둘 다 비어있는 경우(완전 초기화 시도)만 차단
+    const isExplicitWipeAttempt = 
+        (appState.hasOwnProperty('members') && Array.isArray(appState.members) && appState.members.length === 0) &&
+        (appState.hasOwnProperty('matchHistory') && Array.isArray(appState.matchHistory) && appState.matchHistory.length === 0);
+
+    if (isExplicitWipeAttempt && !hasPopulatedData) {
+        console.warn(`[SaveToCloud] ⚠️ BLOCKED: 완전 초기화 시도 차단됨 (caller: ${caller}, DB: ${currentDbName})`);
+        console.trace('[SaveToCloud] 호출 스택:');
+        return;
+    }
+
+    console.log(`[SaveToCloud] 저장 실행 (caller: ${caller}, DB: ${currentDbName})`);
+
     try {
-        await setDoc(doc(db, clusterPath, currentDbName), {
-            members: appState.members,
-            matchHistory: appState.matchHistory,
-            currentSchedule: appState.currentSchedule,
-            sessionNum: appState.sessionNum,
-            applicants: appState.applicants,
-            reports: appState.reports || {},
-            updatedAt: serverTimestamp()
+        // [v36] 전달된 필드만 업데이트하기 위해 merge: true 사용 및 유효한 데이터만 구성
+        const dataToSave = { 
+            updatedAt: window.FB_SDK.serverTimestamp() 
+        };
+        
+        // appState에 존재하는 키만 dataToSave에 포함 (undefined 제외)
+        const validKeys = ['members', 'matchHistory', 'currentSchedule', 'sessionNum', 'applicants', 'reports'];
+        validKeys.forEach(key => {
+            if (appState.hasOwnProperty(key) && appState[key] !== undefined) {
+                dataToSave[key] = appState[key];
+            }
         });
+
+        await setDoc(doc(db, clusterPath, currentDbName), dataToSave, { merge: true });
     } catch (e) {
         console.error("Cloud Error:", e);
     }
@@ -576,7 +591,7 @@ export { getServerData as fbGetServerData };
  * @param {number|null} s2 - 팀 2 점수
  */
 export async function saveMatchScoreWithTransaction(matchId, s1, s2) {
-    const { doc, runTransaction } = window.FB_SDK;
+    const { doc, runTransaction, serverTimestamp } = window.FB_SDK;
     const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
     const docRef = doc(db, clusterPath, currentDbName);
 
@@ -614,7 +629,7 @@ export async function saveMatchScoreWithTransaction(matchId, s1, s2) {
  * @param {Object} item - 히스토리 경기 객체
  */
 export async function addHistoryItem(item) {
-    const { collection, addDoc, serverTimestamp, doc } = window.FB_SDK;
+    const { collection, setDoc, serverTimestamp, doc } = window.FB_SDK;
     const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
     const historyCol = collection(db, clusterPath, currentDbName, "history");
 

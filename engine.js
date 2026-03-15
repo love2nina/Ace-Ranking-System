@@ -54,6 +54,28 @@ export function getSplits(n) {
 export function recalculateAll(context) {
     const { members, matchHistory, rankMap, sessionRankSnapshots, sessionStartRatings } = context;
     try {
+        // [v41] 신규 DB 지원: 히스토리에만 있고 회원 목록에 없는 선수를 자동 등재 (로컬 복구용)
+        const memberIdSet = new Set(members.map(m => String(m.id)));
+        matchHistory.forEach(h => {
+            const ids = [...(h.t1_ids || []), ...(h.t2_ids || [])];
+            const names = [...(h.t1_names || []), ...(h.t2_names || [])];
+            ids.forEach((id, idx) => {
+                const sId = String(id);
+                if (id && !memberIdSet.has(sId)) {
+                    members.push({
+                        id: sId,
+                        name: names[idx] || "Unknown",
+                        rating: ELO_INITIAL,
+                        matchCount: 0, wins: 0, losses: 0, draws: 0, scoreDiff: 0,
+                        mmr: ELO_INITIAL,
+                        participationArr: [],
+                        prevRating: ELO_INITIAL
+                    });
+                    memberIdSet.add(sId);
+                }
+            });
+        });
+
         rankMap.clear();
         members.forEach(m => {
             m.rating = ELO_INITIAL; m.matchCount = 0; m.wins = 0; m.losses = 0; m.draws = 0; m.scoreDiff = 0;
@@ -75,7 +97,8 @@ export function recalculateAll(context) {
             const isLastSession = idx === sessionIds.length - 1;
             if (isLastSession) {
                 members.forEach(m => m.prevRating = m.rating);
-                previousRanking = [...members].sort((a, b) => {
+                // [v43] 순위 변동 계산은 경기를 한 번이라도 치른 활성 멤버들 사이의 상대적 순위로 계산함
+                previousRanking = members.filter(m => m.matchCount > 0).sort((a, b) => {
                     if (b.rating !== a.rating) return b.rating - a.rating;
                     return String(a.id).localeCompare(String(b.id));
                 }).map(m => m.id);
@@ -185,7 +208,8 @@ export function recalculateAll(context) {
             context.sessionEndRatings[sId] = members.reduce((acc, m) => { acc[m.id] = m.rating; return acc; }, {});
         });
 
-        const currentRanking = [...members].sort((a, b) => {
+        // [v43] 최종 순위 맵 업데이트 시에도 활성 멤버들만 대상으로 순위를 매김
+        const currentRanking = members.filter(m => m.matchCount > 0).sort((a, b) => {
             if (b.rating !== a.rating) return b.rating - a.rating;
             if (b.wins !== a.wins) return b.wins - a.wins;
             const bWinRate = b.matchCount > 0 ? b.wins / b.matchCount : 0;
