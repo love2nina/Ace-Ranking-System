@@ -152,7 +152,7 @@ window.closeAdminModal = () => {
 
 window.openDbModal = async () => {
     document.getElementById('dbModal').classList.remove('hidden');
-    document.getElementById('dbModal').style.display = 'block';
+    document.getElementById('dbModal').style.display = 'flex';
     const select = document.getElementById('dbListSelect');
     const prevSelect = document.getElementById('prevDbSelect');
     if (select) {
@@ -171,7 +171,7 @@ window.closeDbModal = () => {
 window.openHelpModal = () => {
     const modal = document.getElementById('helpModal');
     modal.classList.remove('hidden');
-    modal.style.display = 'block';
+    modal.style.display = 'flex';
 };
 window.closeHelpModal = () => {
     const modal = document.getElementById('helpModal');
@@ -182,7 +182,7 @@ window.closeHelpModal = () => {
 window.openVideoModal = () => {
     const modal = document.getElementById('videoModal');
     modal.classList.remove('hidden');
-    modal.style.display = 'block';
+    modal.style.display = 'flex';
 };
 window.closeVideoModal = () => {
     const modal = document.getElementById('videoModal');
@@ -640,13 +640,13 @@ async function handleCopyAIData() {
 
 async function handleSaveReport() {
     const sessionNum = document.getElementById('reportPostSessionNum')?.value;
-    const content = document.getElementById('reportContent')?.value;
+    const content = document.getElementById('reportPostContent')?.value;
     if (!sessionNum || !content) {
         alert("회차와 내용을 모두 입력해주세요.");
         return;
     }
     await fbSaveReport(sessionNum, content);
-    document.getElementById('reportContent').value = '';
+    document.getElementById('reportPostContent').value = '';
     alert("리포트가 저장되었습니다.");
 }
 
@@ -669,7 +669,7 @@ function openAdminModal() {
     } else {
         const modal = document.getElementById('adminModal');
         modal.classList.remove('hidden');
-        modal.style.display = 'block';
+        modal.style.display = 'flex';
     }
 }
 
