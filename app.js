@@ -139,7 +139,22 @@ async function init() {
 }
 
 // --- 윈도우 익스포트 (UI 제어용) ---
-window.switchTab = (id) => uiSwitchTab(id, { actions: { renderStatsDashboard: () => uiRenderStatsDashboard({ members, matchHistory, actions: { /* ... */ } }) } });
+window.switchTab = (id) => {
+    const ctx = {
+        members, matchHistory, reports, currentSessionState, isAdmin, videos,
+        applicants, currentSchedule, sessionEndRatings, sessionRankSnapshots,
+        ELO_INITIAL,
+        actions: {
+            renderStatsDashboard: (c) => uiRenderStatsDashboard(c),
+            renderEloChart: (c) => uiRenderEloChart(c),
+            updatePlayerSelect: (c) => uiUpdatePlayerSelect(c),
+            renderPlayerTrend: (c) => uiRenderPlayerTrend(c),
+            renderAnalystReport: (c) => uiRenderAnalystReport(c),
+            renderVideoGallery: (c) => uiRenderVideoGallery(c)
+        }
+    };
+    uiSwitchTab(id, ctx);
+};
 
 // 모달 및 서브탭 제어
 window.openAdminModal = () => openAdminModal();
@@ -222,7 +237,7 @@ window.setHistoryViewMode = (mode) => {
 window.toggleHistoryContent = (headerEl) => uiToggleHistoryContent(headerEl);
 
 // 데이터 렌더링 명시적 노출
-window.renderAnalystReport = () => uiRenderAnalystReport({ reports, currentSessionState });
+window.renderAnalystReport = () => uiRenderAnalystReport({ reports, currentSessionState, matchHistory, isAdmin });
 window.renderVideoGallery = () => uiRenderVideoGallery({ videos, isAdmin });
 window.toggleLateJoin = (id) => {
     const player = applicants.find(p => String(p.id) === String(id));
@@ -478,7 +493,8 @@ async function commitSession() {
             t2_ids: m.t2.map(p => p.id),
             t2_names: m.t2.map(p => p.name),
             score1: m.s1,
-            score2: m.s2
+            score2: m.s2,
+            group: m.group // [v26] 조별 정렬을 위해 그룹 정보 명시적 저장
         };
         await fbAddHistoryItem(historyItem);
     }
@@ -591,40 +607,48 @@ async function handleCopyAIData() {
 
     const prompt = `
 당신은 '평촌ACE 전력분석실'의 수석 데이터 분석가입니다. 
-제 ${sessionNum}회차 랭킹전 결과를 바탕으로 전문적이면서도 위트 있는 분석 리포트를 작성해 주세요.
+제 ${sessionNum}회차 랭킹전 결과를 바탕으로 간결하고 임팩트 있는 '랭킹전 분석 보고서'를 작성해 주세요.
 
 [🚨 리포트 작성 핵심 지침]
-1. **고정 템플릿 준수**: 아래 제공된 Markdown 템플릿 구조를 절대 변경하지 마세요.
-2. **참가자 구분 및 서사 (Important)**: 
-   - 데이터의 \`trend\` 내 \`played: false\`는 해당 회차에 이름은 있었으나 경기를 뛰지 않았음을 의미합니다 (단순 1500점 유지와 다름).
-   - **데뷔 (New)**: 최근 데이터상 처음으로 경기를 뛴 선수에게는 "화려한 데뷔", "뉴페이스의 등장" 서사를 부여하세요.
-   - **복귀 (Returning)**: 이전에 뛰었다가 최근 쉬고 돌아온 선수에게는 "환영받는 귀환" 서사를 부여하세요.
-   - **꾸준함 (Steady)**: 연속으로 경기에 참여하며 기량을 갈고닦는 선수들을 부각하세요.
-3. **그룹 서사 중심**: 3~4개의 그룹으로 묶어 그룹 전체의 분위기를 먼저 설명한 뒤, 그 안에서 핵심 인물의 서사를 디테일하게 분석하세요. (모든 참가자 이름 언급 필수)
-4. **모바일 최적화**: 표(Table) 형식을 절대 사용하지 말고, 리스트와 강조(Bold)를 활용하세요.
-5. **톤앤매너**: 데이터 기반의 예리한 분석 70% + 위트와 유머 30% (한글 사용 우선)
+1. **간결함이 최우선**: 전체 리포트를 **최대 800자 이내**로 작성하세요. 군더더기 없는 팩트 중심의 요약이 핵심입니다.
+2. **경기 성적 중심**: 승/패/무 기록, 레이팅 변화 폭, 순위 변동을 **구체적 수치**와 함께 분석하세요.
+3. **참석 태그 최소화**: New/Returning/Steady 등의 참석 태그는 특별한 서사가 있을 때만 간략히 언급하세요.
+4. **그룹 서사**: 2~3개 그룹으로 묶되, 각 그룹 설명은 3~5줄 이내로. 모든 참가자 이름은 한 번씩 언급하세요.
+5. **들여쓰기 금지**: 하위 리스트(들여쓰기 리스트)를 사용하지 마세요. 모든 리스트는 최상위 레벨(- )로만 작성하세요.
+6. **모바일 최적화**: 표(Table) 절대 금지. 인용구(>), 굵게(**), 리스트(-) 활용.
+7. **톤앤매너**: 날카로운 데이터 분석 70% + 위트 30% (한국어).
 
 ---
-[분석 리포트 고정 템플릿]
 
-# 📊 제 ${sessionNum}회차 전력분석 리포트
+# 📋 제 ${sessionNum}회차 랭킹전 분석 보고서
 
-## 🎾 세션 총평
-(이 회차의 전반적인 분위기와 주요 특징 요약)
+---
 
-## 👥 그룹별 상세 분석
-### [그룹 명칭 1]
-- **해당 멤버**: (전원 이름 나열)
-- **주요 결과**: (성과가 돋보이는 인물 위주로 트렌드와 실제 경기 참여 여부를 반영하여 심층 분석)
+## 📢 분석관 브리핑
+> (핵심 테마 2~3문장 요약)
 
-### [그룹 명칭 2]
-- **해당 멤버**: (전원 이름 나열)
-- **주요 결과**: (분석 내용 작성)
+---
 
-...(필요에 따라 그룹 추가)
+## 🏆 핵심 하이라이트
+- **MVP**: (이름 - 핵심 성과 한 줄)
+- **다크호스**: (이름 - 의외의 활약 한 줄)
+
+---
+
+## 🔍 그룹별 분석
+
+### 🏷️ [그룹명 1]
+- **멤버**: (이름 나열)
+- (각 선수의 성적을 간결하게 한두 줄로 요약. 성과가 두드러진 선수만 강조)
+
+### 🏷️ [그룹명 2]
+- **멤버**: (이름 나열)
+- (동일 구조, 간결하게)
+
+---
 
 ## 🔭 향후 전망
-(데이터 기반의 다음 회차 예측 및 관전 포인트)
+- (다음 회차 관전 포인트 1~2줄)
     `;
 
     try {
@@ -718,11 +742,12 @@ async function handleRestoreCsv() {
 }
 
 // 모달/수정 관련
-function openHistoryEditModal(id) { alert("기능 준비 중입니다."); }
-async function deleteHistory(id) {
-    if (!confirm("정말 삭제하시겠습니까?")) return;
+// 모달/수정 관련
+window.openHistoryEditModal = (id) => { alert("기능 준비 중입니다."); };
+window.deleteHistoryItem = async (id) => {
+    if (!confirm("정말 삭제하시겠습니까? (이 작업은 되돌릴 수 없습니다)")) return;
     await fbDeleteHistoryItem(id);
-}
+};
 function openCurrentMatchEditModal(id) { alert("이름 수정 기능은 현재 구현 중입니다."); }
 
 // 앱 시작

@@ -668,7 +668,7 @@ export function renderCurrentMatches(context) {
 // --------------------------------------------------------
 
 export function renderHistory(context) {
-    const { matchHistory, historyViewMode, sessionRankSnapshots, isAdmin, actions: { openEditModal, deleteHistory } } = context;
+    const { matchHistory = [], historyViewMode, sessionRankSnapshots, isAdmin, actions: { openEditModal, deleteHistory } } = context;
     const list = document.getElementById('historyList');
     if (!list) return;
     list.innerHTML = matchHistory.length ? '' : '<p style="text-align:center; padding:20px">기록이 없습니다.</p>';
@@ -681,58 +681,35 @@ export function renderHistory(context) {
 
     const sortedSessions = Object.keys(groups).sort((a, b) => parseInt(b) - parseInt(a));
 
+    let finalHtml = '';
     sortedSessions.forEach(sNum => {
         const sessionMatches = groups[sNum];
-        // [v22 추가] 경기별 결과 조별(A->Z) 정렬
+        // 회차별 경기 정렬 (A조 -> B조 ..., 라운드 순 정방향)
         sessionMatches.sort((a, b) => {
-            const gA = a.group || '';
-            const gB = b.group || '';
-            return gA.localeCompare(gB, undefined, { numeric: true });
+            const gA = a.group || 'Z'; 
+            const gB = b.group || 'Z';
+            if (gA !== gB) return gA.localeCompare(gB, undefined, { numeric: true });
+            return (a.groupRound || 0) - (b.groupRound || 0);
         });
 
         const date = sessionMatches[0].date;
-
-        const card = document.createElement('div');
-        card.className = 'history-session-card';
-
         let contentHtml = '';
+
         if (historyViewMode === 'match') {
             contentHtml = sessionMatches.map(h => {
-                let isSwap = false;
-                if (h.score1 < h.score2) {
-                    isSwap = true;
-                } else if (h.score1 === h.score2) {
-                    if ((h.elo_at_match?.expected || 0.5) > 0.5) {
-                        isSwap = true;
-                    }
-                }
-
-                const t1_disp = isSwap ? h.t2_names : h.t1_names;
-                const t2_disp = isSwap ? h.t1_names : h.t2_names;
-                const s1_disp = isSwap ? h.score2 : h.score1;
-                const s2_disp = isSwap ? h.score1 : h.score2;
-
-                let left_change = 0;
-                if (isSwap) {
-                    left_change = h.elo_at_match?.change2 || 0;
-                } else {
-                    left_change = h.elo_at_match?.change1 || 0;
-                }
-
-                let elo_change = left_change;
-
-                const expVal = h.elo_at_match?.expected || 0.5;
-                const left_expected = isSwap ? (1 - expVal) : expVal;
-                const expPcnt = (left_expected * 100).toFixed(0);
-
-                const getRankStrArr = (ids, names, sessNum) => {
+                const elo_change = h.elo_at_match?.change1 || 0;
+                const s1_disp = h.score1 !== null ? h.score1 : '-';
+                const s2_disp = h.score2 !== null ? h.score2 : '-';
+                const expPcnt = h.elo_at_match ? Math.round(h.elo_at_match.expected * 100) : 50;
+                
+                const getRankStrArr = (ids, names, sId) => {
                     return names.map((n, i) => {
-                        return `<span style="font-size:0.9rem;"><strong>${n}</strong></span>`;
+                        const r = (sessionRankSnapshots[sId] && sessionRankSnapshots[sId][ids[i]]) || '-';
+                        return `<div style="font-size:0.85rem;"><strong>${n}</strong> <span style="font-size:0.75rem; color:var(--text-secondary)">(${r})</span></div>`;
                     });
                 };
-
-                const t1_arr = getRankStrArr(isSwap ? h.t2_ids : h.t1_ids, t1_disp, h.sessionNum);
-                const t2_arr = getRankStrArr(isSwap ? h.t1_ids : h.t2_ids, t2_disp, h.sessionNum);
+                const t1_arr = getRankStrArr(h.t1_ids, h.t1_names, h.sessionNum);
+                const t2_arr = getRankStrArr(h.t2_ids, h.t2_names, h.sessionNum);
 
                 return `
                     <div class="history-match-item">
@@ -753,11 +730,11 @@ export function renderHistory(context) {
                             <div style="color:var(--accent-color); font-weight:bold; font-size:1.1rem">${s1_disp} : ${s2_disp}</div>
                         </div>
                         <div style="flex:1; text-align:right; display:flex; flex-direction:column; justify-content:center; align-items:flex-end;">
-                            <div style="font-size:0.65rem; color:var(--text-secondary); opacity:0.8; margin-bottom:2px;">기대승률 ${expPcnt}%</div>
+                            <div style="font-size:0.65rem; color:var(--text-secondary); opacity:0.8; margin-bottom:2px;">승률 ${expPcnt}%</div>
                             <span class="history-elo-tag" style="color:${elo_change >= 0 ? 'var(--success)' : 'var(--danger)'}">
                                 ${elo_change >= 0 ? '+' : ''}${elo_change.toFixed(1)}
                             </span>
-                            ${isAdmin ? `<div style="margin-top:5px"><button class="edit-btn" onclick="openEditModal(${h.id})">수정</button><button class="delete-btn" onclick="deleteHistory(${h.id})">삭제</button></div>` : ''}
+                            ${isAdmin ? `<div style="margin-top:5px; display:flex; gap:5px;"><button class="edit-btn" onclick="window.openHistoryEditModal('${h.id}')">수정</button><button class="delete-btn" onclick="window.deleteHistoryItem('${h.id}')">삭제</button></div>` : ''}
                         </div>
                     </div>
                 `;
@@ -774,12 +751,11 @@ export function renderHistory(context) {
                         if (!playerStats[id]) playerStats[id] = { id: id, name: t.names[idx], wins: 0, draws: 0, losses: 0, eloSum: 0 };
                         if (t.score > t.oppScore) playerStats[id].wins++;
                         else if (t.score < t.oppScore) playerStats[id].losses++;
-                        else playerStats[id].draws++;
+                        else if (t.score === t.oppScore && t.score !== null) playerStats[id].draws++;
                         playerStats[id].eloSum += t.change;
                     });
                 });
             });
-
             const sortedPlayers = Object.values(playerStats).sort((a, b) => {
                 const rankA = (sessionRankSnapshots[sNum] && sessionRankSnapshots[sNum][a.id]) || 9999;
                 const rankB = (sessionRankSnapshots[sNum] && sessionRankSnapshots[sNum][b.id]) || 9999;
@@ -787,13 +763,10 @@ export function renderHistory(context) {
             });
             contentHtml = sortedPlayers.map(p => {
                 let rankVal = (sessionRankSnapshots[sNum] && sessionRankSnapshots[sNum][p.id]) || '-';
-                const rankLabel = (rankVal !== '-')
-                    ? `<span style="font-size:0.8em; color:var(--text-secondary)">(${rankVal})</span>`
-                    : `<span style="font-size:0.8em; color:var(--accent-color)">(New)</span>`;
                 return `
                 <div class="player-history-item">
                     <div>
-                        <div class="player-history-info">${p.name}${rankLabel}</div>
+                        <div class="player-history-info">${p.name} <span style="font-size:0.75rem; color:var(--text-secondary)">(${rankVal})</span></div>
                         <div class="player-history-stats">${p.wins}승 ${p.draws}무 ${p.losses}패</div>
                     </div>
                     <div style="text-align:right">
@@ -805,20 +778,22 @@ export function renderHistory(context) {
             }).join('');
         }
 
-        card.innerHTML = `
-            <div class="history-session-header" onclick="toggleHistoryContent(this)">
-                <div>
-                    <span class="session-info" style="margin-right:10px">제 ${sNum}회차</span>
-                    <span style="font-size:0.85rem; color:var(--text-secondary)">${date} (${sessionMatches.length}경기)</span>
+        finalHtml += `
+            <div class="history-session-card">
+                <div class="history-session-header" onclick="toggleHistoryContent(this)">
+                    <div>
+                        <span class="session-info" style="margin-right:10px">제 ${sNum}회차</span>
+                        <span style="font-size:0.85rem; color:var(--text-secondary)">${date} (${sessionMatches.length}경기)</span>
+                    </div>
+                    <span class="toggle-icon">▼</span>
                 </div>
-                <span class="toggle-icon">▼</span>
-            </div>
-            <div class="history-session-content">
-                ${contentHtml}
+                <div class="history-session-content">
+                    ${contentHtml}
+                </div>
             </div>
         `;
-        list.appendChild(card);
     });
+    list.innerHTML = finalHtml || '<p style="text-align:center; padding:20px">기록이 없습니다.</p>';
 }
 
 export function toggleHistoryContent(header) {
@@ -937,6 +912,10 @@ export function switchTab(id, context) {
 
     if (id === 'stats' && renderStatsDashboard) {
         renderStatsDashboard(context);
+    }
+    if (id === 'caster') {
+        renderAnalystReport(context);
+        renderVideoGallery(context);
     }
 }
 
@@ -1339,7 +1318,7 @@ export function renderPlayerTrend(context) {
 }
 
 export function renderAnalystReport(context) {
-    const { reports, matchHistory, isAdmin } = context;
+    const { reports = {}, matchHistory = [], isAdmin } = context;
     const contentArea = document.getElementById('casterReportContent');
     const select = document.getElementById('reportSessionSelect');
     if (!contentArea || !select) return;
@@ -1432,13 +1411,18 @@ function parseMarkdown(text) {
                 resultRows.push('<tr>' + cells.map(c => `<td>${c}</td>`).join('') + '</tr>');
             }
         } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
-            // 리스트 처리
+            // 리스트 처리 (들여쓰기 지원)
             if (inTable) {
                 inTable = false;
                 resultRows.push('</tbody></table></div>');
             }
+            const indent = line.search(/\S/);
             const listContent = trimmed.substring(2);
-            resultRows.push(`<li>${listContent}</li>`);
+            if (indent >= 4) {
+                resultRows.push(`<li style="margin-left:20px; list-style-type:circle;">${listContent}</li>`);
+            } else {
+                resultRows.push(`<li>${listContent}</li>`);
+            }
         } else {
             if (inTable) {
                 inTable = false;
