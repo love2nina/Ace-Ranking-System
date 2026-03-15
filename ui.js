@@ -697,19 +697,45 @@ export function renderHistory(context) {
 
         if (historyViewMode === 'match') {
             contentHtml = sessionMatches.map(h => {
-                const elo_change = h.elo_at_match?.change1 || 0;
-                const s1_disp = h.score1 !== null ? h.score1 : '-';
-                const s2_disp = h.score2 !== null ? h.score2 : '-';
-                const expPcnt = h.elo_at_match ? Math.round(h.elo_at_match.expected * 100) : 50;
+                const s1 = h.score1 !== null ? h.score1 : 0;
+                const s2 = h.score2 !== null ? h.score2 : 0;
+                const chg1 = h.elo_at_match?.change1 || 0;
+                const chg2 = h.elo_at_match?.change2 || 0;
+                const exp1 = h.elo_at_match ? Math.round(h.elo_at_match.expected * 100) : 50;
+                const exp2 = 100 - exp1;
+
+                // 역전(Swap) 기준:
+                // 1. 점수가 등록되어 있고 T2가 승리한 경우
+                // 2. 무승부이거나 점수가 없을 때, T2의 기대승률이 더 낮은 경우 (즉 exp1 > exp2)
+                let isSwap = false;
+                if (h.score1 !== null && h.score2 !== null) {
+                    if (s2 > s1) isSwap = true;
+                    else if (s2 === s1 && exp1 > exp2) isSwap = true;
+                } else {
+                    if (exp1 > exp2) isSwap = true;
+                }
+
+                const s1_disp = h.score1 !== null ? (isSwap ? s2 : s1) : '-';
+                const s2_disp = h.score2 !== null ? (isSwap ? s1 : s2) : '-';
+                const elo_change = isSwap ? chg2 : chg1;
+                const expPcnt = isSwap ? exp2 : exp1;
                 
+                const t1Ids = isSwap ? h.t2_ids : h.t1_ids;
+                const t1Names = isSwap ? h.t2_names : h.t1_names;
+                const t2Ids = isSwap ? h.t1_ids : h.t2_ids;
+                const t2Names = isSwap ? h.t1_names : h.t2_names;
+
                 const getRankStrArr = (ids, names, sId) => {
+                    const prevSId = (parseInt(sId) - 1).toString();
                     return names.map((n, i) => {
-                        const r = (sessionRankSnapshots[sId] && sessionRankSnapshots[sId][ids[i]]) || '-';
-                        return `<div style="font-size:0.85rem;"><strong>${n}</strong> <span style="font-size:0.75rem; color:var(--text-secondary)">(${r})</span></div>`;
+                        const r = (sessionRankSnapshots[prevSId] && sessionRankSnapshots[prevSId][ids[i]]) || null;
+                        const rankHtml = r ? ` <span style="font-size:0.75rem; color:var(--text-secondary)">(${r})</span>` : '';
+                        return `<div style="font-size:0.85rem; white-space:nowrap;"><strong>${n}</strong>${rankHtml}</div>`;
                     });
                 };
-                const t1_arr = getRankStrArr(h.t1_ids, h.t1_names, h.sessionNum);
-                const t2_arr = getRankStrArr(h.t2_ids, h.t2_names, h.sessionNum);
+
+                const t1_arr = getRankStrArr(t1Ids, t1Names, h.sessionNum);
+                const t2_arr = getRankStrArr(t2Ids, t2Names, h.sessionNum);
 
                 return `
                     <div class="history-match-item">
@@ -730,7 +756,7 @@ export function renderHistory(context) {
                             <div style="color:var(--accent-color); font-weight:bold; font-size:1.1rem">${s1_disp} : ${s2_disp}</div>
                         </div>
                         <div style="flex:1; text-align:right; display:flex; flex-direction:column; justify-content:center; align-items:flex-end;">
-                            <div style="font-size:0.65rem; color:var(--text-secondary); opacity:0.8; margin-bottom:2px;">승률 ${expPcnt}%</div>
+                            <div style="font-size:0.65rem; color:var(--text-secondary); opacity:0.8; margin-bottom:2px;">기대승률 ${expPcnt}%</div>
                             <span class="history-elo-tag" style="color:${elo_change >= 0 ? 'var(--success)' : 'var(--danger)'}">
                                 ${elo_change >= 0 ? '+' : ''}${elo_change.toFixed(1)}
                             </span>

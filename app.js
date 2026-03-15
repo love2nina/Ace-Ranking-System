@@ -494,7 +494,8 @@ async function commitSession() {
             t2_names: m.t2.map(p => p.name),
             score1: m.s1,
             score2: m.s2,
-            group: m.group // [v26] 조별 정렬을 위해 그룹 정보 명시적 저장
+            group: m.group, // [v26] 조별 정렬을 위해 그룹 정보 명시적 저장
+            groupRound: m.groupRound || 0 // [v30] 라운드 정보 명시적 저장
         };
         await fbAddHistoryItem(historyItem);
     }
