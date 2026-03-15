@@ -8,6 +8,7 @@ let currentClubId = 'Default';
 let clusterUnsubscribe = null;
 let statusUnsubscribe = null;
 let videosUnsubscribe = null;
+let historyUnsubscribe = null;
 let systemSettings = { admin_pw: "ace_dot" };
 
 // 콜백 저장소 (app.js에서 주입)
@@ -86,54 +87,41 @@ export function initFirebase(callbacks) {
     const settingsPath = currentClubId === 'Default' ? "system/settings" : `clubs/${currentClubId}/config/settings`;
     const settingsRef = doc(db, settingsPath);
 
-    // 먼저 localStorage를 읽어서 활성 DB를 확인
+    // 1. 먼저 localStorage를 읽어서 활성 DB를 확인 (빠른 사용자 경험용)
     const cachedDb = localStorage.getItem(`ace_active_db_${currentClubId}`);
     if (cachedDb) {
         currentDbName = cachedDb;
         if (_callbacks.onDbNameChange) _callbacks.onDbNameChange(currentDbName);
-        subscribeToCluster(currentDbName);
+        subscribeToCluster(currentDbName); // 최초 구독 시도
     }
 
-    getDoc(settingsRef).then(snap => {
-        if (snap.exists()) {
-            const activeDb = snap.data().active_cluster || 'Default';
-            if (activeDb !== currentDbName) {
-                currentDbName = activeDb;
-                localStorage.setItem(`ace_active_db_${currentClubId}`, activeDb);
+    // 2. 서버 설정 실시간 리스너 (설정 변경 시 DB 전환 대응)
+    onSnapshot(settingsRef, (snapshot) => {
+        if (snapshot.exists()) {
+            systemSettings = snapshot.data();
+            if (_callbacks.onSettingsUpdate) _callbacks.onSettingsUpdate(systemSettings);
+            const globalActiveDb = systemSettings.active_cluster || 'Default';
+
+            // 구독 중인 DB와 다르거나 아직 리스너가 없는 경우에만 재구독
+            if (globalActiveDb !== currentDbName || !clusterUnsubscribe) {
+                console.log(`[Global Sync] Database context: ${globalActiveDb}`);
+                currentDbName = globalActiveDb;
+                localStorage.setItem(`ace_active_db_${currentClubId}`, globalActiveDb);
                 if (_callbacks.onDbNameChange) _callbacks.onDbNameChange(currentDbName);
-                subscribeToCluster(activeDb);
+                subscribeToCluster(globalActiveDb);
+            }
+        } else {
+            // 설정 문서가 없는 경우 기본값 복구 또는 생성
+            if (currentDbName && currentDbName !== 'Default') {
+                console.warn(`[Settings] Restoring missing settings for '${currentDbName}'`);
+                setDoc(settingsRef, { admin_pw: systemSettings.admin_pw || "ace_dot", active_cluster: currentDbName });
+            } else if (!currentDbName) {
+                console.log("[Settings] Initializing Default cluster settings");
+                setDoc(settingsRef, { admin_pw: "ace_dot", active_cluster: "Default" });
             }
         }
-    }).catch(() => { }).finally(() => {
-        // settings 리스너 등록 (이후 실시간 변경 감지)
-        onSnapshot(settingsRef, (snapshot) => {
-            if (snapshot.exists()) {
-                systemSettings = snapshot.data();
-                if (_callbacks.onSettingsUpdate) _callbacks.onSettingsUpdate(systemSettings);
-                const globalActiveDb = systemSettings.active_cluster || 'Default';
-
-                // 전역 활성 DB가 변경되었을 경우에만 리스너 재구독 및 로컬 저장
-                if (globalActiveDb !== currentDbName || !clusterUnsubscribe) {
-                    console.log(`[Global Sync] Switching to Active DB: ${globalActiveDb}`);
-                    currentDbName = globalActiveDb;
-                    localStorage.setItem(`ace_active_db_${currentClubId}`, globalActiveDb);
-                    if (_callbacks.onDbNameChange) _callbacks.onDbNameChange(currentDbName);
-                    subscribeToCluster(globalActiveDb);
-                }
-            } else {
-                // ⚠️ 설정 문서가 존재하지 않음
-                // 이미 활성 DB가 있는 경우: 네트워크 일시 단절로 인한 false-negative일 수 있음
-                // → 기존 DB를 유지하면서 설정 문서를 복원
-                if (currentDbName && currentDbName !== 'Default') {
-                    console.warn(`[Settings] ⚠️ Settings document not found but active DB is '${currentDbName}'. Restoring settings instead of resetting to Default.`);
-                    setDoc(settingsRef, { admin_pw: systemSettings.admin_pw || "ace_dot", active_cluster: currentDbName });
-                } else {
-                    // 최초 초기화인 경우에만 Default로 생성
-                    console.log("[Settings] Creating initial settings document with Default.");
-                    setDoc(settingsRef, { admin_pw: "ace_dot", active_cluster: "Default" });
-                }
-            }
-        });
+    }, (error) => {
+        console.error("[Settings] Listener Error:", error);
     });
 }
 
@@ -147,6 +135,7 @@ export function subscribeToCluster(dbName) {
     if (clusterUnsubscribe) clusterUnsubscribe();
     if (statusUnsubscribe) statusUnsubscribe();
     if (videosUnsubscribe) videosUnsubscribe();
+    if (historyUnsubscribe) historyUnsubscribe();
 
     currentDbName = dbName;
     if (_callbacks.onDbNameChange) _callbacks.onDbNameChange(currentDbName);
@@ -165,6 +154,21 @@ export function subscribeToCluster(dbName) {
         } else if (snapshot.exists()) {
             _dataLoadedForDb = currentDbName; // 데이터 로드 성공 기록
             if (_callbacks.onDataLoaded) _callbacks.onDataLoaded(data);
+
+            // 1.1 하위 히스토리 컬렉션 추가 구독 (순차적 로딩)
+            const { collection, query, orderBy } = window.FB_SDK;
+            const historyRef = collection(db, clusterPath, currentDbName, "history");
+            const historyQuery = query(historyRef, orderBy("timestamp", "desc")); // 최신순
+
+            if (historyUnsubscribe) historyUnsubscribe();
+            historyUnsubscribe = onSnapshot(historyQuery, (hSnapshot) => {
+                const historyList = hSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                console.log(`[Firebase] History loaded: ${historyList.length} items`);
+                if (_callbacks.onHistoryLoaded) _callbacks.onHistoryLoaded(historyList);
+            }, (hError) => {
+                console.warn("[Firebase] History migration check or loading issue:", hError);
+                // 히스토리 컬렉션이 없거나 권한 문제일 경우 기존 data.matchHistory를 대안으로 사용하거나 비워둠
+            });
         } else {
             // ⚠️ 문서가 존재하지 않는 경우: 빈 데이터를 자동 저장하지 않음 (데이터 소실 방지)
             console.warn(`[Firebase] Document does not exist for DB: ${currentDbName}. Skipping auto-save to prevent data loss.`);
@@ -299,7 +303,8 @@ export async function saveToCloud(appState, caller = 'unknown') {
             currentSchedule: appState.currentSchedule,
             sessionNum: appState.sessionNum,
             applicants: appState.applicants,
-            reports: appState.reports || {}
+            reports: appState.reports || {},
+            updatedAt: serverTimestamp()
         });
     } catch (e) {
         console.error("Cloud Error:", e);
@@ -546,6 +551,148 @@ export async function saveReport(sessionNum, content) {
         console.log(`[Firebase] Report saved for session ${sessionNum}`);
     } catch (e) {
         console.error("Save Report Error:", e);
+        throw e;
+    }
+}
+
+export { getServerData as fbGetServerData };
+
+/**
+ * 특정 경기의 점수를 트랜잭션으로 안전하게 저장합니다.
+ * @param {string} matchId - 경기 ID
+ * @param {number|null} s1 - 팀 1 점수
+ * @param {number|null} s2 - 팀 2 점수
+ */
+export async function saveMatchScoreWithTransaction(matchId, s1, s2) {
+    const { doc, runTransaction } = window.FB_SDK;
+    const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
+    const docRef = doc(db, clusterPath, currentDbName);
+
+    try {
+        await runTransaction(db, async (transaction) => {
+            const sfDoc = await transaction.get(docRef);
+            if (!sfDoc.exists()) {
+                throw "Document does not exist!";
+            }
+
+            const data = sfDoc.data();
+            const schedule = data.currentSchedule || [];
+            const match = schedule.find(m => m.id === matchId);
+
+            if (match) {
+                match.s1 = s1;
+                match.s2 = s2;
+                transaction.update(docRef, { 
+                    currentSchedule: schedule,
+                    updatedAt: serverTimestamp()
+                });
+                console.log(`[Transaction] Success for match ${matchId}: ${s1}:${s2}`);
+            } else {
+                console.warn(`[Transaction] Match ${matchId} not found in schedule.`);
+            }
+        });
+    } catch (e) {
+        console.error("[Transaction] Failed:", e);
+        throw e;
+    }
+}
+
+/**
+ * 개별 경기를 히스토리 서브컬렉션에 추가합니다.
+ * @param {Object} item - 히스토리 경기 객체
+ */
+export async function addHistoryItem(item) {
+    const { collection, addDoc, serverTimestamp, doc } = window.FB_SDK;
+    const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
+    const historyCol = collection(db, clusterPath, currentDbName, "history");
+
+    try {
+        // 기존 ID가 있으면 문서 ID로 사용, 없으면 자동 생성
+        const docRef = item.id ? doc(historyCol, String(item.id)) : doc(historyCol);
+        await setDoc(docRef, {
+            ...item,
+            timestamp: serverTimestamp() // 순차 로딩 및 정렬용
+        });
+        console.log(`[Firebase] History item saved to subcollection: ${docRef.id}`);
+    } catch (e) {
+        console.error("Add History Error:", e);
+        throw e;
+    }
+}
+
+/**
+ * 특정 히스토리 항목을 서브컬렉션에서 삭제합니다.
+ * @param {string} itemId - 삭제할 항목의 ID
+ */
+export async function deleteHistoryItem(itemId) {
+    const { doc, deleteDoc } = window.FB_SDK;
+    const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
+    const docRef = doc(db, clusterPath, currentDbName, "history", String(itemId));
+
+    try {
+        await deleteDoc(docRef);
+        console.log(`[Firebase] History item deleted: ${itemId}`);
+    } catch (e) {
+        console.error("Delete History Error:", e);
+        throw e;
+    }
+}
+
+/**
+ * 특정 히스토리 항목을 서브컬렉션에서 수정합니다.
+ * @param {string} itemId - 수정할 항목의 ID
+ * @param {Object} updates - 수정할 내용
+ */
+export async function updateHistoryItem(itemId, updates) {
+    const { doc, updateDoc, serverTimestamp } = window.FB_SDK;
+    const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
+    const docRef = doc(db, clusterPath, currentDbName, "history", String(itemId));
+
+    try {
+        await updateDoc(docRef, {
+            ...updates,
+            updatedAt: serverTimestamp()
+        });
+        console.log(`[Firebase] History item updated: ${itemId}`);
+    } catch (e) {
+        console.error("Update History Error:", e);
+        throw e;
+    }
+}
+
+/**
+ * 기존 메인 문서의 matchHistory를 서브컬렉션으로 일괄 이관합니다.
+ * @param {Array} historyArray - 이관할 히스토리 배열
+ */
+export async function migrateHistory(historyArray) {
+    if (!historyArray || historyArray.length === 0) return;
+    
+    const { doc, collection, setDoc, serverTimestamp } = window.FB_SDK;
+    const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
+    const docRef = doc(db, clusterPath, currentDbName);
+    const historyCol = collection(db, clusterPath, currentDbName, "history");
+
+    console.log(`[Migration] Starting migration of ${historyArray.length} items...`);
+
+    try {
+        // 1. 각 항목을 서브컬렉션에 저장
+        for (const item of historyArray) {
+            const hDocRef = doc(historyCol, String(item.id));
+            await setDoc(hDocRef, {
+                ...item,
+                timestamp: serverTimestamp()
+            });
+        }
+
+        // 2. 메인 문서에서 히스토리 비우기
+        await window.FB_SDK.updateDoc(docRef, { 
+            matchHistory: [],
+            updatedAt: serverTimestamp()
+        });
+
+        console.log(`[Migration] ✅ Successfully migrated ${historyArray.length} items to subcollection.`);
+    } catch (e) {
+        console.error("[Migration] ❌ Error during migration:", e);
         throw e;
     }
 }

@@ -72,7 +72,12 @@ import {
     getDb as fbGetDb,
     initNewClusterSession as fbInitNewClusterSession,
     saveReport as fbSaveReport,
-    getServerData as fbGetServerData,
+    fbGetServerData,
+    saveMatchScoreWithTransaction as fbSaveMatchScoreWithTransaction,
+    addHistoryItem as fbAddHistoryItem,
+    deleteHistoryItem as fbDeleteHistoryItem,
+    updateHistoryItem as fbUpdateHistoryItem,
+    migrateHistory as fbMigrateHistory,
     subscribeToVideos as fbSubscribeToVideos,
     addVideo as fbAddVideo,
     deleteVideo as fbDeleteVideo
@@ -161,16 +166,42 @@ function startFirebaseInit() {
     }, 15000);
 }
 
-// 방안 A: matchHistory 변경 감지용 경량 해시
-function _matchHistoryHash(history) {
-    if (!history || history.length === 0) return '0';
-    return history.length + ':' + history.map(h => `${h.id}_${h.score1}_${h.score2}`).join(',');
+// 방안 A: matchHistory 변경 감지용 경량 해시 (updatedAt 우선 활용)
+function _matchHistoryHash(data) {
+    if (!data) return '0';
+    if (data.updatedAt) {
+        // Firestore의 타임스탬프 객체면 seconds/nanoseconds 활용
+        const ts = data.updatedAt;
+        if (ts.seconds) return `${ts.seconds}_${ts.nanoseconds}`;
+        return String(ts);
+    }
+    // updatedAt이 없는 구버전 데이터 대응 (히스토리 길이와 마지막 점수 합)
+    const history = data.matchHistory || [];
+    if (history.length === 0) return '0';
+    let sum = 0;
+    for (let i = Math.max(0, history.length - 10); i < history.length; i++) {
+        sum += (history[i].score1 || 0) + (history[i].score2 || 0);
+    }
+    return `${history.length}_${sum}`;
 }
 
 function initFirebase() {
     fbInitFirebase({
         getMembers: () => members,
         onDataLoaded: (data) => {
+            // 실시간 업데이트 시 편집 중인 데이터(dirtyMatches)는 덮어쓰지 않음
+            if (data.currentSchedule) {
+                data.currentSchedule.forEach(sm => {
+                    if (dirtyMatches.has(sm.id)) {
+                        const localM = currentSchedule.find(x => x.id === sm.id);
+                        if (localM) {
+                            sm.s1 = localM.s1;
+                            sm.s2 = localM.s2;
+                        }
+                    }
+                });
+            }
+
             members = data.members || [];
             matchHistory = data.matchHistory || [];
             currentSchedule = data.currentSchedule || [];
@@ -178,17 +209,44 @@ function initFirebase() {
             applicants = data.applicants || [];
             reports = data.reports || {};
 
-            // 방안 A: matchHistory가 변경된 경우에만 재계산
-            const newHash = _matchHistoryHash(matchHistory);
+            // 방안 A: 데이터 변경 여부 확인 (updatedAt 또는 경량 해시)
+            const newHash = _matchHistoryHash(data);
             if (newHash !== _lastMatchHistoryHash) {
                 recalculateAll();
                 _lastMatchHistoryHash = newHash;
-                console.log('[Perf] matchHistory changed → recalculateAll executed');
+                console.log('[Perf] Data changed → recalculateAll');
+                
+                // [이관 로직] 메인 문서에 히스토리 데이터가 남아있는 경우 자동으로 서브컬렉션으로 이관 (1회성)
+                if (isAdmin && data.matchHistory && data.matchHistory.length > 0) {
+                    console.log(`[Migration] Legacy history detected (${data.matchHistory.length} items). Starting auto-migration...`);
+                    fbMigrateHistory(data.matchHistory).catch(err => {
+                        console.error("[Migration] Auto-migration failed:", err);
+                    });
+                }
             } else {
-                console.log('[Perf] matchHistory unchanged → recalculateAll skipped');
+                console.log('[Perf] Data unchanged → skip recalculate');
             }
             updateUI();
             hideLoading();
+        },
+        onHistoryLoaded: (historyList) => {
+            // [순차 로딩] 히스토리 수신 시 기존 데이터와 병합 (ID 기준 중복 제거)
+            const map = new Map();
+            // 1. 기존 matchHistory (메인 문서에 있던 구버전 데이터 포함)
+            matchHistory.forEach(h => map.set(h.id, h));
+            // 2. 새로운 서브컬렉션 데이터로 덮어쓰기/추가
+            historyList.forEach(h => map.set(h.id, h));
+
+            const merged = Array.from(map.values());
+            // 세션번호와 ID로 정렬 (최신순)
+            merged.sort((a, b) => (b.sessionNum - a.sessionNum) || (b.id - a.id));
+
+            if (merged.length !== matchHistory.length) {
+                matchHistory = merged;
+                recalculateAll();
+                updateUI();
+                console.log(`[Perf] History synchronized: ${matchHistory.length} total items`);
+            }
         },
         onEmptyDefault: async () => {
             await fbHandleMigration();
@@ -962,37 +1020,16 @@ window.saveMatchScore = async (id) => {
     }
 
     try {
-        // 서버의 최신 데이터를 읽어서 현재 경기 점수만 병합
-        const serverData = await fbGetServerData();
-        if (serverData && serverData.currentSchedule) {
-            // 서버의 최신 스케줄에 이 경기의 점수만 덮어쓰기
-            const serverSchedule = serverData.currentSchedule;
-            const serverMatch = serverSchedule.find(x => x.id === id);
-            if (serverMatch) {
-                serverMatch.s1 = m.s1;
-                serverMatch.s2 = m.s2;
-            }
-            // 서버 스케줄의 나머지 경기 점수도 로컬에 동기화 (다른 사람이 입력한 점수 반영)
-            serverSchedule.forEach(sm => {
-                if (sm.id !== id) {
-                    const localM = currentSchedule.find(x => x.id === sm.id);
-                    if (localM && !dirtyMatches.has(sm.id)) {
-                        localM.s1 = sm.s1;
-                        localM.s2 = sm.s2;
-                    }
-                }
-            });
-            // 병합된 서버 스케줄로 교체 후 저장
-            currentSchedule = serverSchedule;
-            // 이 경기의 점수를 다시 확실히 반영
-            const finalMatch = currentSchedule.find(x => x.id === id);
-            if (finalMatch) {
-                finalMatch.s1 = m.s1;
-                finalMatch.s2 = m.s2;
-            }
-        }
-        await window.saveToCloud('saveMatchScore');
+        // [핵심 개선] 전체 덮어쓰기 대신 트랜잭션 함수를 호출하여 이 경기 점수만 안전하게 병합 저장
+        await fbSaveMatchScoreWithTransaction(id, m.s1, m.s2);
+        
+        // 로컬 데이터 정합성 유지 (트랜잭션 성공 후 최신 서버 데이터 다시 읽기 권장되나 
+        // onSnapshot에 의해 자동으로 업데이트될 것임)
         dirtyMatches.delete(id);
+        
+        // [수정] fbSaveMatchScoreWithTransaction이 이미 클라우드에 저장했으므로 
+        // 전체를 저장하는 window.saveToCloud는 중복이며 동시성 충돌을 유발할 수 있어 제거합니다.
+        
         // 성공 시 UI 업데이트
         const card = document.querySelector(`[data-match-id="${id}"]`);
         if (card) {
@@ -1058,7 +1095,7 @@ async function commitSession() {
                 // v7.2: Renaming logic removed to prevent accidental overwrites
             });
 
-            matchHistory.push({
+            const historyItem = {
                 id: Date.now() + Math.random(),
                 date,
                 sessionNum,
@@ -1068,12 +1105,17 @@ async function commitSession() {
                 t2_names: m.t2.map(p => p.name),
                 score1: parseInt(m.s1) || 0,
                 score2: parseInt(m.s2) || 0
-            });
+            };
+            // [개선] 메인 배열 대신 개별 서브컬렉션 문서로 저장
+            fbAddHistoryItem(historyItem);
+            // 로컬 상태 유지 (UI 즉시 반영용)
+            matchHistory.push(historyItem);
         });
 
         currentSchedule = [];
         applicants = []; // 랭킹전 최종 종료 시에만 명단 초기화
-        await window.saveToCloud('commitSession');
+        // [중요] 이제 matchHistory는 개별 저장되므로 메인 문서 업데이트에서는 제외
+        await fbSaveToCloud({ members, matchHistory: [], currentSchedule, sessionNum, applicants, reports }, 'commitSession');
 
         // 랭킹전 종료 후 상태를 IDLE로 변경하고 다음 회차 번호 준비
         await window.saveSessionState('idle', parseInt(sessionNum) + 1);
@@ -1115,10 +1157,24 @@ window.toggleHistoryContent = (header) => {
 window.deleteHistory = async (id) => {
     if (!isAdmin) return;
     if (!confirm('정말로 이 경기 기록을 삭제하시겠습니까?\n모든 랭킹 점수가 처음부터 재계산됩니다.')) return;
-    matchHistory = matchHistory.filter(h => h.id !== id);
-    recalculateAll();
-    updateUI();
-    await window.saveToCloud('deleteHistory');
+
+    try {
+        // [개선] 서브컬렉션에서 우선 삭제
+        await fbDeleteHistoryItem(id);
+
+        // 로컬 배열에서도 제거
+        matchHistory = matchHistory.filter(h => h.id !== id);
+
+        // 메인 문서에 남아있을 수 있으므로 동기화 저장
+        await window.saveToCloud('deleteHistory');
+
+        recalculateAll();
+        updateUI();
+        console.log(`[History] Item deleted: ${id}`);
+    } catch (e) {
+        console.error("Delete History failed:", e);
+        alert("삭제 중 오류가 발생했습니다.");
+    }
 };
 window.openEditModal = (id) => {
     if (!isAdmin) return;
@@ -1226,10 +1282,27 @@ async function saveEdit() {
         h.score1 = parseInt(document.getElementById('edit_s1').value) || 0;
         h.score2 = parseInt(document.getElementById('edit_s2').value) || 0;
 
-        closeModal();
-        recalculateAll(); // 수정 즉시 데이터 재계산
-        updateUI();       // UI 갱신
-        await window.saveToCloud('saveEdit');
+        try {
+            // [개선] 서브컬렉션 문서 업데이트 시도
+            await fbUpdateHistoryItem(h.id, {
+                t1_names: h.t1_names,
+                t2_names: h.t2_names,
+                t1_ids: h.t1_ids,
+                t2_ids: h.t2_ids,
+                score1: h.score1,
+                score2: h.score2
+            });
+
+            closeModal();
+            // 메인 문서 동기화 (구버전 호환용)
+            await window.saveToCloud('saveEdit');
+            recalculateAll();
+            updateUI();
+            console.log(`[History] Item updated: ${h.id}`);
+        } catch (e) {
+            console.error("Save Edit failed:", e);
+            alert("저장 중 오류가 발생했습니다.");
+        }
     }
 }
 
