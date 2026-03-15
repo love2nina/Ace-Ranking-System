@@ -683,6 +683,13 @@ export function renderHistory(context) {
 
     sortedSessions.forEach(sNum => {
         const sessionMatches = groups[sNum];
+        // [v22 추가] 경기별 결과 조별(A->Z) 정렬
+        sessionMatches.sort((a, b) => {
+            const gA = a.group || '';
+            const gB = b.group || '';
+            return gA.localeCompare(gB, undefined, { numeric: true });
+        });
+
         const date = sessionMatches[0].date;
 
         const card = document.createElement('div');
