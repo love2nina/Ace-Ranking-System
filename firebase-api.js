@@ -9,6 +9,7 @@ let clusterUnsubscribe = null;
 let statusUnsubscribe = null;
 let videosUnsubscribe = null;
 let historyUnsubscribe = null;
+let reportsUnsubscribe = null;
 let systemSettings = { admin_pw: "ace_dot" };
 
 // 콜백 저장소 (app.js에서 주입)
@@ -136,6 +137,7 @@ export function subscribeToCluster(dbName) {
     if (statusUnsubscribe) statusUnsubscribe();
     if (videosUnsubscribe) videosUnsubscribe();
     if (historyUnsubscribe) historyUnsubscribe();
+    if (reportsUnsubscribe) reportsUnsubscribe();
 
     currentDbName = dbName;
     if (_callbacks.onDbNameChange) _callbacks.onDbNameChange(currentDbName);
@@ -167,7 +169,20 @@ export function subscribeToCluster(dbName) {
                 if (_callbacks.onHistoryLoaded) _callbacks.onHistoryLoaded(historyList);
             }, (hError) => {
                 console.warn("[Firebase] History migration check or loading issue:", hError);
-                // 히스토리 컬렉션이 없거나 권한 문제일 경우 기존 data.matchHistory를 대안으로 사용하거나 비워둠
+            });
+
+            // 1.2 분석 리포트 서브컬렉션 구독 (지연/순차 로드)
+            const reportsRef = collection(db, clusterPath, currentDbName, "reports");
+            if (reportsUnsubscribe) reportsUnsubscribe();
+            reportsUnsubscribe = onSnapshot(reportsRef, (rSnapshot) => {
+                const reportsData = {};
+                rSnapshot.docs.forEach(doc => {
+                    reportsData[doc.id] = doc.data().content;
+                });
+                console.log(`[Firebase] Reports loaded: ${Object.keys(reportsData).length} sessions`);
+                if (_callbacks.onReportsLoaded) _callbacks.onReportsLoaded(reportsData);
+            }, (rError) => {
+                console.warn("[Firebase] Reports loading issue:", rError);
             });
         } else {
             // ⚠️ 문서가 존재하지 않는 경우: 빈 데이터를 자동 저장하지 않음 (데이터 소실 방지)
@@ -535,20 +550,17 @@ export async function initNewClusterSession(sessionStatusDocPath, initialState) 
  * @param {string} content 
  */
 export async function saveReport(sessionNum, content) {
+    const { doc, setDoc, serverTimestamp } = window.FB_SDK;
+    const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
+    // [개선] 메인 문서 대신 reports 서브컬렉션에 세션번호를 문서 ID로 개별 저장
+    const reportRef = doc(db, clusterPath, currentDbName, "reports", String(sessionNum));
+
     try {
-        const { doc, getDoc, updateDoc } = window.FB_SDK;
-        const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
-        const docRef = doc(db, clusterPath, currentDbName);
-
-        const snap = await getDoc(docRef);
-        let reports = {};
-        if (snap.exists() && snap.data().reports) {
-            reports = snap.data().reports;
-        }
-
-        reports[String(sessionNum)] = content;
-        await updateDoc(docRef, { reports });
-        console.log(`[Firebase] Report saved for session ${sessionNum}`);
+        await setDoc(reportRef, {
+            content: content,
+            updatedAt: serverTimestamp()
+        });
+        console.log(`[Firebase] Report saved to subcollection for session ${sessionNum}`);
     } catch (e) {
         console.error("Save Report Error:", e);
         throw e;
@@ -693,6 +705,42 @@ export async function migrateHistory(historyArray) {
         console.log(`[Migration] ✅ Successfully migrated ${historyArray.length} items to subcollection.`);
     } catch (e) {
         console.error("[Migration] ❌ Error during migration:", e);
+        throw e;
+    }
+}
+
+/**
+ * 기존 메인 문서의 reports를 서브컬렉션으로 일괄 이관합니다.
+ * @param {Object} reportsObj - 이관할 리포트 객체 (sessionNum: content)
+ */
+export async function migrateReports(reportsObj) {
+    if (!reportsObj || Object.keys(reportsObj).length === 0) return;
+
+    const { doc, setDoc, serverTimestamp, updateDoc } = window.FB_SDK;
+    const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
+    const docRef = doc(db, clusterPath, currentDbName);
+    const reportsCol = doc(db, clusterPath, currentDbName).path + "/reports";
+
+    console.log(`[Migration] Starting migration of ${Object.keys(reportsObj).length} reports...`);
+
+    try {
+        for (const [sessionNum, content] of Object.entries(reportsObj)) {
+            const rDocRef = doc(db, clusterPath, currentDbName, "reports", String(sessionNum));
+            await setDoc(rDocRef, {
+                content: content,
+                updatedAt: serverTimestamp()
+            });
+        }
+
+        // 메인 문서에서 reports 비우기
+        await updateDoc(docRef, { 
+            reports: {},
+            updatedAt: serverTimestamp()
+        });
+
+        console.log(`[Migration] ✅ Successfully migrated reports to subcollection.`);
+    } catch (e) {
+        console.error("[Migration] ❌ Error during report migration:", e);
         throw e;
     }
 }

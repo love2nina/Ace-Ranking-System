@@ -78,6 +78,7 @@ import {
     deleteHistoryItem as fbDeleteHistoryItem,
     updateHistoryItem as fbUpdateHistoryItem,
     migrateHistory as fbMigrateHistory,
+    migrateReports as fbMigrateReports,
     subscribeToVideos as fbSubscribeToVideos,
     addVideo as fbAddVideo,
     deleteVideo as fbDeleteVideo
@@ -223,6 +224,14 @@ function initFirebase() {
                         console.error("[Migration] Auto-migration failed:", err);
                     });
                 }
+
+                // [리포트 이관] 메인 문서에 리포트 데이터가 남아있는 경우 서브컬렉션으로 이관
+                if (isAdmin && data.reports && Object.keys(data.reports).length > 0) {
+                    console.log(`[Migration] Legacy reports detected (${Object.keys(data.reports).length} sessions). Starting auto-migration...`);
+                    fbMigrateReports(data.reports).catch(err => {
+                        console.error("[Migration] Report migration failed:", err);
+                    });
+                }
             } else {
                 console.log('[Perf] Data unchanged → skip recalculate');
             }
@@ -246,6 +255,18 @@ function initFirebase() {
                 recalculateAll();
                 updateUI();
                 console.log(`[Perf] History synchronized: ${matchHistory.length} total items`);
+            }
+        },
+        onReportsLoaded: (reportsData) => {
+            // [지연 로드] 리포트 데이터 수신 시 병합 (기존 reports 객체와 병합)
+            reports = { 
+                ...(reports || {}),
+                ...(reportsData || {})
+            };
+            console.log(`[Perf] Reports synchronized: ${Object.keys(reports).length} total sessions`);
+            // 중계석 탭이 열려있다면 즉시 렌더링 갱신 가능성 확인
+            if (currentTab === 'caster') {
+                window.renderAnalystReport();
             }
         },
         onEmptyDefault: async () => {
