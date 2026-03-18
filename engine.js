@@ -291,7 +291,9 @@ export function optimizeCourtRoundLayout(availablePool, numMatches, partners, op
 
             // 게임 횟수 형평성 유지 (많이 뛴 사람이 걸리면 가차없이 페널티 부여)
             p.forEach(player => {
-                currentTotalScore -= ((gameCounts[player.id] || 0) * 50000);
+                // [v46] 지각자는 0.5경기 뛴 것으로 페널티 부여. (3경기까지는 우선 배정되나, 자리가 남으면 4경기도 가능하게 함)
+                const lateJoinPenalty = (player.lateJoin && matchMode === 'court') ? 25000 : 0;
+                currentTotalScore -= ((gameCounts[player.id] || 0) * 50000 + lateJoinPenalty);
             });
         }
 
@@ -333,14 +335,16 @@ function generateCourtSchedule(context) {
         }
     }
 
-    const maxGamesPerPlayer = 4;
+    // [v44] 지각자는 최대 3게임, 일반 선수는 최대 4게임
     const players = [...applicants];
     const gameCounts = {};
+    const maxGamesMap = {};
     const partners = {};
     const opponents = {};
 
     players.forEach(p => {
         gameCounts[p.id] = 0;
+        maxGamesMap[p.id] = 4; // [v46] 지각자도 기본 최대 4게임 오픈. 대신 정렬 시 페널티 부여로 3게임 가능성 우선 배정
         partners[p.id] = new Set();
         opponents[p.id] = new Map();
     });
@@ -353,7 +357,7 @@ function generateCourtSchedule(context) {
 
         const availablePool = [...players]
             .filter(p => {
-                if (gameCounts[p.id] >= maxGamesPerPlayer) return false;
+                if (gameCounts[p.id] >= maxGamesMap[p.id]) return false;
                 if (r === 1 && p.lateJoin) return false; // 1R 지각자 제외
                 return true;
             })

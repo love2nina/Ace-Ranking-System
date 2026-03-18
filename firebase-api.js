@@ -535,14 +535,55 @@ export async function switchDatabase() {
                 createdAt: new Date().toISOString()
             });
 
-            await updateDoc(doc(db, settingsPath), { active_cluster: newName });
+            // 4. 전역 설정의 active_cluster 업데이트 (v49: robust global scope)
+            const sdk = window.FB_SDK;
+            await sdk.setDoc(sdk.doc(db, settingsPath), {
+                active_cluster: newName,
+                updatedAt: new Date().toISOString()
+            }, { merge: true });
+
+            window.alert(`'${newName}'(으)로 전환 완료되었습니다. 페이지를 새로고침합니다.`);
+            window.location.reload();
+        } catch (e) {
+            console.error("[Firebase] Switch DB Error:", e);
+            window.alert("DB 생성/전환 중 오류가 발생했습니다: " + e.message);
+        }
+    }
+}
+
+/**
+ * 기존 DB(시즌) 불러오기 (관리자 전용)
+ */
+export async function loadDatabase() {
+    const dbSelect = document.getElementById('dbListSelect');
+    if (!dbSelect) { console.error("[Firebase] dbListSelect not found"); return; }
+    const selectedDb = dbSelect.value;
+    
+    console.log(`[Firebase] Attempting to load DB: ${selectedDb}`);
+    
+    if (!selectedDb) {
+        window.alert('불러올 데이터베이스를 선택해주세요.');
+        return;
+    }
+    
+    if (window.confirm(`'${selectedDb}' 데이터베이스로 전환하시겠습니까?`)) {
+        try {
+            const sdk = window.FB_SDK;
+            const settingsPath = currentClubId === 'Default' ? "system/settings" : `clubs/${currentClubId}/config/settings`;
             
-            document.getElementById('newDbInput').value = '';
-            alert(`신규 시즌 '${newName}'이 생성되었습니다. 페이지가 새로고침됩니다.`);
-            location.reload();
-        } catch (e) { 
-            console.error(e);
-            alert('생성 실패: ' + e.message); 
+            console.log(`[Firebase] Updating settingsPath: ${settingsPath} with cluster: ${selectedDb}`);
+            
+            // 4. 전역 설정의 active_cluster 업데이트 (v49: robust global scope)
+            await sdk.setDoc(sdk.doc(db, settingsPath), {
+                active_cluster: selectedDb,
+                updatedAt: new Date().toISOString()
+            }, { merge: true });
+
+            window.alert(`'${selectedDb}'(으)로 전환되었습니다. 페이지를 새로고침합니다.`);
+            window.location.reload();
+        } catch(e) {
+            console.error("[Firebase] DB Load Error:", e);
+            window.alert("DB 불러오기 중 오류가 발생했습니다: " + e.message);
         }
     }
 }
@@ -647,20 +688,21 @@ export async function addHistoryItem(item) {
     }
 }
 
-/**
- * 특정 히스토리 항목을 서브컬렉션에서 삭제합니다.
- * @param {string} itemId - 삭제할 항목의 ID
- */
 export async function deleteHistoryItem(itemId) {
     const { doc, deleteDoc } = window.FB_SDK;
     const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
     const docRef = doc(db, clusterPath, currentDbName, "history", String(itemId));
+
+    console.log(`[Firebase] Deleting history item. Path: ${docRef.path}, ID: ${itemId}`);
 
     try {
         await deleteDoc(docRef);
         console.log(`[Firebase] History item deleted: ${itemId}`);
     } catch (e) {
         console.error("Delete History Error:", e);
+        if (e.code === 'permission-denied') {
+            alert("삭제 권한이 없습니다. Firebase 보안 규칙을 확인해 주세요.");
+        }
         throw e;
     }
 }
@@ -675,6 +717,8 @@ export async function updateHistoryItem(itemId, updates) {
     const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
     const docRef = doc(db, clusterPath, currentDbName, "history", String(itemId));
 
+    console.log(`[Firebase] Updating history item. Path: ${docRef.path}, ID: ${itemId}`, updates);
+
     try {
         await updateDoc(docRef, {
             ...updates,
@@ -683,6 +727,9 @@ export async function updateHistoryItem(itemId, updates) {
         console.log(`[Firebase] History item updated: ${itemId}`);
     } catch (e) {
         console.error("Update History Error:", e);
+        if (e.code === 'permission-denied') {
+            alert("수정 권한이 없습니다. Firebase 보안 규칙을 확인해 주세요.");
+        }
         throw e;
     }
 }

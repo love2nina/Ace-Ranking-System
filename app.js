@@ -12,6 +12,7 @@ import {
     addVideo as fbAddVideo,
     deleteVideo as fbDeleteVideo,
     switchDatabase as fbSwitchDatabase,
+    loadDatabase as fbLoadDatabase,
     fetchDbList,
     saveReport as fbSaveReport,
     saveMatchScoreWithTransaction as fbSaveMatchScoreWithTransaction,
@@ -40,7 +41,9 @@ import {
     toggleHistoryContent as uiToggleHistoryContent,
     renderEloChart as uiRenderEloChart,
     updatePlayerSelect as uiUpdatePlayerSelect,
-    renderPlayerTrend as uiRenderPlayerTrend
+    renderPlayerTrend as uiRenderPlayerTrend,
+    renderHistoryEditModal as uiRenderHistoryEditModal,
+    renderCurrentMatchEditModal as uiRenderCurrentMatchEditModal
 } from './ui.js';
 
 import {
@@ -71,6 +74,7 @@ let activeGroupTab = ''; // 현재 활성 대진표 탭
 let tempSchedule = null; // 확정 전 임시 대진표
 let historyViewMode = 'match'; // 'match' or 'player'
 let editingMatchId = null;
+let modalMode = ''; // 'history' or 'current'
 
 // --- 초기화 (Initialization) ---
 async function init() {
@@ -81,7 +85,7 @@ async function init() {
             members = data.members || [];
             currentSchedule = data.currentSchedule || [];
             applicants = data.applicants || [];
-            recalculateAll();
+            // [v44] recalculateAll은 onHistoryLoaded에서만 호출 (중복 제거, 로딩 최적화)
             updateUI();
 
             // 데이터 로딩 완료 시 오버레이 숨김
@@ -150,7 +154,8 @@ window.switchTab = (id) => {
             updatePlayerSelect: (c) => uiUpdatePlayerSelect(c),
             renderPlayerTrend: (c) => uiRenderPlayerTrend(c),
             renderAnalystReport: (c) => uiRenderAnalystReport(c),
-            renderVideoGallery: (c) => uiRenderVideoGallery(c)
+            renderVideoGallery: (c) => uiRenderVideoGallery(c),
+            updateUI: () => updateUI()
         }
     };
     uiSwitchTab(id, ctx);
@@ -168,14 +173,7 @@ window.closeAdminModal = () => {
 window.openDbModal = async () => {
     document.getElementById('dbModal').classList.remove('hidden');
     document.getElementById('dbModal').style.display = 'flex';
-    const select = document.getElementById('dbListSelect');
-    const prevSelect = document.getElementById('prevDbSelect');
-    if (select) {
-        const dbs = await fetchDbList();
-        const options = dbs.map(db => `<option value="${db}">${db}</option>`).join('');
-        select.innerHTML = '<option value="">데이터베이스 선택...</option>' + options;
-        if (prevSelect) prevSelect.innerHTML = '<option value="">이관할 이전 DB(시즌) 선택...</option>' + options;
-    }
+    await fetchDbList();
 };
 window.closeDbModal = () => {
     const modal = document.getElementById('dbModal');
@@ -263,6 +261,9 @@ function setupEventListeners() {
     const switchDbBtn = document.getElementById('switchDbBtn');
     if (switchDbBtn) switchDbBtn.onclick = () => fbSwitchDatabase();
 
+    const loadDbBtn = document.getElementById('loadDbBtn');
+    if (loadDbBtn) loadDbBtn.onclick = () => fbLoadDatabase();
+
     const helpBtn = document.getElementById('helpBtn');
     if (helpBtn) helpBtn.onclick = () => window.openHelpModal();
 
@@ -283,10 +284,15 @@ function setupEventListeners() {
     if (generateScheduleBtn) generateScheduleBtn.onclick = () => generateSchedule();
 
     const finalizeScheduleBtn = document.getElementById('finalizeScheduleBtn');
-    if (finalizeScheduleBtn) finalizeScheduleBtn.onclick = () => finalizeSchedule();
+    if (finalizeScheduleBtn) {
+        finalizeScheduleBtn.onclick = () => finalizeSchedule();
+    }
 
-    const regenerateBtn = document.getElementById('regenerateBtn');
-    if (regenerateBtn) regenerateBtn.onclick = () => generateSchedule();
+    const saveEditBtn = document.getElementById('saveEditBtn');
+    if (saveEditBtn) saveEditBtn.onclick = () => saveEdit();
+
+    const closeModalBtn = document.querySelector('#editModal .secondary');
+    if (closeModalBtn) closeModalBtn.onclick = () => closeEditModal();
 
     const cancelScheduleBtn = document.getElementById('cancelScheduleBtn');
     if (cancelScheduleBtn) cancelScheduleBtn.onclick = () => cancelSchedule();
@@ -312,6 +318,27 @@ function setupEventListeners() {
 
     const restoreCsvBtn = document.getElementById('restoreCsvBtn');
     if (restoreCsvBtn) restoreCsvBtn.onclick = () => handleRestoreCsv();
+
+    // [v44] 조편성 저장 버튼 클릭 시 즉시 반영
+    const savePreviewBtn = document.getElementById('savePreviewBtn');
+    if (savePreviewBtn) savePreviewBtn.onclick = () => {
+        previewGroups = null; // 기존 미리보기 초기화 → 새 커스텀 입력값 기준으로 재생성
+        updateUI();
+    };
+
+    // [v45] 실시간 커스텀 인원 입력 검증
+    const customSplitInput = document.getElementById('customSplitInput');
+    if (customSplitInput) {
+        customSplitInput.oninput = () => {
+            // updateUI 전체를 호출하면 포커스가 잃어버리므로, 정보 업데이트만 부분 호출
+            const context = {
+                currentSessionState, applicants, previewGroups, GAME_COUNTS, 
+                getSplits,
+                actions: { selfRender: () => {}, setPreviewGroups: (val) => { previewGroups = val; }, updateUI: () => updateUI() }
+            };
+            uiUpdateOptimizationInfo(context);
+        };
+    }
 
     // 실시간 세션 정보 입력 동기화
     const sessionInfoSelect = document.getElementById('sessionInfoSelect');
@@ -375,7 +402,8 @@ function updateUI() {
             updatePlayerSelect: (ctx) => uiUpdatePlayerSelect(ctx),
             renderPlayerTrend: (ctx) => uiRenderPlayerTrend(ctx),
             openEditModal: (id) => openHistoryEditModal(id),
-            deleteHistory: (id) => deleteHistory(id)
+            deleteHistory: (id) => deleteHistory(id),
+            updateUI: () => updateUI()
         }
     };
 
@@ -398,6 +426,12 @@ function recalculateAll() {
 window.removeApplicant = (id) => {
     applicants = applicants.filter(p => String(p.id) !== String(id));
     fbSaveToCloud({ applicants }, 'removeApplicant');
+    
+    // [v45] 인원 변동 시 커스텀 분할 고정 해제 및 미리보기 리셋
+    const customInput = document.getElementById('customSplitInput');
+    if (customInput) customInput.value = '';
+    previewGroups = null;
+    
     updateUI();
 };
 window.updateLiveScore = (id, team, val) => {
@@ -437,6 +471,15 @@ function generateSchedule() {
     if (result) {
         tempSchedule = result.tempSchedule;
         activeGroupTab = result.activeGroupTab;
+        
+        // [v50] 대진표가 생성되지 않은 경우 (인원 부족 등) 알림 추가
+        if (!tempSchedule || tempSchedule.length === 0) {
+            alert("대진표를 생성할 수 없습니다. 인원 배분이나 참가자 수를 확인해 주세요.");
+            const finalizeBtn = document.getElementById('finalizeScheduleBtn');
+            if (finalizeBtn) finalizeBtn.style.display = 'none';
+            return;
+        }
+
         uiRenderSchedulePreview({ gameCounts: result.gameCounts, applicants, rankMap });
 
         const finalizeBtn = document.getElementById('finalizeScheduleBtn');
@@ -445,19 +488,46 @@ function generateSchedule() {
 }
 
 async function finalizeSchedule() {
-    if (!tempSchedule || !isAdmin) return;
-    if (!confirm("대진표를 확정하고 랭킹전을 시작하시겠습니까?")) return;
+    if (!tempSchedule || tempSchedule.length === 0) {
+        window.alert("확정할 대진표 데이터가 없습니다. 먼저 대진표를 생성해 주세요.");
+        return;
+    }
+    
+    // 관리자 권한 최종 확인
+    const savedPw = localStorage.getItem('ace_admin_pw');
+    const effectiveIsAdmin = isAdmin || (savedPw === systemSettings.admin_pw);
+    if (!effectiveIsAdmin) {
+        window.alert("관리자 권한이 없습니다. 다시 로그인해 주세요.");
+        return;
+    }
+    
+    if (!window.confirm("대진표를 확정하고 랭킹전을 시작하시겠습니까?")) return;
 
-    const sessionNum = tempSchedule[0].sessionNum;
-    const info = document.getElementById('manualSessionInfo')?.value || document.getElementById('sessionInfoSelect')?.value || "";
-    const matchMode = currentSessionState.matchMode || 'court';
+    try {
+        const sessionNum = tempSchedule[0].sessionNum;
+        const infoSelect = document.getElementById('sessionInfoSelect')?.value || "";
+        const manualInput = document.getElementById('manualSessionInfo')?.value || "";
+        const info = (infoSelect === 'manual' ? manualInput : infoSelect) || currentSessionState.info || "";
+        const matchMode = currentSessionState.matchMode || 'court';
 
-    await fbSaveToCloud({ currentSchedule: tempSchedule }, 'finalizeSchedule');
-    await fbSaveSessionState('playing', sessionNum, info, matchMode);
+        await fbSaveToCloud({ currentSchedule: tempSchedule }, 'finalizeSchedule');
+        await fbSaveSessionState('playing', sessionNum, info, matchMode);
 
-    tempSchedule = null;
-    const area = document.getElementById('schedulePreviewArea');
-    if (area) area.style.display = 'none';
+        // 상탯값 초기화
+        tempSchedule = null;
+        previewGroups = null;
+        
+        const area = document.getElementById('schedulePreviewArea');
+        if (area) area.style.display = 'none';
+        
+        // 확정 성공 시 대진표 탭으로 자동 이동 및 알림
+        if (window.switchTab) window.switchTab('match');
+        window.alert("대진표가 성공적으로 확정되었습니다!");
+        
+    } catch (e) {
+        console.error("Finalize Schedule Error:", e);
+        window.alert("대진표 확정 중 오류가 발생했습니다: " + e.message);
+    }
 }
 
 async function cancelSchedule() {
@@ -485,6 +555,10 @@ function addPlayer() {
     const newPlayer = member ? { ...member } : { id: Date.now().toString(), name: name, rating: ELO_INITIAL };
 
     applicants.push(newPlayer);
+    
+    // [v45] 인원 변동 시 커스텀 분할 고정 해제 및 미리보기 리셋
+    const customInput = document.getElementById('customSplitInput');
+    if (customInput) customInput.value = '';
     previewGroups = null; // 인원 변경 시 프리뷰 초기화
 
     fbSaveToCloud({ applicants }, 'addPlayer');
@@ -542,7 +616,16 @@ async function openRegistration() {
     const sessionNum = document.getElementById('nextSessionNum')?.value;
     if (!sessionNum) { alert("회차를 입력해주세요."); return; }
 
-    await fbSaveSessionState('recruiting', sessionNum, "", currentSessionState.matchMode || 'court');
+    // [v44] 회차 오픈 시 현재 선택된 장소/시간 정보를 즉시 반영
+    const sessionInfoSelect = document.getElementById('sessionInfoSelect');
+    const manualInput = document.getElementById('manualSessionInfo');
+    let info = '';
+    if (sessionInfoSelect?.value === 'manual') {
+        info = manualInput?.value || '';
+    } else {
+        info = sessionInfoSelect?.value || '';
+    }
+    await fbSaveSessionState('recruiting', sessionNum, info, currentSessionState.matchMode || 'court');
 }
 
 // --- AI 리포트 생성 (v23 핵심: 서사 및 템플릿 고착화) ---
@@ -789,13 +872,144 @@ async function handleRestoreCsv() {
 }
 
 // 모달/수정 관련
-// 모달/수정 관련
-window.openHistoryEditModal = (id) => { alert("기능 준비 중입니다."); };
+// 히스토리(경기별 기록) 수정 모달 열기
+window.openHistoryEditModal = (id) => {
+    editingMatchId = id;
+    modalMode = 'history';
+
+    if (!matchHistory || matchHistory.length === 0) {
+        alert("경기 기록 데이터를 불러올 수 없습니다.");
+        return;
+    }
+
+    const match = matchHistory.find(m => String(m.id) === String(id));
+    if (!match) {
+        alert("해당 경기 정보를 찾을 수 없습니다.");
+        return;
+    }
+
+    uiRenderHistoryEditModal(match);
+};
+
 window.deleteHistoryItem = async (id) => {
     if (!confirm("정말 삭제하시겠습니까? (이 작업은 되돌릴 수 없습니다)")) return;
     await fbDeleteHistoryItem(id);
 };
-function openCurrentMatchEditModal(id) { alert("이름 수정 기능은 현재 구현 중입니다."); }
+
+function openCurrentMatchEditModal(id) {
+    editingMatchId = id;
+    modalMode = 'current';
+    const match = currentSchedule.find(m => String(m.id) === String(id));
+    if (!match) {
+        alert("현재 경기 정보를 찾을 수 없습니다.");
+        return;
+    }
+
+    uiRenderCurrentMatchEditModal(match);
+}
+
+async function saveEdit() {
+    console.log("[App] saveEdit called. Mode:", modalMode, "ID:", editingMatchId);
+    if (!editingMatchId) return;
+
+    // 이름 변경에 따른 ID 해결 유틸리티
+    const resolvePlayer = (newName, oldId) => {
+        const name = newName.trim();
+        if (!name) return { id: oldId, name: "Unknown" };
+
+        const existing = members.find(m => m.name === name);
+        if (existing) return { id: existing.id, name: existing.name };
+
+        const member = members.find(m => String(m.id) === String(oldId));
+        if (member) {
+            member.name = name;
+            return { id: member.id, name: name };
+        }
+
+        const newId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
+        const newM = { id: newId, name: name, rating: ELO_INITIAL, matchCount: 0, wins: 0, losses: 0, draws: 0, scoreDiff: 0 };
+        members.push(newM);
+        return { id: newId, name: name };
+    };
+
+    try {
+        let membersUpdated = false;
+
+        if (modalMode === 'history') {
+            const hMatch = matchHistory.find(m => String(m.id) === String(editingMatchId));
+            if (!hMatch) throw new Error("History Match not found");
+
+            const n1 = document.getElementById('editHistName1').value.trim();
+            const n2 = document.getElementById('editHistName2').value.trim();
+            const n3 = document.getElementById('editHistName3').value.trim();
+            const n4 = document.getElementById('editHistName4').value.trim();
+            const s1 = parseInt(document.getElementById('editHistScore1').value);
+            const s2 = parseInt(document.getElementById('editHistScore2').value);
+
+            // 선수별 이름-ID 동기화
+            const p1 = resolvePlayer(n1, hMatch.t1_ids[0]);
+            const p2 = resolvePlayer(n2, hMatch.t1_ids[1]);
+            const p3 = resolvePlayer(n3, hMatch.t2_ids[0]);
+            const p4 = resolvePlayer(n4, hMatch.t2_ids[1]);
+
+            console.log(`[App] Saving History Edit with ID Sync:`, { p1, p2, p3, p4, s1, s2 });
+            
+            await fbUpdateHistoryItem(editingMatchId, { 
+                t1_ids: [p1.id, p2.id],
+                t1_names: [p1.name, p2.name],
+                t2_ids: [p3.id, p4.id],
+                t2_names: [p3.name, p4.name],
+                score1: s1, 
+                score2: s2 
+            });
+            membersUpdated = true;
+            alert("히스토리 기록이 수정되었습니다. 선수 명단 및 랭킹이 재계산됩니다.");
+
+        } else if (modalMode === 'current') {
+            const match = currentSchedule.find(m => String(m.id) === String(editingMatchId));
+            if (!match) throw new Error("Current Match not found");
+
+            const n1 = document.getElementById('editName1').value.trim();
+            const n2 = document.getElementById('editName2').value.trim();
+            const n3 = document.getElementById('editName3').value.trim();
+            const n4 = document.getElementById('editName4').value.trim();
+
+            const p1 = resolvePlayer(n1, match.t1[0].id);
+            const p2 = resolvePlayer(n2, match.t1[1].id);
+            const p3 = resolvePlayer(n3, match.t2[0].id);
+            const p4 = resolvePlayer(n4, match.t2[1].id);
+
+            match.t1[0] = p1;
+            match.t1[1] = p2;
+            match.t2[0] = p3;
+            match.t2[1] = p4;
+
+            await fbSaveToCloud({ currentSchedule: currentSchedule }, 'updateMatchNamesExtended');
+            membersUpdated = true;
+            alert("현재 대진표의 선수 및 명칭이 수정되었습니다.");
+        }
+
+        // 회원 정보가 변경(이름 수정 또는 신규 추가)되었다면 클라우드에 전체 저장
+        if (membersUpdated) {
+            await fbSaveToCloud({ members }, 'syncMembersAfterEdit');
+        }
+
+        closeEditModal();
+        recalculateAll(); // 로컬 캐시 즉시 갱신
+        updateUI();
+    } catch (e) {
+        console.error("Save Edit Error:", e);
+        alert("수정 중 오류가 발생했습니다: " + e.message);
+    }
+}
+
+function closeEditModal() {
+    const modal = document.getElementById('editModal');
+    modal.classList.add('hidden');
+    modal.style.display = 'none';
+    editingMatchId = null;
+    modalMode = '';
+}
 
 // 앱 시작
 init();

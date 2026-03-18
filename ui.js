@@ -200,6 +200,7 @@ export function renderApplicants(context) {
     if (!split || split.length === 0) { setPreviewGroups(null); return; }
 
     const totalInPreview = previewGroups ? previewGroups.reduce((s, g) => s + g.length, 0) : 0;
+    // [v49] 공백 제거 후 비교하여 4,4 와 4, 4 차이로 인한 리셋 방지
     const currentStructure = previewGroups ? previewGroups.map(g => g.length).join(',') : '';
     const targetStructure = split.join(',');
 
@@ -211,6 +212,7 @@ export function renderApplicants(context) {
             cur += s;
         });
         setPreviewGroups(previewGroups);
+        context.previewGroups = previewGroups; // [v47] 드래그 얩 드롭 컨텍스트 참조 지속성 보장
 
         const saveBtn = document.getElementById('savePreviewBtn');
         if (saveBtn && !customValue) saveBtn.style.display = 'none';
@@ -221,6 +223,7 @@ export function renderApplicants(context) {
             group.map(p => appMap.get(String(p.id)) || p).filter(p => appMap.has(String(p.id)))
         );
         setPreviewGroups(previewGroups);
+        context.previewGroups = previewGroups; // [v47] 드래그 얩 드롭 컨텍스트 참조 지속성 보장
 
         const newTotal = previewGroups.reduce((s, g) => s + g.length, 0);
         if (newTotal !== sortedApplicants.length) {
@@ -265,9 +268,16 @@ export function renderApplicants(context) {
                 if (saveBtn) saveBtn.style.display = 'block';
 
                 setPreviewGroups(previewGroups);
+                context.previewGroups = previewGroups; // [v47] 최신 조편성을 context에 업데이트하여 updateSplitInputFromPreview가 올바르게 작동하도록 함
                 updateSplitInputFromPreview(context);
-                selfRender(context);
-                updateOptimizationInfo(context);
+                
+                // [v47] 브라우저 드래그 이벤트 루프 종료 후 DOM 업데이트를 수행하도록 지연
+                setTimeout(() => {
+                    if (context.actions?.updateUI) {
+                        context.actions.updateUI();
+                    }
+                    updateOptimizationInfo(context);
+                }, 10);
             });
         }
 
@@ -292,12 +302,21 @@ export function renderApplicants(context) {
                 const isLate = a.lateJoin;
                 const icon = isLate ? '⏰' : '🕒';
                 const style = isLate ? 'color: var(--accent-color); font-weight: bold;' : 'opacity: 0.5; filter: grayscale(1);';
-                // 4명 조에서는 지각 옵션 비활성화
-                const isDisabled = group.length <= 4;
-                const clickHandler = isDisabled ? `alert('4명 조에서는 지각을 허용할 수 없습니다.')` : `window.toggleLateJoin('${a.id}')`;
+                // [v44, v47] 지각 허용 상한 로직 (조별 모드 한정)
+                let isDisabled = false;
+                let disabledMsg = '';
+                
+                if (currentSessionState && currentSessionState.matchMode === 'group') {
+                    const maxLate = Math.max(0, group.length - 4);
+                    const currentLateCount = group.filter(p => p.lateJoin && String(p.id) !== String(a.id)).length;
+                    isDisabled = maxLate === 0 || (!isLate && currentLateCount >= maxLate);
+                    disabledMsg = maxLate === 0 ? '4명 조에서는 지각 불가' : `이 조는 최대 ${maxLate}명까지 지각 허용 (현재 ${currentLateCount}명)`;
+                }
+
+                const clickHandler = isDisabled ? `alert('${disabledMsg}')` : `window.toggleLateJoin('${a.id}')`;
                 const disabledStyle = isDisabled ? 'opacity: 0.2; cursor: not-allowed;' : 'cursor: pointer;';
                 
-                lateBtn = ` <span style="${disabledStyle} margin-left:5px; font-size:1.1em; ${isDisabled ? '' : style}" onclick="event.stopPropagation(); ${clickHandler}" title="${isDisabled ? '4명 조 지각 불가' : '눌러서 2라운드부터 참여(지각) 토글'}">${icon}</span>`;
+                lateBtn = ` <span style="${disabledStyle} margin-left:5px; font-size:1.1em; ${isDisabled ? '' : style}" onclick="event.stopPropagation(); ${clickHandler}" title="${isDisabled ? disabledMsg : '눌러서 2라운드부터 참여(지각) 토글'}">${icon}</span>`;
             }
 
             tag.innerHTML = `${a.name}${rankLabel}${lateBtn}${isAdmin ? ` <span class="remove-btn" onclick="event.stopPropagation(); removeApplicant('${a.id}')">×</span>` : ''}`;
@@ -368,15 +387,14 @@ export function validateCustomSplit(context) {
         }
         btn.disabled = false;
 
-        const saveBtn = document.getElementById('savePreviewBtn');
-        if (saveBtn) saveBtn.style.display = 'block';
-
+        // [v47, v49] 사용성 개선: 입력 즉시 조편성을 자동 변경하되, 공백 차이로 인한 무한 루프 방지
         const currentPreviewSplit = previewGroups ? previewGroups.map(g => g.length).join(',') : '';
         const inputSplit = nums.join(',');
 
         if (currentPreviewSplit !== inputSplit) {
-            setPreviewGroups(null);
-            setTimeout(() => selfRender(context), 0);
+            console.log(`[UI] Split changed: ${currentPreviewSplit} -> ${inputSplit}. Resetting preview.`);
+            if (context.actions?.setPreviewGroups) context.actions.setPreviewGroups(null);
+            setTimeout(() => { if (context.actions?.updateUI) context.actions.updateUI(); }, 0);
         }
 
         const info = document.getElementById('optimizationInfo');
@@ -678,7 +696,7 @@ export function renderCurrentMatches(context) {
 // --------------------------------------------------------
 
 export function renderHistory(context) {
-    const { matchHistory = [], historyViewMode, sessionRankSnapshots, isAdmin, actions: { openEditModal, deleteHistory } } = context;
+    const { matchHistory = [], historyViewMode, sessionRankSnapshots, rankMap, isAdmin, actions: { openEditModal, deleteHistory } } = context;
     const list = document.getElementById('historyList');
     if (!list) return;
     list.innerHTML = matchHistory.length ? '' : '<p style="text-align:center; padding:20px">기록이 없습니다.</p>';
@@ -789,13 +807,15 @@ export function renderHistory(context) {
                     });
                 });
             });
+            // [v44] 랭킹보드와 동일한 현재 순위(rankMap) 기준으로 정렬 및 표시
             const sortedPlayers = Object.values(playerStats).sort((a, b) => {
-                const rankA = (sessionRankSnapshots[sNum] && sessionRankSnapshots[sNum][a.id]) || 9999;
-                const rankB = (sessionRankSnapshots[sNum] && sessionRankSnapshots[sNum][b.id]) || 9999;
+                const rankA = rankMap?.get(String(a.id))?.rank || 9999;
+                const rankB = rankMap?.get(String(b.id))?.rank || 9999;
                 return rankA - rankB;
             });
             contentHtml = sortedPlayers.map(p => {
-                let rankVal = (sessionRankSnapshots[sNum] && sessionRankSnapshots[sNum][p.id]) || '-';
+                const rInfo = rankMap?.get(String(p.id));
+                let rankVal = rInfo ? rInfo.rank : '-';
                 return `
                 <div class="player-history-item">
                     <div>
@@ -1181,7 +1201,7 @@ export function renderEloChart(context) {
     const ctx = document.getElementById('eloChart')?.getContext('2d');
     if (!ctx) return;
 
-    const data = members.filter(m => m.matchCount > 0).sort((a, b) => b.rating - a.rating).slice(0, 15);
+    const data = members.filter(m => m.matchCount > 0).sort((a, b) => b.rating - a.rating).slice(0, 8);
     const labels = data.map(m => m.name);
     const ratings = data.map(m => Math.round(m.rating));
     if (ratings.length === 0) return;
@@ -1578,4 +1598,75 @@ export function renderVideoGallery(context) {
         card.appendChild(content);
         container.appendChild(card);
     });
+}
+
+/**
+ * 🛠️ 히스토리 수정 모달 렌더링
+ */
+export function renderHistoryEditModal(match) {
+    const fields = document.getElementById('editFields');
+    if (!fields) return;
+
+    fields.innerHTML = `
+        <div style="margin-bottom:15px; background:rgba(255,255,255,0.05); padding:10px; border-radius:8px;">
+            <div style="font-size:0.9rem; margin-bottom:5px; color:var(--text-secondary);">히스토리 기록 수정</div>
+            <p style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:10px;">선수 이름과 점수를 모두 수정할 수 있습니다.</p>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-top:10px;">
+            <div>
+                <label style="display:block; font-size:0.75rem; margin-bottom:5px; color:var(--accent-color);">TEAM 1 선수</label>
+                <input type="text" id="editHistName1" value="${match.t1_names[0]}" style="width:100%; margin-bottom:5px;">
+                <input type="text" id="editHistName2" value="${match.t1_names[1]}" style="width:100%;">
+                <div style="text-align:center; margin-top:10px;">
+                    <label style="display:block; font-size:0.75rem; margin-bottom:5px;">SCORE</label>
+                    <input type="number" id="editHistScore1" value="${match.score1}" min="0" max="6" style="width:60px; font-size:1.2rem; text-align:center;">
+                </div>
+            </div>
+            <div>
+                <label style="display:block; font-size:0.75rem; margin-bottom:5px; color:var(--accent-color);">TEAM 2 선수</label>
+                <input type="text" id="editHistName3" value="${match.t2_names[0]}" style="width:100%; margin-bottom:5px;">
+                <input type="text" id="editHistName4" value="${match.t2_names[1]}" style="width:100%;">
+                <div style="text-align:center; margin-top:10px;">
+                    <label style="display:block; font-size:0.75rem; margin-bottom:5px;">SCORE</label>
+                    <input type="number" id="editHistScore2" value="${match.score2}" min="0" max="6" style="width:60px; font-size:1.2rem; text-align:center;">
+                </div>
+            </div>
+        </div>
+    `;
+    
+    const modal = document.getElementById('editModal');
+    if (modal) {
+        modal.classList.remove('hidden');
+        modal.style.display = 'flex';
+    }
+}
+
+/**
+ * 🛠️ 현재 경기 수정 모달 렌더링
+ */
+export function renderCurrentMatchEditModal(match) {
+    const fields = document.getElementById('editFields');
+    if (!fields) return;
+
+    fields.innerHTML = `
+        <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:15px;">출전 선수 명칭을 수정합니다. (랭킹/데이터에는 영향 없음)</p>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px;">
+            <div>
+                <label style="display:block; font-size:0.75rem; margin-bottom:5px; color:var(--accent-color);">TEAM 1</label>
+                <input type="text" id="editName1" value="${match.t1[0].name}" style="width:100%; margin-bottom:5px;">
+                <input type="text" id="editName2" value="${match.t1[1].name}" style="width:100%;">
+            </div>
+            <div>
+                <label style="display:block; font-size:0.75rem; margin-bottom:5px; color:var(--accent-color);">TEAM 2</label>
+                <input type="text" id="editName3" value="${match.t2[0].name}" style="width:100%; margin-bottom:5px;">
+                <input type="text" id="editName4" value="${match.t2[1].name}" style="width:100%;">
+            </div>
+        </div>
+    `;
+
+    const modal = document.getElementById('editModal');
+    if (modal) {
+        modal.classList.remove('hidden');
+        modal.style.display = 'flex';
+    }
 }
