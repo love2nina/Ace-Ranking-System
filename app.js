@@ -421,7 +421,16 @@ function updateUI() {
 }
 
 function recalculateAll() {
-    engineRecalculateAll({ members, matchHistory, rankMap, sessionRankSnapshots, sessionStartRatings, sessionEndRatings });
+    engineRecalculateAll({ 
+        members, 
+        matchHistory, 
+        rankMap, 
+        sessionRankSnapshots, 
+        sessionStartRatings, 
+        sessionEndRatings,
+        applicants,
+        currentSchedule
+    });
 }
 window.removeApplicant = (id) => {
     applicants = applicants.filter(p => String(p.id) !== String(id));

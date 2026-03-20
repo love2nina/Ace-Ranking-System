@@ -208,8 +208,21 @@ export function recalculateAll(context) {
             context.sessionEndRatings[sId] = members.reduce((acc, m) => { acc[m.id] = m.rating; return acc; }, {});
         });
 
-        // [v43] 최종 순위 맵 업데이트 시에도 활성 멤버들만 대상으로 순위를 매김
-        const currentRanking = members.filter(m => m.matchCount > 0).sort((a, b) => {
+        // [v43, v59] 최종 순위 맵 업데이트: UI(랭킹보드)와 동일한 활동성 필터 적용
+        const allSessionsSorted = [...sessionIds];
+        const recent3 = [...allSessionsSorted].reverse().slice(0, 3);
+
+        const currentRanking = members.filter(m => {
+            if (m.matchCount === 0) return false;
+            
+            const isRecentlyActive = m.participationArr?.some(s => recent3.includes(s.toString()));
+            const isCurrentParticipant = (context.applicants && context.applicants.some(a => String(a.id) === String(m.id))) ||
+                (context.currentSchedule && context.currentSchedule.some(match =>
+                    [...match.t1, ...match.t2].some(p => String(p.id) === String(m.id))
+                ));
+            
+            return isRecentlyActive || isCurrentParticipant;
+        }).sort((a, b) => {
             if (b.rating !== a.rating) return b.rating - a.rating;
             if (b.wins !== a.wins) return b.wins - a.wins;
             const bWinRate = b.matchCount > 0 ? b.wins / b.matchCount : 0;
@@ -218,6 +231,7 @@ export function recalculateAll(context) {
             if (b.scoreDiff !== a.scoreDiff) return b.scoreDiff - a.scoreDiff;
             return String(a.name).localeCompare(String(b.name));
         });
+
         currentRanking.forEach((m, idx) => {
             const prevIdx = previousRanking.indexOf(m.id);
             let change = 0;
