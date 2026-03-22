@@ -309,8 +309,13 @@ export function renderApplicants(context) {
                 if (currentSessionState && currentSessionState.matchMode === 'group') {
                     const maxLate = Math.max(0, group.length - 4);
                     const currentLateCount = group.filter(p => p.lateJoin && String(p.id) !== String(a.id)).length;
-                    isDisabled = maxLate === 0 || (!isLate && currentLateCount >= maxLate);
-                    disabledMsg = maxLate === 0 ? '4명 조에서는 지각 불가' : `이 조는 최대 ${maxLate}명까지 지각 허용 (현재 ${currentLateCount}명)`;
+                    
+                    // [v6.5-UI] 4인 조에서도 지각자 표시 자체는 허용 (대기 조 배정을 위해)
+                    // 다만 한 조에 4명이 참여할 수 없는 수준(지각자가 너무 많음)은 경고
+                    if (!isLate && group.length - (currentLateCount + 1) < 0) {
+                        isDisabled = true;
+                        disabledMsg = '조 인원보다 지각자가 많을 수 없습니다.';
+                    }
                 }
 
                 const clickHandler = isDisabled ? `alert('${disabledMsg}')` : `window.toggleLateJoin('${a.id}')`;
@@ -555,7 +560,7 @@ export function renderCurrentMatches(context) {
     container.innerHTML = `<h3 style="text-align:center; margin-bottom:20px">${groupTitle} 대진표</h3>`;
 
     const getRank = (p) => {
-        if (p.vRank) return `<span style="font-size:0.8em; color:var(--text-secondary)">(${p.vRank})</span>`;
+        if (p.vRank) return `<span style="font-size:0.8em; color:var(--accent-color)">(New)</span>`;
         const info = rankMap.get(String(p.id));
         return info ? `<span style="font-size:0.8em; color:var(--text-secondary)">(${info.rank})</span>` : '';
     };

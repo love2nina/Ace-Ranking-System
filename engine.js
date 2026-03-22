@@ -547,7 +547,8 @@ export function generateSchedule(context) {
         opponents[p.id] = new Map();
     });
 
-    groupsArr.forEach((g, groupIdx) => {
+    for (let groupIdx = 0; groupIdx < groupsArr.length; groupIdx++) {
+        const g = groupsArr[groupIdx];
         const gLabel = String.fromCharCode(65 + groupIdx);
         const groupSize = g.length;
         const defaultTarget = groupSize === 4 ? 3 : 4;
@@ -557,15 +558,11 @@ export function generateSchedule(context) {
             targetGamesPerPlayer[p.id] = defaultTarget;
         });
 
-        // [v6.4.2] 대기 조(Index >= 3)는 첫 타임슬롯에 쉬게 되므로 1라운드에 지각자가 포함되어도 무방합니다.
-        const allowLateJoinInFirstRound = groupIdx >= 3;
-
         // DFS 백트래킹을 이용한 조별리그 대진 생성
-        let matchSchedule = generateGroupScheduleDFS(g, targetGamesPerPlayer, 2, allowLateJoinInFirstRound);
-        // 2회 한도 내에서 실패 시 3회 통과 허용 처리 (예: 4명 조 등)
-        if (!matchSchedule) matchSchedule = generateGroupScheduleDFS(g, targetGamesPerPlayer, 3, allowLateJoinInFirstRound);
-        // 그래도 실패 시 극한 타협안으로 999 횟수 허용 (파트너 중복 0만 최우선 방어)
-        if (!matchSchedule) matchSchedule = generateGroupScheduleDFS(g, targetGamesPerPlayer, 999, allowLateJoinInFirstRound);
+        // [v6.5] 하드 블로킹 대신 지능적 우선순위 탐색 사용
+        let matchSchedule = generateGroupScheduleDFS(g, targetGamesPerPlayer, 2);
+        if (!matchSchedule) matchSchedule = generateGroupScheduleDFS(g, targetGamesPerPlayer, 3);
+        if (!matchSchedule) matchSchedule = generateGroupScheduleDFS(g, targetGamesPerPlayer, 999);
 
         if (matchSchedule) {
             matchSchedule.forEach((m, matchIdx) => {
@@ -585,11 +582,10 @@ export function generateSchedule(context) {
                 });
             });
         } else {
-            // 한 그룹이라도 생성 실패 시 전체 실패 처리 (v63)
+            // 한 그룹이라도 생성 실패 시 전체 실패 처리
             return null;
         }
-
-    });
+    }
 
     return {
         tempSchedule,
@@ -600,7 +596,7 @@ export function generateSchedule(context) {
 }
 
 // ==== 조별리그 전용 DFS 백트래킹 매칭 (파트너 중복 원천 차단 보장) ==== //
-function generateGroupScheduleDFS(group, targetGamesPerPlayer, maxOpponentRepeats = 2, allowLateJoinInFirstRound = false) {
+function generateGroupScheduleDFS(group, targetGamesPerPlayer, maxOpponentRepeats = 2) {
     const totalSlots = group.reduce((acc, p) => acc + targetGamesPerPlayer[p.id], 0);
     const numMatches = Math.floor(totalSlots / 4);
 
@@ -621,12 +617,7 @@ function generateGroupScheduleDFS(group, targetGamesPerPlayer, maxOpponentRepeat
     const lastPlayedRound = {}; group.forEach(p => lastPlayedRound[p.id] = 0);
 
     function canAddMatch(t1, t2, round) {
-        // 1R 지각자 제외 (v6.4.2: 대기 조인 경우는 허용)
-        if (round === 1 && !allowLateJoinInFirstRound) {
-            for (let p of [...t1, ...t2]) {
-                if (p.lateJoin) return false;
-            }
-        }
+        // [v6.5] 1R 지각자 배제는 dfs 함수 내 정렬을 통한 우선순위 탐색으로 처리 (Hard Block 제거)
 
         // 게임 수 초과 확인
         for (let p of [...t1, ...t2]) {
@@ -706,6 +697,13 @@ function generateGroupScheduleDFS(group, targetGamesPerPlayer, maxOpponentRepeat
         const mustPlayIds = new Set(group.filter(p => round > 1 && lastPlayedRound[p.id] < round - 1 && gameCounts[p.id] < targetGamesPerPlayer[p.id]).map(p => p.id));
 
         const shuffledPairs = [...validPairs].sort((a, b) => {
+            // [v6.5] 1라운드 지각자 기피 우선순위 (Soft Constraint)
+            if (round === 1) {
+                const aHasLate = a[0].lateJoin || a[1].lateJoin;
+                const bHasLate = b[0].lateJoin || b[1].lateJoin;
+                if (aHasLate && !bHasLate) return 1;
+                if (!aHasLate && bHasLate) return -1;
+            }
             const aImpact = (mustPlayIds.has(a[0].id) ? 1 : 0) + (mustPlayIds.has(a[1].id) ? 1 : 0);
             const bImpact = (mustPlayIds.has(b[0].id) ? 1 : 0) + (mustPlayIds.has(b[1].id) ? 1 : 0);
             if (aImpact !== bImpact) return bImpact - aImpact;
