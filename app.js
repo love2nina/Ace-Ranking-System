@@ -35,7 +35,6 @@ import {
     renderRanking as uiRenderRanking,
     switchTab as uiSwitchTab,
     updateStatistics as uiUpdateStatistics,
-    renderStatsDashboard as uiRenderStatsDashboard,
     renderAnalystReport as uiRenderAnalystReport,
     renderVideoGallery as uiRenderVideoGallery,
     toggleHistoryContent as uiToggleHistoryContent,
@@ -91,12 +90,24 @@ async function init() {
         }
     }, 15000);
 
-    // [v60] SDK 존재 여부 사전 체크
+    // [v62-hotfix] SDK 비동기 다운로드 대기 (네트워크 지연 대비 최대 5초)
     if (!window.FB_SDK) {
-        console.error("[App] Firebase SDK not available.");
+        console.warn("[App] FB_SDK not ready, waiting for 'firebase-sdk-ready' event...");
+        await new Promise(resolve => {
+            const onReady = () => { clearTimeout(timer); resolve(); };
+            const timer = setTimeout(() => {
+                window.removeEventListener('firebase-sdk-ready', onReady);
+                resolve();
+            }, 5000);
+            window.addEventListener('firebase-sdk-ready', onReady, { once: true });
+        });
+    }
+
+    if (!window.FB_SDK) {
+        console.error("[App] Firebase SDK not available even after waiting.");
         const loadingText = document.getElementById('loadingText');
         const retryBtn = document.getElementById('retryBtn');
-        if (loadingText) loadingText.innerText = 'Firebase SDK 로드 실패. 네트워크 연결을 확인해 주세요.';
+        if (loadingText) loadingText.innerText = 'Firebase SDK 로드 지연. 네트워크 연결을 확인해 주세요.';
         if (retryBtn) retryBtn.style.display = 'block';
         clearTimeout(loadingTimeout);
         return;
@@ -154,7 +165,9 @@ async function init() {
         getMembers: () => members
     };
 
-    initFirebase(callbacks);
+    // 비동기 초기화를 기다려서 SDK가 로드된 이후에만 subscribeToVideos가 정상 동작하게 함
+    await initFirebase(callbacks);
+
     subscribeToVideos((videoList) => {
         videos = videoList;
         if (document.querySelector('.tab-content#tab-caster.active')) {
@@ -176,9 +189,8 @@ window.switchTab = (id) => {
     const ctx = {
         members, matchHistory, reports, currentSessionState, isAdmin, videos,
         applicants, currentSchedule, sessionEndRatings, sessionRankSnapshots,
-        ELO_INITIAL,
+        ELO_INITIAL, rankMap,
         actions: {
-            renderStatsDashboard: (c) => uiRenderStatsDashboard(c),
             renderEloChart: (c) => uiRenderEloChart(c),
             updatePlayerSelect: (c) => uiUpdatePlayerSelect(c),
             renderPlayerTrend: (c) => uiRenderPlayerTrend(c),
@@ -239,17 +251,22 @@ window.closeModal = () => {
 };
 
 window.switchCasterSubTab = (id) => {
-    const tabs = ['report', 'video'];
+    const tabs = ['badge', 'insight', 'report', 'video'];
     tabs.forEach(t => {
         const el = document.getElementById(`subtab-${t}`);
         const btn = document.getElementById(`subtab-${t}-btn`);
         if (el) el.style.display = (t === id) ? 'block' : 'none';
         if (btn) {
             btn.classList.toggle('active', t === id);
-            btn.style.color = (t === id) ? 'var(--accent-color)' : 'var(--text-secondary)';
-            btn.style.fontWeight = (t === id) ? 'bold' : 'normal';
         }
     });
+
+    if (id === 'badge') {
+        uiRenderEloChart({ members, rankMap });
+    }
+    if (id === 'insight') {
+        uiRenderPlayerTrend({ members, matchHistory, rankMap, ELO_INITIAL });
+    }
 };
 
 // 히스토리 제어
@@ -265,6 +282,44 @@ window.toggleHistoryContent = (headerEl) => uiToggleHistoryContent(headerEl);
 
 // 데이터 렌더링 명시적 노출
 window.renderAnalystReport = () => uiRenderAnalystReport({ reports, currentSessionState, matchHistory, isAdmin });
+
+// CSV 내보내기 (경기 기록 엑셀 다운)
+window.exportHistoryToCSV = () => {
+    if (!matchHistory || matchHistory.length === 0) {
+        alert("다운로드할 경기 기록이 없습니다.");
+        return;
+    }
+    const header = ["회차", "날짜", "팀1_선수1", "팀1_선수2", "팀2_선수1", "팀2_선수2", "팀1_점수", "팀2_점수", "승리팀"];
+    const rows = matchHistory.map(m => {
+        const team1 = Array.isArray(m.t1) ? m.t1 : [];
+        const team2 = Array.isArray(m.t2) ? m.t2 : [];
+        const t1p1 = team1[0]?.name || "";
+        const t1p2 = team1[1]?.name || "";
+        const t2p1 = team2[0]?.name || "";
+        const t2p2 = team2[1]?.name || "";
+        const s1 = m.s1 !== undefined ? m.s1 : "";
+        const s2 = m.s2 !== undefined ? m.s2 : "";
+        let win = "무승부";
+        if (s1 > s2) win = "팀1";
+        else if (s2 > s1) win = "팀2";
+        
+        return [
+            m.sessionNum,
+            m.timestamp ? new Date(m.timestamp).toLocaleDateString() : "",
+            t1p1, t1p2, t2p1, t2p2,
+            s1, s2, win
+        ].map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(",");
+    });
+    
+    const csvContent = "\uFEFF" + header.join(",") + "\n" + rows.join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `ACE_매치기록_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+};
 window.renderVideoGallery = () => uiRenderVideoGallery({ videos, isAdmin });
 window.toggleLateJoin = (id) => {
     const player = applicants.find(p => String(p.id) === String(id));
@@ -426,7 +481,6 @@ function updateUI() {
             setActiveGroupTab: (val) => { activeGroupTab = val; updateUI(); },
             renderCurrentMatches: () => uiRenderCurrentMatches(context),
             openCurrentMatchEditModal: (id) => openCurrentMatchEditModal(id),
-            renderStatsDashboard: () => uiRenderStatsDashboard(context),
             renderEloChart: (ctx) => uiRenderEloChart(ctx),
             updatePlayerSelect: (ctx) => uiUpdatePlayerSelect(ctx),
             renderPlayerTrend: (ctx) => uiRenderPlayerTrend(ctx),
@@ -444,9 +498,15 @@ function updateUI() {
     uiRenderHistory(context);
     uiRenderRanking(context);
     uiUpdateStatistics(context);
-    uiRenderStatsDashboard(context);
     uiRenderAnalystReport(context);
     uiRenderVideoGallery(context);
+
+    // [v62] 현재 활성화된 탭의 렌더링 함수를 트리거 (수정된 탭 구조 대응)
+    const activeTabObj = document.querySelector('.tab-content.active');
+    if (activeTabObj) {
+        const activeTabId = activeTabObj.id.replace('tab-', '');
+        uiSwitchTab(activeTabId, context);
+    }
 }
 
 function recalculateAll() {

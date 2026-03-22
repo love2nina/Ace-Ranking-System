@@ -960,7 +960,7 @@ export function renderRanking(context) {
 }
 
 export function switchTab(id, context) {
-    const { actions: { renderStatsDashboard } } = context;
+    const { actions: { renderEloChart, renderPlayerTrend } } = context;
     document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
     document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
 
@@ -970,12 +970,18 @@ export function switchTab(id, context) {
     const btn = document.querySelector(`.tab-btn[data-tab="${id}"]`);
     if (btn) btn.classList.add('active');
 
-    if (id === 'stats' && renderStatsDashboard) {
-        renderStatsDashboard(context);
+    if (id === 'rank' && renderEloChart) {
+        renderEloChart(context);
     }
+    
     if (id === 'caster') {
         renderAnalystReport(context);
         renderVideoGallery(context);
+        // [v61] 전력분석실로 이동된 명예의 전당과 개인 분석 렌더링
+        if (typeof renderBadgeHall === 'function') renderBadgeHall(context);
+        if (typeof updateInsightPlayerSelect === 'function') updateInsightPlayerSelect(context);
+        // [v62] 성장 추이 차트 렌더링
+        if (renderPlayerTrend) renderPlayerTrend(context);
     }
 }
 
@@ -1006,10 +1012,6 @@ export function renderStatsDashboard(context) {
         renderEloChart(context);
         updatePlayerSelect(context);
         renderPlayerTrend(context);
-
-        // [추가] 고도화 통계 렌더링
-        renderBadgeHall(context);
-        updateInsightPlayerSelect(context);
     }
 }
 
@@ -1197,11 +1199,15 @@ export function renderPlayerInsights(playerId, context) {
 }
 
 export function renderEloChart(context) {
-    const { members } = context;
+    const { members, rankMap } = context;
     const ctx = document.getElementById('eloChart')?.getContext('2d');
     if (!ctx) return;
 
-    const data = members.filter(m => m.matchCount > 0).sort((a, b) => b.rating - a.rating).slice(0, 8);
+    // 비활성 인원 제외 및 랭킹 정렬
+    const data = members
+        .filter(m => rankMap.get(String(m.id)))
+        .sort((a, b) => rankMap.get(String(a.id)).rank - rankMap.get(String(b.id)).rank)
+        .slice(0, 8);
     const labels = data.map(m => m.name);
     const ratings = data.map(m => Math.round(m.rating));
     if (ratings.length === 0) return;

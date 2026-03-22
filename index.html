@@ -54,9 +54,8 @@
 
         <!-- 탭 네비게이션 -->
         <div class="tab-container">
-            <button class="tab-btn active" data-tab="stats" onclick="switchTab('stats')">대시보드</button>
+            <button class="tab-btn active" data-tab="rank" onclick="switchTab('rank')">종합랭킹</button>
             <button class="tab-btn" data-tab="caster" onclick="switchTab('caster')">전력분석실</button>
-            <button class="tab-btn" data-tab="rank" onclick="switchTab('rank')">종합랭킹</button>
             <button class="tab-btn" data-tab="apply" onclick="switchTab('apply')">참가신청</button>
             <button class="tab-btn" data-tab="match" onclick="switchTab('match')">대진표</button>
             <button class="tab-btn" data-tab="history" onclick="switchTab('history')">히스토리</button>
@@ -224,6 +223,7 @@
                         </div>
                     </div>
                     <button id="exportCsvBtn" class="export-btn admin-only"
+                        onclick="exportHistoryToCSV()"
                         style="padding: 5px 10px; font-size: 0.8rem; display: none;">CSV
                         내보내기</button>
                 </div>
@@ -234,12 +234,13 @@
         </div>
 
         <!-- 4. 종합 랭킹 섹션 -->
-        <div id="tab-rank" class="tab-content">
+        <div id="tab-rank" class="tab-content active">
             <div class="card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                     <h3>🏆 종합 랭킹 보드</h3>
                     <span id="sessionBadge" class="session-info">진행된 대회: 0회차</span>
                 </div>
+
                 <div class="table-responsive">
                     <table id="rankingTable">
                         <thead>
@@ -258,60 +259,62 @@
                 </div>
             </div>
         </div>
-        <!-- 5. 데이터 분석 섹션 -->
-        <div id="tab-stats" class="tab-content active">
-            <!-- 🏆 1. 기록 달성 뱃지 섹션 (Badge Hall) -->
-            <section class="dashboard-section">
-                <h3 class="section-title">🏆 명예의 전당 (Badge Hall)</h3>
-                <div id="badgeGrid" class="badge-grid">
-                    <!-- statsService.js 기반으로 동적 생성됨 -->
-                    <p class="loading-msg">데이터 분석 중...</p>
-                </div>
-            </section>
 
-            <div class="card">
-                <h3>📊 도토리 키재기 (실력 분포)</h3>
-                <div style="height: 300px; position: relative;">
-                    <canvas id="eloChart"></canvas>
-                </div>
-            </div>
-
-            <!-- 🔍 2. 개인별 인맥 통계 섹션 (Personal Insights) -->
-            <section class="dashboard-section">
-                <div class="section-header"
-                    style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                    <h3 class="section-title" style="margin-bottom: 0;">🔍 개인 분석 리스트</h3>
-                    <select id="insightPlayerSelect" class="player-select-insight">
-                        <option value="">선수 선택</option>
-                    </select>
-                </div>
-                <div id="insightGrid" class="insight-grid">
-                    <p class="no-data-msg">분석할 선수를 선택해 주세요.</p>
-                </div>
-            </section>
-
-            <div class="card">
-                <h3>📈 도토리 성장 추이</h3>
-                <div style="height: 300px; position: relative;">
-                    <canvas id="trendChart"></canvas>
-                </div>
-            </div>
-        </div>
 
         <!-- 6. 전력분석실 섹션 -->
         <div id="tab-caster" class="tab-content">
             <div class="card caster-card">
-                <div
-                    style="display: flex; gap: 15px; margin-bottom: 20px; border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">
-                    <button id="subtab-report-btn" class="sub-tab-btn active" onclick="switchCasterSubTab('report')"
-                        style="background:none; border:none; color:var(--accent-color); cursor:pointer; font-weight:bold; font-size:1.1rem; padding:5px 10px;">📊
-                        분석 리포트</button>
-                    <button id="subtab-video-btn" class="sub-tab-btn" onclick="switchCasterSubTab('video')"
-                        style="background:none; border:none; color:var(--text-secondary); cursor:pointer; font-size:1.1rem; padding:5px 10px;">📺
-                        영상 자료실</button>
+                <div class="sub-tab-container"
+                    style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">
+                    <button id="subtab-badge-btn" class="sub-tab-btn" onclick="switchCasterSubTab('badge')">명예의 전당</button>
+                    <button id="subtab-insight-btn" class="sub-tab-btn" onclick="switchCasterSubTab('insight')">개인 분석</button>
+                    <button id="subtab-report-btn" class="sub-tab-btn active" onclick="switchCasterSubTab('report')">분석 리포트</button>
+                    <button id="subtab-video-btn" class="sub-tab-btn" onclick="switchCasterSubTab('video')">영상 자료실</button>
                 </div>
 
-                <!-- 6-1. 리포트 탭 내용 -->
+                <!-- 6-1. 명예의 전당 탭 내용 -->
+                <div id="subtab-badge" style="display: none;">
+                    <section class="dashboard-section" style="margin-top: 10px;">
+                        <div id="badgeGrid" class="badge-grid">
+                            <!-- statsService.js 기반으로 동적 생성됨 -->
+                            <p class="loading-msg">데이터 분석 중...</p>
+                        </div>
+                        
+                        <!-- v62-hotfix: 도토리 키재기 차트는 명예의 전당 하단으로 재이동 -->
+                        <div style="margin-top: 35px;">
+                            <h4 style="margin: 0 0 10px 0; color: var(--accent-color);">📊 도토리 키재기</h4>
+                            <div style="height: 300px; position: relative;">
+                                <canvas id="eloChart"></canvas>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+
+                <!-- 6-2. 개인 분석 탭 내용 -->
+                <div id="subtab-insight" style="display: none;">
+                    <section class="dashboard-section" style="margin-top: 10px;">
+                        <div class="section-header"
+                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                            <h3 class="section-title" style="margin-bottom: 0;">🔍 개인 분석 리스트</h3>
+                            <select id="insightPlayerSelect" class="player-select-insight">
+                                <option value="">선수 선택</option>
+                            </select>
+                        </div>
+                        <div id="insightGrid" class="insight-grid">
+                            <p class="no-data-msg">분석할 선수를 선택해 주세요.</p>
+                        </div>
+                        
+                        <!-- v62: trendChart 이동 위치 -->
+                        <div style="margin-top: 25px;">
+                            <h4 style="margin: 0 0 10px 0; color: var(--accent-color);">📈 성장 추이</h4>
+                            <div style="height: 250px; position: relative;">
+                                <canvas id="trendChart"></canvas>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+
+                <!-- 6-3. 리포트 탭 내용 -->
                 <div id="subtab-report" style="display: block;">
                     <div
                         style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
