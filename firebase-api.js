@@ -57,7 +57,7 @@ export function getDb() {
  *   - onDbNameChange(dbName): DB 이름 변경 시
  *   - saveToCloud(): 클라우드 저장 트리거
  */
-export function initFirebase(callbacks) {
+export async function initFirebase(callbacks) {
     _callbacks = callbacks;
     console.log("[Firebase] Initializing...");
     if (!window.FB_SDK) {
@@ -83,6 +83,22 @@ export function initFirebase(callbacks) {
 
     const app = initializeApp(firebaseConfig);
     db = getFirestore(app);
+
+    // [v60] 오프라인 캐시 활성화 (재방문 시 캐시 데이터로 즉시 렌더링)
+    if (window.FB_SDK.enableIndexedDbPersistence) {
+        try {
+            await window.FB_SDK.enableIndexedDbPersistence(db);
+            console.log("[Firebase] Offline cache enabled.");
+        } catch (err) {
+            if (err.code === 'failed-precondition') {
+                console.warn("[Firebase] Offline cache: multiple tabs open, skipping.");
+            } else if (err.code === 'unimplemented') {
+                console.warn("[Firebase] Offline cache: not supported in this browser.");
+            } else {
+                console.warn("[Firebase] Offline cache error:", err);
+            }
+        }
+    }
 
     // 글로벌 설정 리스너 (기본 ACE 클러스터 또는 개별 클럽 경로)
     const settingsPath = currentClubId === 'Default' ? "system/settings" : `clubs/${currentClubId}/config/settings`;

@@ -7,6 +7,12 @@
     <title>도토리 키재기 | ACE 랭킹 시스템</title>
     <!-- favicon 404 에러 방지 -->
     <link rel="icon" href="data:,">
+    <!-- [v60] PWA 지원 -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="ACE 랭킹">
+    <meta name="theme-color" content="#38bdf8">
     <link rel="stylesheet" href="style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- Vercel Analytics -->
@@ -619,16 +625,36 @@
     </div>
 
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, collection, doc, setDoc, getDoc, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp, runTransaction } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+        try {
+            const { initializeApp } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js");
+            const { getFirestore, collection, doc, setDoc, getDoc, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp, runTransaction, enableIndexedDbPersistence } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js");
+            const { getAuth, signInAnonymously } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js");
 
-        // Firebase 설정 (app.js에서 접근 가능하도록 window 객체에 바인딩)
-        window.FB_SDK = { initializeApp, getFirestore, collection, doc, setDoc, getDoc, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp, getAuth, signInAnonymously, runTransaction };
-        // SDK 준비 완료 이벤트 발행
-        window.dispatchEvent(new Event('firebase-sdk-ready'));
+            // Firebase 설정 (app.js에서 접근 가능하도록 window 객체에 바인딩)
+            window.FB_SDK = { initializeApp, getFirestore, collection, doc, setDoc, getDoc, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp, getAuth, signInAnonymously, runTransaction, enableIndexedDbPersistence };
+            // SDK 준비 완료 이벤트 발행
+            window.dispatchEvent(new Event('firebase-sdk-ready'));
+        } catch (e) {
+            console.error("[SDK] Firebase SDK load failed:", e);
+            window.FB_SDK = null;
+            const loadingText = document.getElementById('loadingText');
+            const retryBtn = document.getElementById('retryBtn');
+            if (loadingText) loadingText.innerText = 'Firebase SDK 로드 실패. 네트워크를 확인하고 다시 시도해 주세요.';
+            if (retryBtn) retryBtn.style.display = 'block';
+        }
     </script>
     <script type="module" src="app.js"></script>
+
+    <!-- [v60] Service Worker 등록 -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./service-worker.js')
+                    .then(reg => console.log('[SW] Registered:', reg.scope))
+                    .catch(err => console.warn('[SW] Registration failed:', err));
+            });
+        }
+    </script>
 
 </body>
 

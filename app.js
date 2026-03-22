@@ -80,8 +80,31 @@ let modalMode = ''; // 'history' or 'current'
 async function init() {
     console.log("[App] System starting...");
 
+    // [v60] 로딩 타임아웃 안전장치: 15초 후에도 데이터 미수신 시 에러 UI 표시
+    const loadingTimeout = setTimeout(() => {
+        const overlay = document.getElementById('loadingOverlay');
+        if (overlay && overlay.style.display !== 'none') {
+            const loadingText = document.getElementById('loadingText');
+            const retryBtn = document.getElementById('retryBtn');
+            if (loadingText) loadingText.innerText = '서버 연결에 실패했습니다. 네트워크를 확인해 주세요.';
+            if (retryBtn) retryBtn.style.display = 'block';
+        }
+    }, 15000);
+
+    // [v60] SDK 존재 여부 사전 체크
+    if (!window.FB_SDK) {
+        console.error("[App] Firebase SDK not available.");
+        const loadingText = document.getElementById('loadingText');
+        const retryBtn = document.getElementById('retryBtn');
+        if (loadingText) loadingText.innerText = 'Firebase SDK 로드 실패. 네트워크 연결을 확인해 주세요.';
+        if (retryBtn) retryBtn.style.display = 'block';
+        clearTimeout(loadingTimeout);
+        return;
+    }
+
     const callbacks = {
         onDataLoaded: (data) => {
+            clearTimeout(loadingTimeout); // 타임아웃 해제
             members = data.members || [];
             currentSchedule = data.currentSchedule || [];
             applicants = data.applicants || [];
@@ -118,6 +141,7 @@ async function init() {
             // 레거시 마이그레이션 모듈은 firebase-api에서 수행
         },
         onEmptyClusterSafe: () => {
+            clearTimeout(loadingTimeout);
             members = [];
             matchHistory = [];
             applicants = [];
@@ -141,6 +165,11 @@ async function init() {
     setupEventListeners();
     await checkAdminLogin();
 }
+
+// [v60] 재시도 기능
+window.retryFirebaseInit = () => {
+    window.location.reload();
+};
 
 // --- 윈도우 익스포트 (UI 제어용) ---
 window.switchTab = (id) => {
