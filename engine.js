@@ -557,12 +557,15 @@ export function generateSchedule(context) {
             targetGamesPerPlayer[p.id] = defaultTarget;
         });
 
+        // [v6.4.2] 대기 조(Index >= 3)는 첫 타임슬롯에 쉬게 되므로 1라운드에 지각자가 포함되어도 무방합니다.
+        const allowLateJoinInFirstRound = groupIdx >= 3;
+
         // DFS 백트래킹을 이용한 조별리그 대진 생성
-        let matchSchedule = generateGroupScheduleDFS(g, targetGamesPerPlayer, 2);
+        let matchSchedule = generateGroupScheduleDFS(g, targetGamesPerPlayer, 2, allowLateJoinInFirstRound);
         // 2회 한도 내에서 실패 시 3회 통과 허용 처리 (예: 4명 조 등)
-        if (!matchSchedule) matchSchedule = generateGroupScheduleDFS(g, targetGamesPerPlayer, 3);
+        if (!matchSchedule) matchSchedule = generateGroupScheduleDFS(g, targetGamesPerPlayer, 3, allowLateJoinInFirstRound);
         // 그래도 실패 시 극한 타협안으로 999 횟수 허용 (파트너 중복 0만 최우선 방어)
-        if (!matchSchedule) matchSchedule = generateGroupScheduleDFS(g, targetGamesPerPlayer, 999);
+        if (!matchSchedule) matchSchedule = generateGroupScheduleDFS(g, targetGamesPerPlayer, 999, allowLateJoinInFirstRound);
 
         if (matchSchedule) {
             matchSchedule.forEach((m, matchIdx) => {
@@ -597,7 +600,7 @@ export function generateSchedule(context) {
 }
 
 // ==== 조별리그 전용 DFS 백트래킹 매칭 (파트너 중복 원천 차단 보장) ==== //
-function generateGroupScheduleDFS(group, targetGamesPerPlayer, maxOpponentRepeats = 2) {
+function generateGroupScheduleDFS(group, targetGamesPerPlayer, maxOpponentRepeats = 2, allowLateJoinInFirstRound = false) {
     const totalSlots = group.reduce((acc, p) => acc + targetGamesPerPlayer[p.id], 0);
     const numMatches = Math.floor(totalSlots / 4);
 
@@ -618,8 +621,8 @@ function generateGroupScheduleDFS(group, targetGamesPerPlayer, maxOpponentRepeat
     const lastPlayedRound = {}; group.forEach(p => lastPlayedRound[p.id] = 0);
 
     function canAddMatch(t1, t2, round) {
-        // 1R 지각자 제외
-        if (round === 1) {
+        // 1R 지각자 제외 (v6.4.2: 대기 조인 경우는 허용)
+        if (round === 1 && !allowLateJoinInFirstRound) {
             for (let p of [...t1, ...t2]) {
                 if (p.lateJoin) return false;
             }
