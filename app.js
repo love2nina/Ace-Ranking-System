@@ -200,6 +200,12 @@ window.switchTab = (id) => {
         }
     };
     uiSwitchTab(id, ctx);
+
+    // [v62-Performance] 메인 탭도 선택 시 화면 중앙으로 자동 슬라이딩 (모바일 UX)
+    const activeTabBtn = document.querySelector(`.tab-btn[data-tab="${id}"]`);
+    if (activeTabBtn) {
+        activeTabBtn.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    }
 };
 
 // 모달 및 서브탭 제어
@@ -266,6 +272,12 @@ window.switchCasterSubTab = (id) => {
     }
     if (id === 'insight') {
         uiRenderPlayerTrend({ members, matchHistory, rankMap, ELO_INITIAL });
+    }
+
+    // [v62-Performance] 선택한 탭이 화면 좌측으로 부드럽게 이동 (모바일 UX 개선)
+    const activeBtn = document.getElementById(`subtab-${id}-btn`);
+    if (activeBtn) {
+        activeBtn.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
     }
 };
 
