@@ -574,6 +574,59 @@ td {
     border-color: var(--accent-color);
 }
 
+/* --- 전력분석실 전용 캡슐형 세그먼트 탭 --- */
+.analysis-capsule-tabs {
+    display: flex;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    background: rgba(15, 23, 42, 0.6);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-radius: 16px;
+    padding: 6px;
+    gap: 6px;
+    margin-bottom: 25px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.05);
+}
+.analysis-capsule-tabs::-webkit-scrollbar {
+    display: none;
+}
+
+.capsule-tab-btn {
+    flex: 1;
+    white-space: nowrap;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    padding: 12px 18px;
+    border-radius: 12px;
+    font-size: 0.9rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    opacity: 0.7;
+}
+
+.capsule-tab-btn.active {
+    background: var(--accent-color);
+    color: #0f172a;
+    opacity: 1;
+    box-shadow: 0 4px 12px rgba(56, 189, 248, 0.4);
+    transform: translateY(-1px);
+}
+
+.capsule-tab-btn span.emoji {
+    font-size: 1.1rem;
+    filter: drop-shadow(0 0 5px rgba(255,255,255,0.3));
+}
+
+
 .status-success {
     color: var(--success);
 }

@@ -980,7 +980,8 @@ export function switchTab(id, context) {
         // [v61] 전력분석실로 이동된 명예의 전당과 개인 분석 렌더링
         if (typeof renderBadgeHall === 'function') renderBadgeHall(context);
         if (typeof updateInsightPlayerSelect === 'function') updateInsightPlayerSelect(context);
-        // [v62] 성장 추이 차트 렌더링
+        // [v62] ELO 차트 및 성장 추이 차트 렌더링
+        if (renderEloChart) renderEloChart(context);
         if (renderPlayerTrend) renderPlayerTrend(context);
     }
 }
