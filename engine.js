@@ -527,13 +527,13 @@ export function generateSchedule(context) {
         });
     }
 
-    // [v64] 지각자 포함 조 분산 배치: 지각자가 있는 조를 뒤쪽(Wait 슬롯 가능성 높음)으로 배치
+    // [v6.4.1] 지각자 조 분산 배치 세분화: 
+    // 조 인원이 4명인데 지각자가 포함된 경우, 1라운드 매칭이 불가능하므로 뒤쪽(Wait 슬롯)으로 배치합니다.
+    // 5인 이상의 조는 지각자가 있어도 나머지 4명이 1라운드를 뛸 수 있으므로 배정 순서를 조정하지 않습니다.
     groupsArr.sort((a, b) => {
-        const aHasLate = a.some(p => p.lateJoin);
-        const bHasLate = b.some(p => p.lateJoin);
-        if (aHasLate && !bHasLate) return 1;
-        if (!aHasLate && bHasLate) return -1;
-        return 0;
+        const aImpact = (a.length === 4 && a.some(p => p.lateJoin)) ? 1 : 0;
+        const bImpact = (b.length === 4 && b.some(p => p.lateJoin)) ? 1 : 0;
+        return aImpact - bImpact;
     });
 
     let tempSchedule = [];
