@@ -806,16 +806,17 @@ async function handleCopyAIData() {
     sortedHistory.forEach(m => {
         const pids = [...m.t1_ids, ...m.t2_ids];
         pids.forEach((id) => {
-            if (!playerStatsMap[id]) {
-                playerStatsMap[id] = {
+            const sid = String(id);
+            if (!playerStatsMap[sid]) {
+                playerStatsMap[sid] = {
                     total_wins: 0, total_draws: 0, total_losses: 0,
                     max_rating: -Infinity, min_rating: Infinity,
                     sessions: new Set(),
                     consecutive_wins: 0, consecutive_losses: 0
                 };
             }
-            const stats = playerStatsMap[id];
-            const isT1 = m.t1_ids.includes(id);
+            const stats = playerStatsMap[sid];
+            const isT1 = m.t1_ids.map(String).includes(sid);
             const win = isT1 ? (m.score1 > m.score2) : (m.score2 > m.score1);
             const draw = (m.score1 === m.score2);
             const loss = !win && !draw;
@@ -869,7 +870,7 @@ async function handleCopyAIData() {
             const endRating = (sessionEndRatings[sId] && sessionEndRatings[sId][pid]) || null;
             const hasMatchRecord = matchHistory.some(h =>
                 String(h.sessionNum) === String(sId) &&
-                (h.t1_ids.includes(pid) || h.t2_ids.includes(pid))
+                (h.t1_ids.map(String).includes(String(pid)) || h.t2_ids.map(String).includes(String(pid)))
             );
 
             if (endRating !== null || hasMatchRecord) {
@@ -884,9 +885,15 @@ async function handleCopyAIData() {
             }
         });
 
-        if (!participatedBeforeInWindow) todayPerformance[pid].participationStatus = 'New (데뷔)';
-        else if (!participatedInPrev) todayPerformance[pid].participationStatus = 'Returning (복귀)';
-        else todayPerformance[pid].participationStatus = 'Steady (터줏대감)';
+        // 출석 상태 판별 개선: 최근 5회차 뿐만 아니라 전체 히스토리 참조
+        const totalSessionsParticipated = s.sessions.size;
+        if (totalSessionsParticipated === 1) {
+            todayPerformance[pid].participationStatus = 'New (데뷔)';
+        } else if (!participatedInPrev) {
+            todayPerformance[pid].participationStatus = 'Returning (복귀)';
+        } else {
+            todayPerformance[pid].participationStatus = 'Steady (터줏대감)';
+        }
     });
 
     const upsets = [];
@@ -916,10 +923,13 @@ async function handleCopyAIData() {
         sessionNum: sessionNum,
         totalMatches: sessionMatches.length,
         matches: matchesJson,
-        performance: Object.values(todayPerformance).map(p => ({
-            ...p,
-            avgScoreDiff: p.trend.filter(t => t.played).length > 0 ? (p.scoreDiffSum / p.trend.filter(t => t.played).length).toFixed(1) : 0
-        })),
+        performance: Object.values(todayPerformance).map(p => {
+            const playedCount = p.trend.filter(t => t.played).length;
+            return {
+                ...p,
+                avgScoreDiff: playedCount > 0 ? parseFloat((p.scoreDiffSum / playedCount).toFixed(1)) : 0
+            };
+        }),
         upsets: upsets,
         groupStats: groupStats,
         topRankers: members.sort((a, b) => b.rating - a.rating).slice(0, 5).map(m => ({ name: m.name, rating: Math.round(m.rating) }))
