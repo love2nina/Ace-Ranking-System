@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>도토리 키재기 | ACE 랭킹 시스템</title>
+    <!-- favicon 404 에러 방지 -->
+    <link rel="icon" href="data:,">
+    <!-- [v60] PWA 지원 -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="ACE 랭킹">
+    <meta name="theme-color" content="#38bdf8">
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Vercel Analytics -->
+    <script>
+        window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+    </script>
+    <script defer src="/_vercel/insights/script.js"></script>
+</head>
+
+<body>
+    <!-- 로딩 오버레이 (Firebase 데이터 수신 전까지 표시) -->
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <p id="loadingText">데이터를 불러오는 중입니다...</p>
+            <button id="retryBtn" class="retry-btn" style="display:none;" onclick="window.retryFirebaseInit()">🔄 다시
+                시도</button>
+        </div>
+    </div>
+    <div class="container">
+        <!-- 상단 헤더 및 관리자 제어바 -->
+        <header class="main-header">
+            <div class="header-branding">
+                <h1>도토리 키재기</h1>
+                <p>ACE Club Ranking Management System v5.0</p>
+            </div>
+            <div id="adminStatusArea" class="header-controls">
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 5px;">
+                    <span id="currentDbName" class="db-badge">DB: 커넥팅...</span>
+                    <span id="syncStatus" class="sync-status" style="margin: 0; padding-top: 2px;">● Cloud Online</span>
+                </div>
+                <div class="header-buttons">
+                    <button id="dbSettingsBtn" class="secondary admin-only" style="display: none;">DB 설정</button>
+                    <button id="helpBtn" class="secondary">사용자 가이드</button>
+                    <button id="adminLoginBtn" class="secondary">관리자 로그인</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- 탭 네비게이션 -->
+        <div class="tab-container">
+            <button class="tab-btn active" data-tab="rank" onclick="switchTab('rank')">종합랭킹</button>
+            <button class="tab-btn" data-tab="caster" onclick="switchTab('caster')">전력분석실</button>
+            <button class="tab-btn" data-tab="apply" onclick="switchTab('apply')">참가신청</button>
+            <button class="tab-btn" data-tab="match" onclick="switchTab('match')">대진표</button>
+            <button class="tab-btn" data-tab="history" onclick="switchTab('history')">히스토리</button>
+        </div>
+
+        <!-- 1. 참가 신청 섹션 -->
+        <div id="tab-apply" class="tab-content">
+            <div class="card">
+                <!-- Status Banner -->
+                <div id="roundStatusBanner" class="status-banner"
+                    style="margin-bottom: 20px; padding: 15px; border-radius: 8px; text-align: center; background: rgba(255, 255, 255, 0.05);">
+                    <h3 style="margin: 0;">⏳ 데이터 로딩 중...</h3>
+                </div>
+
+                <!-- Admin Control (Admin Only) -->
+                <div class="admin-only"
+                    style="display: none; margin-bottom: 20px; padding: 15px; border: 1px solid var(--accent-color); border-radius: 8px;">
+                    <h4 style="margin: 0 0 10px 0; color: var(--accent-color);">👮‍♂️ 관리자 권한: 회차 오픈</h4>
+                    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
+                        <span style="white-space: nowrap;">제</span>
+                        <input type="number" id="nextSessionNum" style="width: 80px; text-align: center;"
+                            placeholder="N">
+                        <span style="white-space: nowrap;">회차</span>
+                        <button id="openRoundBtn" class="primary" style="flex: 1;">참가 접수 시작</button>
+                    </div>
+
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <select id="sessionInfoSelect" style="flex: 1; min-width: 150px;">
+                            <option value="">장소/시간 선택 안함</option>
+                            <option value="[토요일 중앙공원 06:20~]">[토요일 중앙공원 06:20~]</option>
+                            <option value="[일요일 CS 코트 06:00~]">[일요일 CS 코트 06:00~]</option>
+                            <option value="manual">직접 입력...</option>
+                        </select>
+                        <input type="text" id="manualSessionInfo" style="display: none; flex: 2;"
+                            placeholder="예: [토요일 중앙공원 06:20~]">
+                    </div>
+                </div>
+
+                <!-- Guest Application Form -->
+                <div id="applicationForm" style="display: none;">
+                    <h3>📢 참가 신청</h3>
+                    <div class="input-group">
+                        <input type="text" id="playerName" placeholder="선수 이름 입력">
+                        <button id="addPlayerBtn">신청</button>
+                    </div>
+                </div>
+                <div id="playerList" class="player-list-container">
+                    <!-- 참가 명단 동적 생성 -->
+                </div>
+
+                <div id="dashboard"
+                    style="display: none; margin-top: 30px; border-top: 1px solid var(--border-color); padding-top: 20px;">
+                    <div class="optimization-card">
+                        <div id="optimizationInfo">
+                            <!-- 분석 정보 노출 -->
+                        </div>
+                    </div>
+
+                    <div class="admin-only" style="display: none;">
+                        <div class="input-group"
+                            style="margin-top: 15px; display: flex; flex-direction: column; gap: 8px;">
+                            <!-- Manual Session Input Removed -->
+                            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                                <input type="text" id="customSplitInput" placeholder="예: 5,5,4,6"
+                                    style="flex: 1; min-width: 100px;">
+                                <button id="savePreviewBtn" class="secondary"
+                                    style="white-space: nowrap; display: none;">조편성 저장</button>
+                            </div>
+                            <p id="splitStatus" style="font-size: 0.8rem; margin: 0;"></p>
+                        </div>
+                        <div style="display: flex; gap: 10px; margin-top: 20px;">
+                            <button id="generateScheduleBtn"
+                                style="flex: 1; background: var(--accent-color); color: #0f172a; padding: 15px; font-size: 1.1rem; border: none; font-weight: 800; box-shadow: 0 4px 12px rgba(56, 189, 248, 0.3);">👥
+                                대진표 생성</button>
+                        </div>
+                        <div
+                            style="margin-top: 15px; padding: 12px; border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 8px; background: rgba(56, 189, 248, 0.03);">
+                            <div style="display: flex; gap: 15px; align-items: center; justify-content: center;">
+                                <span style="font-size: 0.95rem; color: var(--accent-color); font-weight: bold;">🎯 대진
+                                    방식 결정:</span>
+                                <label
+                                    style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.95rem;">
+                                    <input type="radio" name="matchMode" value="group"> 조별 방식
+                                </label>
+                                <label
+                                    style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.95rem;">
+                                    <input type="radio" name="matchMode" value="court" checked> 코트별 랜덤
+                                </label>
+                            </div>
+                            <p
+                                style="font-size: 0.75rem; color: var(--text-secondary); margin: 8px 0 0 0; text-align: center;">
+                                * 방식을 변경하면 모든 사용자의 참가신청 화면이 즉시 업데이트됩니다.
+                            </p>
+                        </div>
+                        <!-- 대진표 생성 미리보기 섹션 추가 -->
+                        <div id="schedulePreviewArea"
+                            style="display: none; margin-top: 20px; padding: 15px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--accent-color); border-radius: 8px;">
+                            <h4 style="margin: 0 0 15px 0; color: var(--accent-color); text-align: center;">📊 대진 생성 결과
+                                (검토 후 확정)</h4>
+                            <div id="previewStatsGrid"
+                                style="display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 10px; margin-bottom: 20px;">
+                                <!-- 선수별 경기 수 동적 생성 -->
+                            </div>
+                            <div
+                                style="text-align: center; font-size: 0.9rem; margin-bottom: 15px; color: var(--text-secondary);">
+                                평균 경기 수: <span id="previewAvgGames"
+                                    style="color: var(--accent-color); font-weight: bold;">0</span>게임
+                            </div>
+                            <div style="display: flex; gap: 10px;">
+                                <button id="regenerateBtn" class="secondary" style="flex: 1;">🔄 다시 생성</button>
+                                <button id="finalizeScheduleBtn" class="primary"
+                                    style="flex: 1; background: var(--success); color: white; border: none;">✅ 대진표
+                                    확정</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. 대진표 및 결과 섹션 -->
+        <div id="tab-match" class="tab-content">
+            <div class="card">
+                <div id="adminMatchControls" class="admin-only"
+                    style="display: none; margin-bottom: 15px; border-bottom: 1px solid var(--border-color); padding-bottom: 15px;">
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <button id="cancelScheduleBtn" class="secondary"
+                            style="width: 100%; color: var(--danger); border-color: var(--danger);">🚫
+                            대진표 초기화 및 접수 재개</button>
+                        <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0; text-align: center;">
+                            * '접수 재개' 시 현재 대진표가 삭제되고 다시 명단을 수정할 수 있습니다.
+                        </p>
+                    </div>
+                </div>
+                <div id="groupTabsContainer" class="sub-tabs" style="display: none; margin-bottom: 20px;">
+                    <!-- A조, B조 탭 동적 생성 -->
+                </div>
+                <div id="matchContainer">
+                    <p style="text-align: center; color: var(--text-secondary); padding: 40px;">대진표를 생성해 주세요.</p>
+                </div>
+                <div id="matchFooter" style="display: none; margin-top: 20px; text-align: center;">
+                    <div class="admin-only" style="display: none;">
+                        <button id="updateEloBtn"
+                            style="background-color: var(--success); color: white; width: 100%;">🏆 랭킹전 종료 및 결과
+                            확정</button>
+                    </div>
+                    <div class="guest-only" style="padding: 15px; color: var(--accent-color); font-weight: bold;">
+                        🏅 실시간 경기 결과가 업데이트 중입니다.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. 경기 히스토리 섹션 -->
+        <div id="tab-history" class="tab-content">
+            <div class="card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                        <h3>경기 기록</h3>
+                        <div class="view-toggle-group">
+                            <button id="viewMatchesBtn" class="toggle-btn active"
+                                onclick="setHistoryViewMode('match')">경기별</button>
+                            <button id="viewPlayersBtn" class="toggle-btn"
+                                onclick="setHistoryViewMode('player')">선수별</button>
+                        </div>
+                    </div>
+                    <button id="exportCsvBtn" class="export-btn admin-only"
+                        onclick="exportHistoryToCSV()"
+                        style="padding: 5px 10px; font-size: 0.8rem; display: none;">CSV
+                        내보내기</button>
+                </div>
+                <div id="historyList">
+                    <!-- 히스토리 카드 동적 생성 -->
+                </div>
+            </div>
+        </div>
+
+        <!-- 4. 종합 랭킹 섹션 -->
+        <div id="tab-rank" class="tab-content active">
+            <div class="card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h3>🏆 종합 랭킹 보드</h3>
+                    <span id="sessionBadge" class="session-info">진행된 대회: 0회차</span>
+                </div>
+
+                <div class="table-responsive">
+                    <table id="rankingTable">
+                        <thead>
+                            <tr>
+                                <th>순위</th>
+                                <th>성명</th>
+                                <th>ELO</th>
+                                <th>전적</th>
+                                <th>승률</th>
+                                <th>득실</th>
+                                <th>참여</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- 6. 전력분석실 섹션 -->
+        <div id="tab-caster" class="tab-content">
+            <div class="card caster-card">
+                <div class="analysis-capsule-tabs">
+                    <button id="subtab-badge-btn" class="capsule-tab-btn active" onclick="switchCasterSubTab('badge')">
+                        <span class="emoji">🏆</span> 명예의 전당
+                    </button>
+                    <button id="subtab-insight-btn" class="capsule-tab-btn" onclick="switchCasterSubTab('insight')">
+                        <span class="emoji">🔍</span> 개인 분석
+                    </button>
+                    <button id="subtab-report-btn" class="capsule-tab-btn" onclick="switchCasterSubTab('report')">
+                        <span class="emoji">📝</span> 분석 리포트
+                    </button>
+                    <button id="subtab-video-btn" class="capsule-tab-btn" onclick="switchCasterSubTab('video')">
+                        <span class="emoji">📹</span> 영상 자료실
+                    </button>
+                </div>
+
+                <!-- 6-1. 명예의 전당 탭 내용 -->
+                <div id="subtab-badge" style="display: block;">
+                    <section class="dashboard-section" style="margin-top: 10px;">
+                        <div id="badgeGrid" class="badge-grid">
+                            <!-- statsService.js 기반으로 동적 생성됨 -->
+                            <p class="loading-msg">데이터 분석 중...</p>
+                        </div>
+                        
+                        <!-- v62-hotfix: 도토리 키재기 차트는 명예의 전당 하단으로 재이동 -->
+                        <div style="margin-top: 35px;">
+                            <h4 style="margin: 0 0 10px 0; color: var(--accent-color);">📊 도토리 키재기</h4>
+                            <div style="height: 300px; position: relative;">
+                                <canvas id="eloChart"></canvas>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+
+                <!-- 6-2. 개인 분석 탭 내용 -->
+                <div id="subtab-insight" style="display: none;">
+                    <section class="dashboard-section" style="margin-top: 10px;">
+                        <div class="section-header"
+                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                            <h3 class="section-title" style="margin-bottom: 0;">🔍 개인 분석 리스트</h3>
+                            <select id="insightPlayerSelect" class="player-select-insight">
+                                <option value="">선수 선택</option>
+                            </select>
+                        </div>
+                        <div id="insightGrid" class="insight-grid">
+                            <p class="no-data-msg">분석할 선수를 선택해 주세요.</p>
+                        </div>
+                        
+                        <!-- v62: trendChart 이동 위치 -->
+                        <div style="margin-top: 25px;">
+                            <h4 style="margin: 0 0 10px 0; color: var(--accent-color);">📈 성장 추이</h4>
+                            <div style="height: 250px; position: relative;">
+                                <canvas id="trendChart"></canvas>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+
+                <!-- 6-3. 리포트 탭 내용 -->
+                <div id="subtab-report" style="display: none;">
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h3 style="color: var(--accent-color);">경기 분석 리포트</h3>
+                        <select id="reportSessionSelect" style="max-width: 150px; font-size: 0.85rem;"
+                            onchange="renderAnalystReport()">
+                            <option value="">회차 선택</option>
+                        </select>
+                    </div>
+
+                    <div id="casterReportContent" class="report-display-area">
+                        <p style="text-align: center; color: var(--text-secondary); padding: 40px;">수석 분석관이 데이터를 정밀 분석
+                            중입니다...</p>
+                    </div>
+
+                    <!-- Admin Report Post Area (Moved inside subtab-report) -->
+                    <div class="admin-only"
+                        style="display: none; margin-top: 30px; padding-top: 20px; border-top: 1px dashed var(--border-color);">
+                        <div
+                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                            <h4 style="color: var(--accent-color); margin: 0;">👮 리포트 게시 (관리자)</h4>
+                            <button id="copyAIBtn" class="secondary" style="font-size: 0.75rem; padding: 5px 10px;">📋
+                                AI
+                                분석용 데이터 복사</button>
+                        </div>
+                        <div style="margin-bottom: 10px; display: flex; gap: 10px; align-items: center;">
+                            <span style="font-size: 0.9rem;">대상 회차:</span>
+                            <input type="number" id="reportPostSessionNum" style="width: 80px; text-align: center;"
+                                placeholder="N">
+                        </div>
+                        <textarea id="reportPostContent"
+                            style="width: 100%; height: 200px; padding: 12px; font-family: inherit; font-size: 0.9rem; margin-bottom: 10px;"
+                            placeholder="AI가 생성한 리포트 내용을 여기에 붙여넣으세요..."></textarea>
+                        <button id="saveReportBtn"
+                            style="width: 100%; background: var(--accent-color); color: #0f172a; font-weight: bold;">리포트
+                            게시하기</button>
+                    </div>
+                </div>
+
+                <!-- 6-2. 비디오 갤러리 탭 내용 (신규) -->
+                <div id="subtab-video" style="display: none;">
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h3 style="color: var(--accent-color);">테니스 영상 자료실</h3>
+                        <button id="openVideoModalBtn" class="primary-btn"
+                            style="padding: 6px 15px; font-size: 0.85rem;">+ 추천 영상 올리기</button>
+                    </div>
+                    <div id="videoGalleryContent"
+                        style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 15px;">
+                        <p
+                            style="text-align: center; color: var(--text-secondary); padding: 40px; grid-column: 1 / -1;">
+                            등록된 영상이 없습니다.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 관리자 로그인 모달 -->
+    <div id="adminModal" class="modal hidden">
+        <div class="modal-content" style="max-width: 350px;">
+            <h3>🔐 관리자 인증</h3>
+            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 15px;">운영 비밀번호를 입력해 주세요.</p>
+            <input type="password" id="adminPassword" class="admin-pw-input" placeholder="비밀번호 입력"
+                style="width: 100%; margin-bottom: 10px;" autocomplete="current-password">
+            <p id="adminLoginStatus" style="font-size: 0.8rem; color: #ef4444; margin: 0 0 15px 0; min-height: 1.2em;"></p>
+            <div style="display: flex; gap: 10px;">
+                <button onclick="closeAdminModal()" class="secondary" style="flex: 1;">취소</button>
+                <button id="confirmAdminBtn" style="flex: 1;">로그인</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 경기 수정 모달 (기존 유지하되 관리자만 호출 가능하도록 로직 조정 예정) -->
+    <div id="editModal" class="modal hidden">
+        <div class="modal-content">
+            <h3>경기 기록 수정</h3>
+            <div id="editFields"></div>
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button onclick="closeModal()" class="secondary" style="flex: 1;">취소</button>
+                <button id="saveEditBtn" style="flex: 1;">저장</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 사용 가이드 모달 -->
+    <div id="helpModal" class="modal hidden">
+        <div class="modal-content" style="max-width: 600px; max-height: 80vh; overflow-y: auto; text-align: left;">
+            <div
+                style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid var(--border-color); padding-bottom: 15px;">
+                <h2 style="margin: 0; color: var(--accent-color);">🏸 ACE 랭킹 시스템 사용 가이드</h2>
+                <button onclick="closeHelpModal()" class="secondary" style="padding: 5px 10px;">닫기</button>
+            </div>
+
+            <div class="manual-section">
+                <h3>📋 1. 참가자용 가이드 (모든 사용자)</h3>
+                <div class="manual-item">
+                    <strong>✅ 참가 신청 (참가신청 탭)</strong>
+                    <ul>
+                        <li><strong>대기</strong>: 관리자가 회차를 오픈할 때까지 기다립니다.</li>
+                        <li><strong>신청</strong>: 접수가 시작되면 본인의 이름을 입력하고 신청합니다.</li>
+                        <li><strong>확인</strong>: 하단 명단에 본인의 이름이 나타나면 정상 처리된 것입니다.</li>
+                    </ul>
+                </div>
+                <div class="manual-item">
+                    <strong>⚔️ 대진표 및 경기 진행 (대진표 탭)</strong>
+                    <ul>
+                        <li><strong>대진 확인</strong>: 본인이 속한 조(A, B 등)를 선택하여 상대를 확인합니다.</li>
+                        <li><strong>점수 입력</strong>: 경기가 끝나면 자신들의 경기결과를 입력합니다.</li>
+                    </ul>
+                </div>
+                <div class="manual-item">
+                    <strong>📊 랭킹 및 대시보드</strong>
+                    <ul>
+                        <li><strong>종합 랭킹</strong>: 현재 모든 선수의 ELO 점수, 승률 등을 확인합니다.</li>
+                        <li><strong>도토리 성장 추이</strong>: 대시보드에서 본인의 이름을 선택하여 실력 변화 추이를 확인하세요.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="manual-section" style="margin-top: 30px;">
+                <h3>🔐 2. 관리자용 가이드 (운영진)</h3>
+                <div class="manual-item">
+                    <strong>🔑 관리자 로그인</strong>
+                    <p>상단 [관리자 로그인] 버튼 클릭 후 암호 입력 시 관리 기능이 활성화됩니다.</p>
+                </div>
+                <div class="manual-item">
+                    <strong>📂 DB 관리</strong>
+                    <ul>
+                        <li><strong>DB 전환</strong>: 드롭다운 메뉴에서 활성화 할 DB를 선택합니다.</li>
+                        <li><strong>새 DB 생성</strong>: 새로운 이름을 입력하고 생성합니다. 시즌 재시작시 사용합니다.</li>
+                    </ul>
+                </div>
+                <div class="manual-item">
+                    <strong>⚙️ 대회 운영 프로세스</strong>
+                    <ol>
+                        <li><strong>회차 오픈</strong>: 참가신청 탭에서 회차 번호를 확인하고 [참가 접수 시작]을 누릅니다.</li>
+                        <li><strong>명단 관리</strong>: 신청 명단은 랭킹 순으로 자동 정렬되며, 이름 옆에 현재 순위가 표시됩니다.</li>
+                        <li><strong>대진표 생성</strong>: [대진표 생성] 클릭 시 신규 참가자는 랭킹권 아래에 무작위 배치됩니다.</li>
+                        <li><strong>랭킹 확정</strong>: 경기 종료 후 [랭킹전을 종료합니다]를 누르면 결과가 반영됩니다.</li>
+                    </ol>
+                </div>
+                <div class="manual-item">
+                    <strong>💾 데이터 활용</strong>
+                    <ul>
+                        <li><strong>CSV 내보내기</strong>: 히스토리 탭의 [CSV 내보내기] 버튼을 통해 전체 경기 기록을 엑셀 파일로 저장할 수 있습니다.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="manual-section"
+                style="margin-top: 30px; background: rgba(56, 189, 248, 0.05); padding: 15px; border-radius: 8px;">
+                <h3 style="color: var(--accent-color); margin-bottom: 10px;">📊 포인트 산정 방식 (ELO Rating)</h3>
+                <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 15px;">
+                    공정한 실력 측정을 위해 **ELO 레이팅 시스템**을 사용합니다. (초기 점수 1500점)
+                </p>
+
+                <h4 style="color: white; margin-bottom: 8px; font-size: 0.95rem;">1. 경기 결과별 포인트 변동</h4>
+                <div class="table-responsive" style="margin-bottom: 20px;">
+                    <table
+                        style="width: 100%; font-size: 0.85rem; text-align: center; border: 1px solid var(--border-color);">
+                        <tr style="background: rgba(255,255,255,0.1);">
+                            <th style="padding: 8px;">구분</th>
+                            <th>점수 변동</th>
+                            <th>예시 <span style="font-weight:normal; font-size:0.75rem">(기대승률 50%)</span></th>
+                            <th>비고</th>
+                        </tr>
+                        <tr>
+                            <td><strong>승리</strong></td>
+                            <td style="color: var(--success);">점수 상승 (+)</td>
+                            <td style="color: var(--success);">+16.0</td>
+                            <td>상대와의 실력 차이에 따라 변동폭 결정</td>
+                        </tr>
+                        <tr>
+                            <td><strong>완승</strong> <span style="font-size:0.75rem">(6:0)</span></td>
+                            <td style="color: var(--success);">점수 상승 (×1.5)</td>
+                            <td style="color: var(--success);">+24.0</td>
+                            <td>승리 점수의 50% 추가 보너스</td>
+                        </tr>
+                        <tr>
+                            <td><strong>무승부</strong></td>
+                            <td style="color: var(--accent-color);">소폭 변동</td>
+                            <td style="color: var(--accent-color);">±0</td>
+                            <td>강팀은 소폭 하락, 약팀은 소폭 상승</td>
+                        </tr>
+                        <tr>
+                            <td><strong>패배</strong></td>
+                            <td style="color: var(--danger);">점수 하락 (-)</td>
+                            <td style="color: var(--danger);">-16.0</td>
+                            <td>승리 팀이 얻은 만큼 점수 차감</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <h4 style="color: white; margin-bottom: 8px; font-size: 0.95rem;">2. 추가 규칙</h4>
+                <div class="manual-item">
+                    <ul>
+                        <li><strong>완승 보너스</strong>: 6:0으로 승리 시, 승점 변동폭이 **1.5배(50% 추가)** 적용됩니다. (이길 때 더 많이 얻고, 질 때 더 많이
+                            잃습니다)</li>
+                        <li><strong>신규 참가자</strong>: 1500점에서 시작하며, 첫 배치 후 실력에 맞는 점수를 찾아갑니다.</li>
+                    </ul>
+                </div>
+
+                <div style="margin-top: 30px; text-align: center;">
+                    <button onclick="closeHelpModal()" style="width: 100%;">사용자 가이드 닫기</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- DB 관리 모달 -->
+    <div id="dbModal" class="modal hidden">
+        <div class="modal-content" style="max-width: 400px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h3 style="margin: 0;">📂 데이터베이스 관리</h3>
+                <button onclick="closeDbModal()" class="secondary" style="padding: 5px 10px;">닫기</button>
+            </div>
+
+            <div class="db-management">
+                <div class="db-selector-group" style="display: flex; flex-direction: column; gap: 15px;">
+                    <div style="background: rgba(255,255,255,0.03); padding: 15px; border-radius: 8px;">
+                        <label
+                            style="font-size: 0.8rem; display: block; margin-bottom: 8px; color: var(--text-secondary);">기존
+                            DB 선택</label>
+                        <div style="display: flex; gap: 5px;">
+                            <select id="dbListSelect" style="flex: 1;">
+                                <option value="">데이터베이스 선택...</option>
+                            </select>
+                            <button id="loadDbBtn" class="secondary"
+                                style="padding: 8px 12px; font-size: 0.8rem;">전환</button>
+                        </div>
+                    </div>
+
+                    <div style="background: rgba(255,255,255,0.03); padding: 15px; border-radius: 8px;">
+                        <label style="font-size: 0.8rem; display: block; margin-bottom: 8px; color: var(--text-secondary);">새 DB(시즌) 생성</label>
+                        <div style="display: flex; gap: 5px; margin-bottom: 12px;">
+                            <input type="text" id="newDbInput" placeholder="이름 입력 (예: 2026 하반기)" style="flex: 1; font-size: 0.8rem;">
+                        </div>
+                        
+                        <div style="font-size: 0.8rem; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.1); padding: 10px; border-radius: 5px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: bold; color: var(--text-primary);">이전 시즌 연결 옵션:</label>
+                            <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 5px; cursor: pointer;">
+                                <input type="radio" name="seasonOption" value="carryover" checked>
+                                <span>이전 시즌 이어가기 <small style="color:var(--text-secondary);">(MMR / 요약 전적 이관)</small></span>
+                            </label>
+                            <div id="prevDbSelectContainer" style="margin-left: 24px; margin-bottom: 10px;">
+                                <select id="prevDbSelect" style="width: 100%;">
+                                    <option value="">이관할 이전 DB(시즌) 선택...</option>
+                                </select>
+                            </div>
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="radio" name="seasonOption" value="reset">
+                                <span>완전히 새로 시작 <small style="color:var(--danger);">(MMR 포함 전면 초기화)</small></span>
+                            </label>
+                        </div>
+                        
+                        <button id="switchDbBtn" class="primary" style="width: 100%; padding: 10px; font-size: 0.9rem;">✨ 시즌 생성 및 이동</button>
+                    </div>
+                    <div
+                        style="background: rgba(255,165,0,0.05); padding: 15px; border-radius: 8px; border: 1px dashed rgba(255,165,0,0.3); margin-top: 10px;">
+                        <label
+                            style="font-size: 0.8rem; display: block; margin-bottom: 8px; color: #ff9800; font-weight: bold;">⚡
+                            데이터 긴급 복구 (CSV)</label>
+                        <p style="font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 8px;">
+                            백업받은 .csv 파일을 선택하면 데이터를 복원합니다.
+                        </p>
+                        <div style="display: flex; flex-direction: column; gap: 8px;">
+                            <input type="file" id="restoreCsvFile" accept=".csv"
+                                style="font-size: 0.8rem; width: 100%;">
+                            <button id="restoreCsvBtn" class="secondary"
+                                style="padding: 8px; font-size: 0.8rem; background: rgba(255,165,0,0.2) !important; color: #ff9800 !important; border-color: #ff9800 !important;">CSV에서
+                                복구하기</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div style="margin-top: 20px; text-align: center;">
+                <p style="font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4;">
+                    * 새로운 환경이 필요할 때만 사용하세요.<br>
+                    데이터베이스를 전환하면 페이지가 새로고침됩니다.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 비디오 추가 모달 (신규) -->
+    <div id="videoModal" class="modal hidden">
+        <div class="modal-content" style="max-width: 500px;">
+            <h3>🎥 추천 영상 올리기</h3>
+            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 15px;">유튜브 링크와 함께 모두에게 도움이 될 요약
+                내용을 적어주세요. <br /><span style="color:#ef4444">* 삭제는 관리자만 가능합니다.</span></p>
+
+            <label style="display:block; margin-bottom: 5px; font-weight: bold;">유튜브 링크 주소 (URL) *</label>
+            <input type="text" id="videoUrlInput" placeholder="예: https://youtu.be/..."
+                style="width: 100%; padding: 10px; margin-bottom: 15px; background: var(--bg-color); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px;">
+
+            <label style="display:block; margin-bottom: 5px; font-weight: bold;">영상 제목 *</label>
+            <input type="text" id="videoTitleInput" placeholder="영상 제목을 입력하세요"
+                style="width: 100%; padding: 10px; margin-bottom: 15px; background: var(--bg-color); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px;">
+
+            <label style="display:block; margin-bottom: 5px; font-weight: bold;">핵심 요약 (Markdown 지원)</label>
+            <textarea id="videoSummaryInput" placeholder="이 영상의 핵심 포인트나 느낀 점을 적어주세요."
+                style="width: 100%; height: 100px; padding: 10px; margin-bottom: 15px; background: var(--bg-color); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; resize: vertical;"></textarea>
+
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button id="submitVideoBtn" class="primary-btn" style="flex:1;">영상 등록</button>
+                <button id="closeVideoModalBtn" class="secondary-btn" style="flex:1;">취소</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        try {
+            const { initializeApp } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js");
+            const { getFirestore, collection, doc, setDoc, getDoc, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp, runTransaction, enableIndexedDbPersistence } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js");
+            const { getAuth, signInAnonymously } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js");
+
+            // Firebase 설정 (app.js에서 접근 가능하도록 window 객체에 바인딩)
+            window.FB_SDK = { initializeApp, getFirestore, collection, doc, setDoc, getDoc, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp, getAuth, signInAnonymously, runTransaction, enableIndexedDbPersistence };
+            // SDK 준비 완료 이벤트 발행
+            window.dispatchEvent(new Event('firebase-sdk-ready'));
+        } catch (e) {
+            console.error("[SDK] Firebase SDK load failed:", e);
+            window.FB_SDK = null;
+            const loadingText = document.getElementById('loadingText');
+            const retryBtn = document.getElementById('retryBtn');
+            if (loadingText) loadingText.innerText = 'Firebase SDK 로드 실패. 네트워크를 확인하고 다시 시도해 주세요.';
+            if (retryBtn) retryBtn.style.display = 'block';
+        }
+    </script>
+    <script type="module" src="app.js"></script>
+
+    <!-- [v60] Service Worker 등록 -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./service-worker.js')
+                    .then(reg => console.log('[SW] Registered:', reg.scope))
+                    .catch(err => console.warn('[SW] Registration failed:', err));
+            });
+        }
+    </script>
+
+</body>
+
+</html>
