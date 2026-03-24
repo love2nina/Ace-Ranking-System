@@ -739,6 +739,7 @@ async function openRegistration() {
 }
 
 // --- AI 리포트 생성 (v23 핵심: 서사 및 템플릿 고착화) ---
+// --- AI 리포트 생성 (v24 및 Advanced Analytics 대응) ---
 async function handleCopyAIData() {
     const sessionNum = document.getElementById('reportPostSessionNum')?.value || currentSessionState.sessionNum;
     if (!sessionNum) return;
@@ -749,8 +750,25 @@ async function handleCopyAIData() {
         return;
     }
 
-    // 1. 해당 회차 성적 집계
+    // --- 1. 해당 회차 성적 및 경기 리스트 집계 ---
     const todayPerformance = {};
+    const matchesJson = sessionMatches.map(m => {
+        const scoreA = m.score1;
+        const scoreB = m.score2;
+        let result = "draw";
+        if (scoreA > scoreB) result = "A";
+        else if (scoreB > scoreA) result = "B";
+
+        return {
+            match_id: m.id,
+            team_a: m.t1_names,
+            team_b: m.t2_names,
+            score_a: scoreA,
+            score_b: scoreB,
+            result: result
+        };
+    });
+
     sessionMatches.forEach(m => {
         const pids = [...m.t1_ids, ...m.t2_ids];
         pids.forEach((id, idx) => {
@@ -761,7 +779,8 @@ async function handleCopyAIData() {
                     wins: 0, draws: 0, losses: 0,
                     ratingChange: 0,
                     trend: [],
-                    participationStatus: 'New' // 기본값
+                    participationStatus: 'New',
+                    scoreDiffSum: 0
                 };
             }
             const isT1 = m.t1_ids.includes(id);
@@ -770,73 +789,116 @@ async function handleCopyAIData() {
             if (win) todayPerformance[id].wins++;
             else if (draw) todayPerformance[id].draws++;
             else todayPerformance[id].losses++;
+            
             todayPerformance[id].ratingChange += isT1 ? (m.elo_at_match?.change1 || 0) : (m.elo_at_match?.change2 || 0);
+            todayPerformance[id].scoreDiffSum += isT1 ? (m.score1 - m.score2) : (m.score2 - m.score1);
         });
     });
 
-    // 2. [v24 개선] 최근 5회차 데이터 기반 참가 상태 및 트렌드 분석 (실제 참여 여부 포함)
+    // --- 2. 시즌 누적 데이터 및 출석 분석 ---
     const allSessions = [...new Set(matchHistory.map(h => String(h.sessionNum)))].sort((a, b) => parseInt(a) - parseInt(b));
+    const totalSessionsCount = allSessions.length;
+    const playerStatsMap = {};
+
+    // 시간 순으로 전체 히스토리 정렬 (연승 계산용)
+    const sortedHistory = [...matchHistory].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+
+    sortedHistory.forEach(m => {
+        const pids = [...m.t1_ids, ...m.t2_ids];
+        pids.forEach((id) => {
+            if (!playerStatsMap[id]) {
+                playerStatsMap[id] = {
+                    total_wins: 0, total_draws: 0, total_losses: 0,
+                    max_rating: -Infinity, min_rating: Infinity,
+                    sessions: new Set(),
+                    consecutive_wins: 0, consecutive_losses: 0
+                };
+            }
+            const stats = playerStatsMap[id];
+            const isT1 = m.t1_ids.includes(id);
+            const win = isT1 ? (m.score1 > m.score2) : (m.score2 > m.score1);
+            const draw = (m.score1 === m.score2);
+            const loss = !win && !draw;
+
+            if (win) stats.total_wins++;
+            else if (draw) stats.total_draws++;
+            else stats.total_losses++;
+
+            stats.sessions.add(String(m.sessionNum));
+
+            if (m.elo_at_match) {
+                const rBefore = isT1 ? m.elo_at_match.t1_before : m.elo_at_match.t2_before;
+                const rAfter = rBefore + (isT1 ? m.elo_at_match.change1 : m.elo_at_match.change2);
+                stats.max_rating = Math.max(stats.max_rating, rBefore, rAfter);
+                stats.min_rating = Math.min(stats.min_rating, rBefore, rAfter);
+            }
+
+            if (win) { stats.consecutive_wins++; stats.consecutive_losses = 0; }
+            else if (loss) { stats.consecutive_losses++; stats.consecutive_wins = 0; }
+            else { stats.consecutive_wins = 0; stats.consecutive_losses = 0; }
+        });
+    });
+
+    // --- 3. 데이터 결합 및 최종 구성 ---
     const targetIdx = allSessions.indexOf(String(sessionNum));
     const recentSessions = allSessions.slice(Math.max(0, targetIdx - 4), targetIdx + 1);
     const prevSessionId = targetIdx > 0 ? allSessions[targetIdx - 1] : null;
 
     Object.keys(todayPerformance).forEach(pid => {
+        const s = playerStatsMap[pid];
+        const totalPlayed = s.total_wins + s.total_draws + s.total_losses;
+        
+        todayPerformance[pid].season_stats = {
+            total_wins: s.total_wins,
+            total_draws: s.total_draws,
+            total_losses: s.total_losses,
+            win_rate: totalPlayed > 0 ? parseFloat((s.total_wins / totalPlayed).toFixed(2)) : 0,
+            max_rating: s.max_rating === -Infinity ? 1500 : Math.round(s.max_rating),
+            min_rating: s.min_rating === Infinity ? 1500 : Math.round(s.min_rating),
+            rating_volatility: (s.max_rating !== -Infinity && s.min_rating !== Infinity) ? Math.round(s.max_rating - s.min_rating) : 0,
+            consecutive_wins: s.consecutive_wins,
+            consecutive_losses: s.consecutive_losses,
+            attendance_rate: parseFloat((s.sessions.size / totalSessionsCount).toFixed(2))
+        };
+
+        // 추세 분석 (최근 5회차)
         let participatedBeforeInWindow = false;
         let participatedInPrev = false;
 
         recentSessions.forEach(sId => {
             const endRating = (sessionEndRatings[sId] && sessionEndRatings[sId][pid]) || null;
-
-            // [v24] 해당 회차에 실제 경기 기록이 있는지 확인
             const hasMatchRecord = matchHistory.some(h =>
                 String(h.sessionNum) === String(sId) &&
                 (h.t1_ids.includes(pid) || h.t2_ids.includes(pid))
             );
 
             if (endRating !== null || hasMatchRecord) {
-                const displayRating = endRating !== null ? Math.round(endRating) : 1500;
                 todayPerformance[pid].trend.push({
                     session: sId,
-                    rating: displayRating,
-                    played: hasMatchRecord // [v24] 실제 참여 여부
+                    rating: endRating !== null ? Math.round(endRating) : 1500,
+                    played: hasMatchRecord
                 });
 
-                // 현재 회차 제외, 이전 회차들 중 참여 이력 확인
-                if (sId !== String(sessionNum) && hasMatchRecord) {
-                    participatedBeforeInWindow = true;
-                }
-                // 직전 회차 참여 여부
-                if (sId === String(prevSessionId) && hasMatchRecord) {
-                    participatedInPrev = true;
-                }
+                if (sId !== String(sessionNum) && hasMatchRecord) participatedBeforeInWindow = true;
+                if (sId === String(prevSessionId) && hasMatchRecord) participatedInPrev = true;
             }
         });
 
-        // 상태 판별 (v24 정밀화: played 플래그 기준)
-        if (!participatedBeforeInWindow) {
-            todayPerformance[pid].participationStatus = 'New (이번이 첫 데뷔이거나 아주 오랜만의 등장)';
-        } else if (!participatedInPrev) {
-            todayPerformance[pid].participationStatus = 'Returning (지난 회차는 쉬고 돌아온 복귀파)';
-        } else {
-            todayPerformance[pid].participationStatus = 'Steady (꾸준히 자리를 지키는 터줏대감)';
-        }
+        if (!participatedBeforeInWindow) todayPerformance[pid].participationStatus = 'New (데뷔)';
+        else if (!participatedInPrev) todayPerformance[pid].participationStatus = 'Returning (복귀)';
+        else todayPerformance[pid].participationStatus = 'Steady (터줏대감)';
     });
 
-    // 3. [v65] 상세 통제 데이터 추가 (Upset, 득실차, 조별 통계)
     const upsets = [];
     const groupStats = {};
-
     sessionMatches.forEach(m => {
-        // 이변(Upset) 경기 추출: 기대 승분 0.45 미만인 팀이 이긴 경우
         if (m.elo_at_match) {
-            const { expected, t1_before, t2_before } = m.elo_at_match;
+            const { expected } = m.elo_at_match;
             const t1_won = m.score1 > m.score2;
             const t2_won = m.score2 > m.score1;
-
             if ((t1_won && expected < 0.45) || (t2_won && expected > 0.55)) {
                 upsets.push({
-                    matchId: m.id,
-                    group: m.group,
+                    matchId: m.id, group: m.group,
                     winner: t1_won ? m.t1_names : m.t2_names,
                     loser: t1_won ? m.t2_names : m.t1_names,
                     score: `${m.score1}:${m.score2}`,
@@ -844,95 +906,31 @@ async function handleCopyAIData() {
                 });
             }
         }
-
-        // 조별 통계
         const gLabel = m.group || 'Unknown';
         if (!groupStats[gLabel]) groupStats[gLabel] = { totalMatches: 0, totalScores: 0 };
         groupStats[gLabel].totalMatches++;
         groupStats[gLabel].totalScores += (m.score1 + m.score2);
-
-        // 선수별 득실차 합산
-        const diff = Math.abs(m.score1 - m.score2);
-        const t1_won = m.score1 > m.score2;
-        [...m.t1_ids].forEach(id => {
-            if (todayPerformance[id]) {
-                todayPerformance[id].scoreDiffSum = (todayPerformance[id].scoreDiffSum || 0) + (m.score1 - m.score2);
-            }
-        });
-        [...m.t2_ids].forEach(id => {
-            if (todayPerformance[id]) {
-                todayPerformance[id].scoreDiffSum = (todayPerformance[id].scoreDiffSum || 0) + (m.score2 - m.score1);
-            }
-        });
     });
 
-    // 4. AI 리포트 데이터 구성 (v24: 실제 참여 여부 기반 서사 보강 + v65: 상세 데이터)
     const reportData = {
         sessionNum: sessionNum,
         totalMatches: sessionMatches.length,
+        matches: matchesJson,
         performance: Object.values(todayPerformance).map(p => ({
             ...p,
-            avgScoreDiff: p.trend.length > 0 ? (p.scoreDiffSum / p.trend.filter(t => t.played).length).toFixed(1) : 0
+            avgScoreDiff: p.trend.filter(t => t.played).length > 0 ? (p.scoreDiffSum / p.trend.filter(t => t.played).length).toFixed(1) : 0
         })),
         upsets: upsets,
         groupStats: groupStats,
         topRankers: members.sort((a, b) => b.rating - a.rating).slice(0, 5).map(m => ({ name: m.name, rating: Math.round(m.rating) }))
     };
 
-    const prompt = `
-당신은 '평촌ACE 전력분석실'의 수석 데이터 분석가입니다. 
-제 ${sessionNum}회차 랭킹전 결과를 바탕으로 간결하고 임팩트 있는 '랭킹전 분석 보고서'를 작성해 주세요.
-
-[🚨 리포트 작성 핵심 지침]
-1. **간결함이 최우선**: 전체 리포트를 **최대 800자 이내**로 작성하세요. 군더더기 없는 팩트 중심의 요약이 핵심입니다.
-2. **경기 성적 중심**: 승/패/무 기록, 레이팅 변화 폭, 순위 변동을 **구체적 수치**와 함께 분석하세요.
-3. **참석 태그 최소화**: New/Returning/Steady 등의 참석 태그는 특별한 서사가 있을 때만 간략히 언급하세요.
-4. **그룹 서사**: 2~3개 그룹으로 묶되, 각 그룹 설명은 3~5줄 이내로. 모든 참가자 이름은 한 번씩 언급하세요.
-5. **들여쓰기 금지**: 하위 리스트(들여쓰기 리스트)를 사용하지 마세요. 모든 리스트는 최상위 레벨(- )로만 작성하세요.
-6. **모바일 최적화**: 표(Table) 절대 금지. 인용구(>), 굵게(**), 리스트(-) 활용.
-7. **톤앤매너**: 날카로운 데이터 분석 70% + 위트 30% (한국어).
-
----
-
-# 📋 제 ${sessionNum}회차 랭킹전 분석 보고서
-
----
-
-## 📢 분석관 브리핑
-> (핵심 테마 2~3문장 요약)
-
----
-
-## 🏆 핵심 하이라이트
-- **MVP**: (이름 - 핵심 성과 한 줄)
-- **다크호스**: (이름 - 의외의 활약 한 줄)
-
----
-
-## 🔍 그룹별 분석
-
-### 🏷️ [그룹명 1]
-- **멤버**: (이름 나열)
-- (각 선수의 성적을 간결하게 한두 줄로 요약. 성과가 두드러진 선수만 강조)
-
-### 🏷️ [그룹명 2]
-- **멤버**: (이름 나열)
-- (동일 구조, 간결하게)
-
----
-
-## 🔭 향후 전망
-- (다음 회차 관전 포인트 1~2줄)
-    `;
-
     try {
         await navigator.clipboard.writeText(JSON.stringify(reportData, null, 2));
-        alert("AI 분석용 데이터(JSON)가 클립보드에 복사되었습니다!\n외부 AI 및 전력분석실 도구에 붙여넣어 리포트를 생성하세요.");
+        alert("분석용 통합 데이터(JSON)가 클립보드에 복사되었습니다!\n상세 대진 정보와 시즌 누적 통계가 포함되었습니다.");
     } catch (err) {
         console.error("Clipboard Error:", err);
-        alert("클립보드 복사에 실패했습니다. 콘솔을 확인하세요.");
-        console.log("DATA:", reportData);
-        console.log("PROMPT:", prompt);
+        alert("클립보드 복사에 실패했습니다.");
     }
 }
 

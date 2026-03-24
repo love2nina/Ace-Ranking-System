@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Dependency directories
 node_modules/
 
@@ -43,3 +44,50 @@ test_csv_parse_v2.js
 /tmp/
 *.bak
 *.tmp
+=======
+# Dependency directories
+node_modules/
+
+# Build outputs
+dist/
+build/
+out/
+
+# Firebase configuration & logs
+.firebase/
+firebase-debug.log
+firestore-debug.log
+pubsub-debug.log
+ui-debug.log
+firebase-export-*/
+
+# Operating System files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDEs and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*.swn
+
+# Local environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Project specific temporary files
+test_csv_parse.js
+test_csv_parse_v2.js
+/tmp/
+*.bak
+*.tmp
+>>>>>>> aae4517273e7fa99df94fc534050b1fcbba1ff44
