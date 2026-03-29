@@ -176,6 +176,8 @@ async function init() {
     });
 
     setupEventListeners();
+    // [v63] 보안 강화: 자동 로그인 기능을 위해 저장된 민감 정보를 초기화합니다.
+    localStorage.removeItem('ace_admin_pw');
     await checkAdminLogin();
 }
 
@@ -958,11 +960,10 @@ async function handleSaveReport() {
 
 // --- 관리자/모달 로직 (생략된 기타 함수들) ---
 async function checkAdminLogin() {
-    const savedPw = localStorage.getItem('ace_admin_pw');
-    if (savedPw === systemSettings.admin_pw) {
-        isAdmin = true;
-        updateUI();
-    }
+    // [v63] 기기 기반 자동 로그인 기능을 제거합니다.
+    isAdmin = false;
+    localStorage.removeItem('ace_admin_pw');
+    updateUI();
 }
 
 function openAdminModal() {
@@ -991,7 +992,8 @@ function tryAdminLogin() {
 
     if (pw === systemSettings.admin_pw) {
         isAdmin = true;
-        localStorage.setItem('ace_admin_pw', pw);
+        // [v63] 보안을 위해 브라우저 저장소의 비밀번호를 영구 보관하지 않습니다.
+        localStorage.removeItem('ace_admin_pw'); 
         const modal = document.getElementById('adminModal');
         modal.classList.add('hidden');
         modal.style.display = 'none';
