@@ -1518,7 +1518,7 @@ function parseMarkdown(text) {
  * 📺 영상 자료실 화면 렌더링
  */
 export function renderVideoGallery(context) {
-    const { videos, isAdmin, deleteVideo } = context;
+    const { videos, isAdmin } = context;
     const container = document.getElementById('videoGalleryContent');
     if (!container) return;
 

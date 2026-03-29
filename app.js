@@ -1063,6 +1063,11 @@ window.deleteHistoryItem = async (id) => {
     await fbDeleteHistoryItem(id);
 };
 
+window.deleteVideo = async (id) => {
+    if (!confirm("영상을 삭제하시겠습니까? (이 작업은 되돌릴 수 없습니다)")) return;
+    await fbDeleteVideo(id);
+};
+
 function openCurrentMatchEditModal(id) {
     editingMatchId = id;
     modalMode = 'current';
