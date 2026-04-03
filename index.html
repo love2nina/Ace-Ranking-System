@@ -92,6 +92,27 @@
                         <input type="text" id="manualSessionInfo" style="display: none; flex: 2;"
                             placeholder="예: [토요일 중앙공원 06:20~]">
                     </div>
+
+                    <!-- 코트 설정 패널 (관리자 전용) -->
+                    <div id="courtConfigPanel" style="display: none; margin-top: 12px; padding: 12px; background: rgba(56, 189, 248, 0.03); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 8px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                            <span style="font-size: 0.85rem; font-weight: bold; color: var(--accent-color);">⚙️ 코트별 라운드 설정</span>
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <label style="font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap;">인당 최대</label>
+                                <input type="text" id="maxGamesPerPlayerInput" value="4" 
+                                    style="width: 35px; text-align: center; font-size: 0.85rem; padding: 4px 2px; appearance: none; -moz-appearance: textfield; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-color); color: var(--text-primary);"
+                                    inputmode="numeric" pattern="[0-9]*">
+                                <span style="font-size: 0.75rem; color: var(--text-secondary);">게임</span>
+                            </div>
+                        </div>
+                        <div id="courtConfigList" style="display: flex; flex-direction: column; gap: 6px;">
+                            <!-- 동적 생성: 코트별 라운드 수 입력 -->
+                        </div>
+                        <div style="display: flex; gap: 8px; margin-top: 10px;">
+                            <button id="addCourtBtn" class="secondary" style="flex: 1; font-size: 0.8rem; padding: 6px;">+ 코트 추가</button>
+                            <button id="saveCourtConfigBtn" class="primary" style="flex: 1; font-size: 0.8rem; padding: 6px; background: var(--accent-color); color: #0f172a; border: none;">💾 설정 저장</button>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Guest Application Form -->

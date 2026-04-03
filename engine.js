@@ -333,7 +333,7 @@ export function optimizeCourtRoundLayout(availablePool, numMatches, partners, op
 }
 
 function generateCourtSchedule(context) {
-    const { currentSessionState, applicants } = context;
+    const { currentSessionState, applicants, courtConfigs, maxGamesPerPlayer, locationKey } = context;
 
     const sessionNum = currentSessionState.sessionNum;
     if (!sessionNum) { alert('회차 정보가 없습니다.'); return null; }
@@ -342,10 +342,25 @@ function generateCourtSchedule(context) {
     const info = currentSessionState.info || '';
     let courtConfig = null;
 
-    if (info.includes('중앙공원')) {
-        courtConfig = { '코트 1': 5, '코트 2': 5, '코트 3': 7 };
-    } else if (info.includes('CS')) {
-        courtConfig = { '코트 4': 7, '코트 3': 7, '코트 2': 5 };
+    // [v65] Firebase에서 로드된 동적 코트 설정 우선 적용
+    let targetLocationKey = locationKey;
+    if (!targetLocationKey) {
+        targetLocationKey = courtConfigs ? Object.keys(courtConfigs).find(key => info.includes(key)) : null;
+    }
+
+    if (targetLocationKey && courtConfigs && courtConfigs[targetLocationKey]) {
+        const cfg = courtConfigs[targetLocationKey];
+        courtConfig = {};
+        (cfg.courts || []).forEach(c => { courtConfig[c.name] = c.maxRounds; });
+    }
+
+    // 동적 설정이 없으면 하드코딩 폴백 (하위 호환성)
+    if (!courtConfig) {
+        if (info.includes('중앙공원')) {
+            courtConfig = { '코트 1': 5, '코트 2': 5, '코트 3': 7 };
+        } else if (info.includes('CS')) {
+            courtConfig = { '코트 4': 7, '코트 3': 7, '코트 2': 5 };
+        }
     }
 
     let numRounds, roundsToCourts = {};
@@ -362,7 +377,8 @@ function generateCourtSchedule(context) {
         }
     }
 
-    // [v44] 지각자는 최대 3게임, 일반 선수는 최대 4게임
+    // [v65] 인당 최대 게임 수: context에서 전달받거나 기본값 4
+    const maxGamesDefault = maxGamesPerPlayer || 4;
     const players = [...applicants];
     const gameCounts = {};
     const maxGamesMap = {};
@@ -373,10 +389,10 @@ function generateCourtSchedule(context) {
     const lastPlayedRound = {};
     players.forEach(p => {
         gameCounts[p.id] = 0;
-        maxGamesMap[p.id] = 4; 
+        maxGamesMap[p.id] = maxGamesDefault; // [v65] 지각자 포함 전원 동일한 최대 게임 수
         partners[p.id] = new Set();
         opponents[p.id] = new Map();
-        lastPlayedRound[p.id] = 0; // 마지막으로 뛴 라운드 (0은 아직 시작 전)
+        lastPlayedRound[p.id] = 0;
     });
 
     const fullScheduleData = [];
@@ -392,20 +408,25 @@ function generateCourtSchedule(context) {
                 if (r === 1 && p.lateJoin) return false; 
                 return true;
             })
-            // 정렬 최우선 순위: 2회 연속 휴식 방지를 위해 (r-1)라운드 휴식자(lastPlayedRound < r-1)를 앞쪽 배치
+            // [v65] 정렬 우선순위:
+            // 1순위: 2회 연속 휴식 방지 (직전 라운드 휴식자를 최상단 배치)
+            // 2순위: 적게 뛴 사람 우선 (게임 수 균형)
+            // 3순위: 동일 게임 수일 때 지각자를 뒤로 → 시간 부족 시 자연스럽게 3게임 대상
+            // 4순위: 랜덤
             .sort((a, b) => {
                 const aRested = lastPlayedRound[a.id] < r - 1;
                 const bRested = lastPlayedRound[b.id] < r - 1;
                 if (aRested && !bRested) return -1;
                 if (!aRested && bRested) return 1;
 
-                // [v64] 지각자 우선순위 반영: 지각 안 한 선수(lateJoin false) 우선 배치
-                if (a.lateJoin !== b.lateJoin) return a.lateJoin ? 1 : -1;
-                
-                // 차선 순위: 많이 안 뛴 사람 우선
+                // [v65] 게임 수 적은 사람 최우선 → 지각자와 비지각자 모두 공평하게 게임 기회 부여
                 if (gameCounts[a.id] !== gameCounts[b.id]) return gameCounts[a.id] - gameCounts[b.id];
                 
-                return Math.random() - 0.5; // 동일 조건 시 랜덤
+                // [v65] 게임 수가 같을 때만 지각자를 뒤로 배치
+                // → 마지막 라운드에서 자리 부족 시 지각자가 3게임 대상이 됨
+                if (a.lateJoin !== b.lateJoin) return a.lateJoin ? 1 : -1;
+                
+                return Math.random() - 0.5;
             });
         const numMatches = Math.min(activeCourtsInRound.length, Math.floor(availablePool.length / 4));
         if (numMatches === 0) continue;
@@ -458,13 +479,14 @@ function generateCourtSchedule(context) {
 export function generateSchedule(context) {
     const {
         isAdmin, currentSessionState, sessionNumInput, customSplitInput,
-        applicants, previewGroups, rankMap, members
+        applicants, previewGroups, rankMap, members,
+        courtConfigs, maxGamesPerPlayer, locationKey
     } = context;
 
     if (!isAdmin) return null;
 
     if (currentSessionState.matchMode === 'court') {
-        return generateCourtSchedule({ currentSessionState, applicants });
+        return generateCourtSchedule({ currentSessionState, applicants, courtConfigs, maxGamesPerPlayer, locationKey });
     }
 
     const sessionNum = currentSessionState.sessionNum || sessionNumInput;

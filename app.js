@@ -18,7 +18,8 @@ import {
     saveMatchScoreWithTransaction as fbSaveMatchScoreWithTransaction,
     addHistoryItem as fbAddHistoryItem,
     deleteHistoryItem as fbDeleteHistoryItem,
-    updateHistoryItem as fbUpdateHistoryItem
+    updateHistoryItem as fbUpdateHistoryItem,
+    saveCourtConfig as fbSaveCourtConfig
 } from './firebase-api.js';
 
 import {
@@ -451,8 +452,17 @@ function setupEventListeners() {
                     await fbSaveSessionState(currentSessionState.status, currentSessionState.sessionNum, sessionInfoSelect.value, currentSessionState.matchMode);
                 }
             }
+            // [v65] 코트 설정 패널 표시/갱신
+            renderCourtConfigPanel();
         };
     }
+
+    // [v65] 코트 설정 이벤트 바인딩
+    const addCourtBtn = document.getElementById('addCourtBtn');
+    if (addCourtBtn) addCourtBtn.onclick = () => addCourtRow();
+    
+    const saveCourtConfigBtn = document.getElementById('saveCourtConfigBtn');
+    if (saveCourtConfigBtn) saveCourtConfigBtn.onclick = () => saveCourtConfigFromUI();
 
     const manualSessionInfoInput = document.getElementById('manualSessionInfo');
     if (manualSessionInfoInput) {
@@ -574,9 +584,14 @@ function generateSchedule() {
     const sessionNumInput = document.getElementById('nextSessionNum')?.value;
     const customSplitInput = document.getElementById('customSplitInput')?.value;
 
+    const locationKey = getLocationKeyFromInfo(document.getElementById('sessionInfoSelect')?.value || "");
+
     const context = {
         isAdmin, currentSessionState, sessionNumInput, customSplitInput,
-        applicants, previewGroups, rankMap, members
+        applicants, previewGroups, rankMap, members,
+        courtConfigs: systemSettings.courtConfigs || null,
+        locationKey: locationKey,
+        maxGamesPerPlayer: parseInt(document.getElementById('maxGamesPerPlayerInput')?.value) || 4
     };
 
     const result = engineGenerateSchedule(context);
@@ -1183,6 +1198,159 @@ function closeEditModal() {
     modal.style.display = 'none';
     editingMatchId = null;
     modalMode = '';
+}
+
+// --- [v65] 코트 설정 관리 ---
+
+/** 장소 키를 세션 정보 문자열에서 추출 ('중앙공원' 또는 'CS') */
+function getLocationKeyFromInfo(info) {
+    if (!info) return null;
+    if (info.includes('중앙공원')) return '중앙공원';
+    if (info.includes('CS')) return 'CS';
+    if (info === 'manual') return 'manual';
+    return null;
+}
+
+/** 기본 코트 설정 (Firebase에 아직 저장된 설정이 없을 때 사용) */
+const DEFAULT_COURT_CONFIGS = {
+    '중앙공원': {
+        courts: [
+            { name: '코트 1', maxRounds: 5 },
+            { name: '코트 2', maxRounds: 5 },
+            { name: '코트 3', maxRounds: 7 }
+        ],
+        maxGamesPerPlayer: 4
+    },
+    'CS': {
+        courts: [
+            { name: '코트 4', maxRounds: 7 },
+            { name: '코트 3', maxRounds: 7 },
+            { name: '코트 2', maxRounds: 5 }
+        ],
+        maxGamesPerPlayer: 4
+    },
+    'manual': {
+        courts: [
+            { name: '코트 1', maxRounds: 5 },
+            { name: '코트 2', maxRounds: 5 },
+            { name: '코트 3', maxRounds: 5 }
+        ],
+        maxGamesPerPlayer: 4
+    }
+};
+
+/** 코트 설정 패널 렌더링 */
+function renderCourtConfigPanel() {
+    const panel = document.getElementById('courtConfigPanel');
+    const infoSelect = document.getElementById('sessionInfoSelect');
+    if (!panel || !infoSelect) return;
+
+    const info = infoSelect.value;
+    const locationKey = getLocationKeyFromInfo(info);
+
+    if (!locationKey || !isAdmin) {
+        panel.style.display = 'none';
+        return;
+    }
+
+    panel.style.display = 'block';
+
+    // Firebase에 저장된 설정 우선, 없으면 기본값
+    const configs = systemSettings.courtConfigs || DEFAULT_COURT_CONFIGS;
+    const config = configs[locationKey] || DEFAULT_COURT_CONFIGS[locationKey] || { courts: [], maxGamesPerPlayer: 4 };
+
+    // 인당 최대 게임 수 설정
+    const maxGamesInput = document.getElementById('maxGamesPerPlayerInput');
+    if (maxGamesInput) maxGamesInput.value = config.maxGamesPerPlayer || 4;
+
+    // 코트 목록 렌더링
+    const list = document.getElementById('courtConfigList');
+    if (!list) return;
+    list.innerHTML = '';
+
+    config.courts.forEach((court, idx) => {
+        const row = document.createElement('div');
+        row.style.cssText = 'display: flex; gap: 8px; align-items: center;';
+        row.innerHTML = `
+            <input type="text" class="court-name-input" value="${court.name}" 
+                style="flex: 2; font-size: 0.85rem; padding: 6px;" placeholder="코트 이름">
+            <input type="number" class="court-rounds-input" value="${court.maxRounds}" min="1" max="10"
+                style="width: 55px; text-align: center; font-size: 0.85rem; padding: 6px;" placeholder="R">
+            <span style="font-size: 0.75rem; color: var(--text-secondary);">라운드</span>
+            <button class="secondary remove-court-btn" data-idx="${idx}" 
+                style="padding: 4px 8px; font-size: 0.75rem; color: var(--danger); border-color: var(--danger);">✕</button>
+        `;
+        list.appendChild(row);
+    });
+
+    // 삭제 버튼 이벤트
+    list.querySelectorAll('.remove-court-btn').forEach(btn => {
+        btn.onclick = () => {
+            btn.closest('div').remove();
+        };
+    });
+}
+
+/** 코트 행 추가 */
+function addCourtRow() {
+    const list = document.getElementById('courtConfigList');
+    if (!list) return;
+
+    const idx = list.children.length;
+    const row = document.createElement('div');
+    row.style.cssText = 'display: flex; gap: 8px; align-items: center;';
+    row.innerHTML = `
+        <input type="text" class="court-name-input" value="코트 ${idx + 1}" 
+            style="flex: 2; font-size: 0.85rem; padding: 6px;" placeholder="코트 이름">
+        <input type="number" class="court-rounds-input" value="5" min="1" max="10"
+            style="width: 55px; text-align: center; font-size: 0.85rem; padding: 6px;" placeholder="R">
+        <span style="font-size: 0.75rem; color: var(--text-secondary);">라운드</span>
+        <button class="secondary remove-court-btn" 
+            style="padding: 4px 8px; font-size: 0.75rem; color: var(--danger); border-color: var(--danger);">✕</button>
+    `;
+    list.appendChild(row);
+
+    row.querySelector('.remove-court-btn').onclick = () => row.remove();
+}
+
+/** 코트 설정을 UI에서 읽어 Firebase에 저장 */
+async function saveCourtConfigFromUI() {
+    const infoSelect = document.getElementById('sessionInfoSelect');
+    if (!infoSelect) return;
+
+    const locationKey = getLocationKeyFromInfo(infoSelect.value);
+    if (!locationKey) {
+        alert('장소를 먼저 선택해 주세요.');
+        return;
+    }
+
+    const list = document.getElementById('courtConfigList');
+    const nameInputs = list.querySelectorAll('.court-name-input');
+    const roundsInputs = list.querySelectorAll('.court-rounds-input');
+    const maxGames = parseInt(document.getElementById('maxGamesPerPlayerInput')?.value) || 4;
+
+    const courts = [];
+    nameInputs.forEach((input, i) => {
+        const name = input.value.trim();
+        const maxRounds = parseInt(roundsInputs[i]?.value) || 5;
+        if (name) courts.push({ name, maxRounds });
+    });
+
+    if (courts.length === 0) {
+        alert('최소 1개 이상의 코트를 설정해 주세요.');
+        return;
+    }
+
+    // 기존 설정에 현재 장소 설정만 업데이트
+    const configs = { ...(systemSettings.courtConfigs || DEFAULT_COURT_CONFIGS) };
+    configs[locationKey] = { courts, maxGamesPerPlayer: maxGames };
+
+    try {
+        await fbSaveCourtConfig(configs);
+        alert(`'${locationKey}' 코트 설정이 저장되었습니다.`);
+    } catch (e) {
+        alert('코트 설정 저장 중 오류: ' + e.message);
+    }
 }
 
 // 앱 시작

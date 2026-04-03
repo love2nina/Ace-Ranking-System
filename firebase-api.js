@@ -307,6 +307,24 @@ export async function deleteVideo(videoId) {
 }
 
 /**
+ * 코트 설정을 Firebase에 저장합니다.
+ * @param {Object} courtConfigs - 장소별 코트 설정 객체
+ */
+export async function saveCourtConfig(courtConfigs) {
+    if (!window.FB_SDK) return;
+    const { doc, setDoc } = window.FB_SDK;
+    const settingsPath = currentClubId === 'Default' ? "system/settings" : `clubs/${currentClubId}/config/settings`;
+    
+    try {
+        await setDoc(doc(db, settingsPath), { courtConfigs }, { merge: true });
+        console.log("[Firebase] Court config saved successfully.");
+    } catch (e) {
+        console.error("[Firebase] Save Court Config Error:", e);
+        throw e;
+    }
+}
+
+/**
  * 전체 상태를 Firestore에 저장
  * @param {Object} appState - { members, matchHistory, currentSchedule, sessionNum, applicants }
  * @param {string} caller - 호출 경로 식별용 문자열
