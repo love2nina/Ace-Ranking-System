@@ -1270,15 +1270,15 @@ function renderCourtConfigPanel() {
 
     config.courts.forEach((court, idx) => {
         const row = document.createElement('div');
-        row.style.cssText = 'display: flex; gap: 8px; align-items: center;';
+        row.style.cssText = 'display: flex; gap: 4px; align-items: center; justify-content: space-between; width: 100%;';
         row.innerHTML = `
             <input type="text" class="court-name-input" value="${court.name}" 
-                style="flex: 2; font-size: 0.85rem; padding: 6px;" placeholder="코트 이름">
+                style="flex: 1; min-width: 60px; font-size: 0.85rem; padding: 6px;" placeholder="코트 이름">
             <input type="number" class="court-rounds-input" value="${court.maxRounds}" min="1" max="10"
-                style="width: 55px; text-align: center; font-size: 0.85rem; padding: 6px;" placeholder="R">
-            <span style="font-size: 0.75rem; color: var(--text-secondary);">라운드</span>
+                style="width: 40px; text-align: center; font-size: 0.85rem; padding: 6px;" placeholder="R">
+            <span style="font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap;">라운드</span>
             <button class="secondary remove-court-btn" data-idx="${idx}" 
-                style="padding: 4px 8px; font-size: 0.75rem; color: var(--danger); border-color: var(--danger);">✕</button>
+                style="padding: 4px 8px; font-size: 0.75rem; color: var(--danger); border-color: var(--danger); flex-shrink: 0;">✕</button>
         `;
         list.appendChild(row);
     });
@@ -1298,15 +1298,15 @@ function addCourtRow() {
 
     const idx = list.children.length;
     const row = document.createElement('div');
-    row.style.cssText = 'display: flex; gap: 8px; align-items: center;';
+    row.style.cssText = 'display: flex; gap: 4px; align-items: center; justify-content: space-between; width: 100%;';
     row.innerHTML = `
         <input type="text" class="court-name-input" value="코트 ${idx + 1}" 
-            style="flex: 2; font-size: 0.85rem; padding: 6px;" placeholder="코트 이름">
+            style="flex: 1; min-width: 60px; font-size: 0.85rem; padding: 6px;" placeholder="코트 이름">
         <input type="number" class="court-rounds-input" value="5" min="1" max="10"
-            style="width: 55px; text-align: center; font-size: 0.85rem; padding: 6px;" placeholder="R">
-        <span style="font-size: 0.75rem; color: var(--text-secondary);">라운드</span>
+            style="width: 40px; text-align: center; font-size: 0.85rem; padding: 6px;" placeholder="R">
+        <span style="font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap;">라운드</span>
         <button class="secondary remove-court-btn" 
-            style="padding: 4px 8px; font-size: 0.75rem; color: var(--danger); border-color: var(--danger);">✕</button>
+            style="padding: 4px 8px; font-size: 0.75rem; color: var(--danger); border-color: var(--danger); flex-shrink: 0;">✕</button>
     `;
     list.appendChild(row);
 
