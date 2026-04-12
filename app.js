@@ -591,8 +591,9 @@ function generateSchedule() {
         applicants, previewGroups, rankMap, members,
         courtConfigs: systemSettings.courtConfigs || null,
         locationKey: locationKey,
-        maxGamesPerPlayer: parseInt(document.getElementById('maxGamesPerPlayerInput')?.value) || 4
     };
+    const maxGames = parseInt(document.getElementById('maxGamesPerPlayerInput')?.value) || 4;
+    context.maxGamesPerPlayer = maxGames;
 
     const result = engineGenerateSchedule(context);
     if (result) {
