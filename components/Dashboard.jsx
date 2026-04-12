@@ -98,24 +98,34 @@ const Dashboard = ({ members, matchHistory }) => {
 };
 
 /* 내부 컴포넌트: 뱃지 카드 */
-const BadgeCard = ({ title, emoji, description, players }) => (
-    <div className="stat-card badge-card">
-        <div className="card-icon">{emoji}</div>
-        <div className="card-content">
-            <h3>{title}</h3>
-            <p className="card-desc">{description}</p>
-            <div className="player-list">
-                {players.length > 0 ? (
-                    players.map((name, idx) => (
-                        <span key={idx} className="player-name">{name}</span>
-                    ))
-                ) : (
-                    <span className="empty-msg">대상자 없음</span>
-                )}
+const BadgeCard = ({ title, emoji, description, players }) => {
+    // 베이글 장인 특수 처리 (객체 구조 대응)
+    const isBagelMaster = title === "베이글 장인";
+    const playerNames = isBagelMaster ? (players?.names || []) : (players || []);
+    const count = isBagelMaster ? players?.count : null;
+
+    return (
+        <div className="stat-card badge-card">
+            <div className="card-icon">{emoji}</div>
+            <div className="card-content">
+                <h3>{title}</h3>
+                <p className="card-desc">{description}</p>
+                <div className="player-list">
+                    {playerNames.length > 0 ? (
+                        <>
+                            {playerNames.map((name, idx) => (
+                                <span key={idx} className={`player-name ${isBagelMaster ? 'highlight' : ''}`}>{name}</span>
+                            ))}
+                            {count !== null && <small className="count-tag">{count}회</small>}
+                        </>
+                    ) : (
+                        <span className="empty-msg">대상자 없음</span>
+                    )}
+                </div>
             </div>
         </div>
-    </div>
-);
+    );
+};
 
 /* 내부 컴포넌트: 인사이트 카드 */
 const InsightCard = ({ title, emoji, label, data, footerText, type }) => (

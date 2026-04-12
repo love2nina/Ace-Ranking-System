@@ -72,13 +72,17 @@
     gap: 8px;
 }
 
-.player-name {
-    background: var(--accent-color);
+.player-name.highlight {
+    background: #facc15;
     color: #000;
+}
+
+.count-tag {
     font-size: 0.8rem;
-    padding: 2px 8px;
-    border-radius: 4px;
+    color: var(--text-secondary);
     font-weight: bold;
+    margin-left: 4px;
+    align-self: center;
 }
 
 .empty-msg {

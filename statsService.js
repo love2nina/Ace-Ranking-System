@@ -12,9 +12,9 @@ const PARTNER_MIN_GAMES = 3;
 export const calculateBadges = (members, matchHistory) => {
     if (!members || !matchHistory) return [];
 
-    // [🥇 베이글 장인]: 6:0 또는 0:6 경기가 있는 선수
-    const bagelMasters = members.filter(member => {
-        return matchHistory.some(match => {
+    // [🥇 베이글 장인]: 6:0 승리 최다 기록자
+    const memberBagelCounts = members.map(member => {
+        const count = matchHistory.filter(match => {
             const isParticipating = [...match.t1_ids, ...match.t2_ids].map(id => id.toString()).includes(member.id.toString());
             if (!isParticipating) return false;
 
@@ -23,8 +23,14 @@ export const calculateBadges = (members, matchHistory) => {
             const opScore = isT1 ? match.score2 : match.score1;
 
             return (myScore === 6 && opScore === 0);
-        });
+        }).length;
+        return { name: member.name, count };
     });
+
+    const maxBagels = Math.max(...memberBagelCounts.map(m => m.count));
+    const bagelMasters = maxBagels > 0 
+        ? { names: memberBagelCounts.filter(m => m.count === maxBagels).map(m => m.name), count: maxBagels }
+        : { names: [], count: 0 };
 
     // [🔥 불타는 연승]: 현재 3연승 이상 진행 중인 선수
     const hotStreaks = members.filter(member => {
@@ -66,7 +72,7 @@ export const calculateBadges = (members, matchHistory) => {
     const topAcorns = maxRating > 0 ? activeMembers.filter(m => m.rating === maxRating) : [];
 
     return {
-        bagelMasters: bagelMasters.map(m => m.name),
+        bagelMasters,
         hotStreaks: hotStreaks.map(m => m.name),
         swampGuards: swampGuards.map(m => m.name),
         ironMen: ironMen.map(m => m.name),

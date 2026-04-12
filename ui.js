@@ -1048,10 +1048,10 @@ export function renderBadgeHall(context) {
             <div class="card-icon">🥇</div>
             <div class="card-content">
                 <h3>베이글 장인</h3>
-                <p class="card-desc">6:0 완승 기록 보유자</p>
+                <p class="card-desc">6:0 완승 최다 기록자</p>
                 <div class="player-list">
-                    ${badges.bagelMasters.length > 0
-            ? badges.bagelMasters.map(name => `<span class="player-name">${name}</span>`).join('')
+                    ${badges.bagelMasters.names.length > 0
+            ? badges.bagelMasters.names.map(name => `<span class="player-name highlight">${name}</span>`).join('') + ` <small class="count-tag">${badges.bagelMasters.count}회</small>`
             : '<span class="empty-msg">대상자 없음</span>'}
                 </div>
             </div>
