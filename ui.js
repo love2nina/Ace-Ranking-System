@@ -1051,7 +1051,7 @@ export function renderBadgeHall(context) {
                 <p class="card-desc">6:0 완승 최다 기록자</p>
                 <div class="player-list">
                     ${badges.bagelMasters.names.length > 0
-            ? badges.bagelMasters.names.map(name => `<span class="player-name highlight">${name}</span>`).join('') + ` <small class="count-tag">${badges.bagelMasters.count}회</small>`
+            ? badges.bagelMasters.names.map(name => `<span class="player-name">${name}</span>`).join('') + ` <small class="count-tag">${badges.bagelMasters.count}회</small>`
             : '<span class="empty-msg">대상자 없음</span>'}
                 </div>
             </div>
@@ -1074,8 +1074,8 @@ export function renderBadgeHall(context) {
                 <h3>늪지대 방어군</h3>
                 <p class="card-desc">끈질긴 5:5 무승부 최다</p>
                 <div class="player-list">
-                    ${badges.swampGuards.length > 0
-            ? badges.swampGuards.map(name => `<span class="player-name">${name}</span>`).join('')
+                    ${badges.swampGuards.names.length > 0
+            ? badges.swampGuards.names.map(name => `<span class="player-name">${name}</span>`).join('') + ` <small class="count-tag">${badges.swampGuards.count}회</small>`
             : '<span class="empty-msg">대상자 없음</span>'}
                 </div>
             </div>

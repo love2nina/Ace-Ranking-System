@@ -74,7 +74,7 @@ export const calculateBadges = (members, matchHistory) => {
     return {
         bagelMasters,
         hotStreaks: hotStreaks.map(m => m.name),
-        swampGuards: swampGuards.map(m => m.name),
+        swampGuards: maxDraws > 0 ? { names: swampGuards.map(m => m.name), count: maxDraws } : { names: [], count: 0 },
         ironMen: ironMen.map(m => m.name),
         topAcorns: topAcorns.map(m => m.name)
     };
