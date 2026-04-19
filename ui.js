@@ -940,10 +940,10 @@ export function renderRanking(context) {
             <td><span class="rank-badge ${i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : ''}">${i + 1}</span>${rankChangeIcon}</td>
             <td><strong>${p.name}</strong></td>
             <td style="color:var(--accent-color); font-weight:bold">${Math.round(p.rating)}</td>
-            <td>${p.wins}승 ${p.draws}무 ${p.losses}패</td>
-            <td>${winRateValue}%</td>
-            <td style="color:${p.scoreDiff >= 0 ? 'var(--success)' : 'var(--danger)'}">${p.scoreDiff > 0 ? '+' : ''}${p.scoreDiff}</td>
-            <td><span class="attendance-badge">${att}%</span></td>
+            <td style="font-size: 0.8rem; color: var(--text-secondary);">${p.wins}승 ${p.draws}무 ${p.losses}패</td>
+            <td style="font-size: 0.8rem; color: var(--text-secondary);">${winRateValue}%</td>
+            <td style="font-size: 0.8rem; font-weight: 600; color:${p.scoreDiff >= 0 ? 'var(--success)' : 'var(--danger)'}">${p.scoreDiff > 0 ? '+' : ''}${p.scoreDiff}</td>
+            <td><span class="attendance-badge" style="font-size: 0.7rem;">${att}%</span></td>
         `;
         tbody.appendChild(tr);
     });
@@ -965,7 +965,7 @@ export function renderRanking(context) {
 }
 
 export function switchTab(id, context) {
-    const { actions: { renderEloChart, renderPlayerTrend } } = context;
+    const { actions: { renderEloChart, renderPlayerTrend, renderAnalystReport, renderVideoGallery } } = context;
     document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
     document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
 
@@ -975,20 +975,17 @@ export function switchTab(id, context) {
     const btn = document.querySelector(`.tab-btn[data-tab="${id}"]`);
     if (btn) btn.classList.add('active');
 
-    if (id === 'rank' && renderEloChart) {
-        renderEloChart(context);
-    }
-    
-    if (id === 'caster') {
-        renderAnalystReport(context);
-        renderVideoGallery(context);
-        // [v61] 전력분석실로 이동된 명예의 전당과 개인 분석 렌더링
-        if (typeof renderBadgeHall === 'function') renderBadgeHall(context);
-        if (typeof updateInsightPlayerSelect === 'function') updateInsightPlayerSelect(context);
-        // [v62] ELO 차트 및 성장 추이 차트 렌더링
+    if (id === 'rank' && renderEloChart) renderEloChart(context);
+    if (id === 'badge') {
+        renderBadgeHall(context);
         if (renderEloChart) renderEloChart(context);
+    }
+    if (id === 'insight') {
+        updateInsightPlayerSelect(context);
         if (renderPlayerTrend) renderPlayerTrend(context);
     }
+    if (id === 'report' && renderAnalystReport) renderAnalystReport(context);
+    if (id === 'video' && renderVideoGallery) renderVideoGallery(context);
 }
 
 export function updateStatistics(context) {
@@ -1163,11 +1160,14 @@ export function renderPlayerInsights(playerId, context) {
                 <h3>나의 천적</h3>
                 <div class="target-name">${nemesis ? nemesis.name : '---'}</div>
             </div>
-            <div class="card-footer">
-                ${nemesis ? `${Math.round(nemesis.eloLost)} ELO 탈취당함` : '기록 없음'}
+            <div class="card-footer" style="font-size: 0.85rem; line-height: 1.4; color: var(--text-secondary);">
+                ${nemesis ? `<span style="font-weight:bold; color:var(--text-color)">${nemesis.wins || 0}승 ${nemesis.draws || 0}무 ${nemesis.losses || 0}패</span> (<span style="color:var(--danger); font-weight:bold">-${Math.abs(Math.round(nemesis.netEloChange))} ELO</span>)` : '기록 없음'}
             </div>
         </div>
     `;
+
+    const getSymbol = (val) => val > 0 ? '+' : (val < 0 ? '-' : '');
+    const formatElo = (val) => `${getSymbol(val)}${Math.abs(Math.round(val))} ELO`;
 
     const bestPartnerHTML = `
         <div class="stat-card insight-card success">
@@ -1179,8 +1179,8 @@ export function renderPlayerInsights(playerId, context) {
                 <h3>환상의 파트너</h3>
                 <div class="target-name">${bestPartner ? bestPartner.name : '---'}</div>
             </div>
-            <div class="card-footer">
-                ${bestPartner ? `승률 ${(bestPartner.winRate * 100).toFixed(0)}% / +${Math.round(bestPartner.eloGain)} ELO` : '조건에 맞는 파트너 부족'}
+            <div class="card-footer" style="font-size: 0.85rem; line-height: 1.4; color: var(--text-secondary);">
+                ${bestPartner ? `<span style="font-weight:bold; color:var(--text-color)">${bestPartner.wins || 0}승 ${bestPartner.draws || 0}무 ${bestPartner.losses || 0}패</span> (<span style="color:var(--success); font-weight:bold">${formatElo(bestPartner.eloGain)}</span>)` : '조건에 맞는 파트너 부족'}
             </div>
         </div>
     `;
@@ -1195,8 +1195,8 @@ export function renderPlayerInsights(playerId, context) {
                 <h3>환장하는 파트너</h3>
                 <div class="target-name">${worstPartner ? worstPartner.name : '---'}</div>
             </div>
-            <div class="card-footer">
-                ${worstPartner ? `${worstPartner.losses}패 / ${Math.round(worstPartner.eloGain)} ELO 손실` : '조건에 맞는 파트너 부족'}
+            <div class="card-footer" style="font-size: 0.85rem; line-height: 1.4; color: var(--text-secondary);">
+                ${worstPartner ? `<span style="font-weight:bold; color:var(--text-color)">${worstPartner.wins || 0}승 ${worstPartner.draws || 0}무 ${worstPartner.losses || 0}패</span> (<span style="color:var(--danger); font-weight:bold">${formatElo(worstPartner.eloGain)}</span>)` : '조건에 맞는 파트너 부족'}
             </div>
         </div>
     `;

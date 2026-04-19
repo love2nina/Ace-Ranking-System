@@ -102,15 +102,10 @@ export const getPlayerInsights = (targetId, members, matchHistory) => {
     // 이전 시즌 요약에는 '상대팀'으로서의 전적만 압축되어 있음 (천적 위주)
     Object.entries(prevStats).forEach(([oppId, stats]) => {
         // 상대 분석 (천적) 초기화
-        const antag = antagonistStats.get(oppId) || { eloLost: 0 };
-        // 이전 시즌에서 잃은 ELO 합산 (eloGain이 음수이면 내가 잃은 것)
-        if (stats.eloGain < 0) {
-            antag.eloLost += Math.abs(stats.eloGain);
-            antagonistStats.set(oppId, antag);
-        }
-
-        // 파트너 데이터는 현재 요약 구조상 포함되어 있지 않으므로 (상대팀 기준), 
-        // 추후 확장이 필요할 수 있으나 현재는 천적(상대) 데이터 위주로 병합
+        const antag = antagonistStats.get(oppId) || { wins: 0, losses: 0, draws: 0, games: 0, netEloChange: 0 };
+        // 이전 시즌의 net ELO change 합산
+        antag.netEloChange += stats.eloGain || 0;
+        antagonistStats.set(oppId, antag);
     });
 
     myMatches.forEach(match => {
@@ -138,13 +133,15 @@ export const getPlayerInsights = (targetId, members, matchHistory) => {
         });
 
         // 상대 분석 (천적)
-        if (isLoss) {
-            opTeamIds.forEach(id => {
-                const stats = antagonistStats.get(id.toString()) || { eloLost: 0 };
-                stats.eloLost += Math.abs(eloChange);
-                antagonistStats.set(id.toString(), stats);
-            });
-        }
+        opTeamIds.forEach(id => {
+            const stats = antagonistStats.get(id.toString()) || { wins: 0, losses: 0, draws: 0, games: 0, netEloChange: 0 };
+            if (isWin) stats.wins++;
+            if (isLoss) stats.losses++;
+            if (isDraw) stats.draws++;
+            stats.games++;
+            stats.netEloChange += eloChange;
+            antagonistStats.set(id.toString(), stats);
+        });
     });
 
     // 결과 정렬 및 추출 (중복 제거 로직)
@@ -160,12 +157,14 @@ export const getPlayerInsights = (targetId, members, matchHistory) => {
 
     const usedIds = new Set();
 
-    // 1. 🏹 나의 천적: 나를 상대로 ELO를 가장 많이 가져간 사람 (상대팀)
+    // 1. 🏹 나의 천적: 나를 상대로 NET ELO를 가장 많이 깎아간 사람 (합산 ELO 변화량이 가장 낮음)
     const antagonists = Array.from(antagonistStats.entries()).map(([id, stats]) => {
         const member = members.find(m => m.id === id);
         return { id, name: member ? member.name : '알 수 없음', ...stats };
     });
-    const nemesis = antagonists.sort((a, b) => b.eloLost - a.eloLost)[0];
+    const nemesis = antagonists
+        .filter(a => a.netEloChange < 0)
+        .sort((a, b) => a.netEloChange - b.netEloChange)[0];
     if (nemesis) usedIds.add(nemesis.id);
 
     // 2. 🤝 환상의 파트너: 최소 3경기, 승률 50% 이상, 중복 제외, 승률 우선

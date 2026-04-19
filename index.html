@@ -53,12 +53,15 @@
         </header>
 
         <!-- 탭 네비게이션 -->
-        <div class="tab-container">
-            <button class="tab-btn active" data-tab="rank" onclick="switchTab('rank')">종합랭킹</button>
-            <button class="tab-btn" data-tab="caster" onclick="switchTab('caster')">전력분석실</button>
+        <div class="tab-container" id="mainTabContainer">
+            <button class="tab-btn" data-tab="badge" onclick="switchTab('badge')">명예의 전당</button>
+            <button class="tab-btn" data-tab="rank" onclick="switchTab('rank')">종합랭킹</button>
+            <button class="tab-btn" data-tab="insight" onclick="switchTab('insight')">개인분석</button>
             <button class="tab-btn" data-tab="apply" onclick="switchTab('apply')">참가신청</button>
             <button class="tab-btn" data-tab="match" onclick="switchTab('match')">대진표</button>
             <button class="tab-btn" data-tab="history" onclick="switchTab('history')">히스토리</button>
+            <button class="tab-btn" data-tab="report" onclick="switchTab('report')">분석리포트</button>
+            <button class="tab-btn" data-tab="video" onclick="switchTab('video')">영상자료실</button>
         </div>
 
         <!-- 1. 참가 신청 섹션 -->
@@ -255,7 +258,7 @@
         </div>
 
         <!-- 4. 종합 랭킹 섹션 -->
-        <div id="tab-rank" class="tab-content active">
+        <div id="tab-rank" class="tab-content">
             <div class="card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                     <h3>🏆 종합 랭킹 보드</h3>
@@ -282,27 +285,10 @@
         </div>
 
 
-        <!-- 6. 전력분석실 섹션 -->
-        <div id="tab-caster" class="tab-content">
+                <!-- 6. 명예의 전당 섹션 -->
+        <div id="tab-badge" class="tab-content active">
             <div class="card caster-card">
-                <div class="analysis-capsule-tabs">
-                    <button id="subtab-badge-btn" class="capsule-tab-btn active" onclick="switchCasterSubTab('badge')">
-                        <span class="emoji">🏆</span> 명예의 전당
-                    </button>
-                    <button id="subtab-insight-btn" class="capsule-tab-btn" onclick="switchCasterSubTab('insight')">
-                        <span class="emoji">🔍</span> 개인 분석
-                    </button>
-                    <button id="subtab-report-btn" class="capsule-tab-btn" onclick="switchCasterSubTab('report')">
-                        <span class="emoji">📝</span> 분석 리포트
-                    </button>
-                    <button id="subtab-video-btn" class="capsule-tab-btn" onclick="switchCasterSubTab('video')">
-                        <span class="emoji">📹</span> 영상 자료실
-                    </button>
-                </div>
-
-                <!-- 6-1. 명예의 전당 탭 내용 -->
-                <div id="subtab-badge" style="display: block;">
-                    <section class="dashboard-section" style="margin-top: 10px;">
+                <section class="dashboard-section" style="margin-top: 10px;">
                         <div id="badgeGrid" class="badge-grid">
                             <!-- statsService.js 기반으로 동적 생성됨 -->
                             <p class="loading-msg">데이터 분석 중...</p>
@@ -316,11 +302,13 @@
                             </div>
                         </div>
                     </section>
-                </div>
+            </div>
+        </div>
 
-                <!-- 6-2. 개인 분석 탭 내용 -->
-                <div id="subtab-insight" style="display: none;">
-                    <section class="dashboard-section" style="margin-top: 10px;">
+        <!-- 7. 개인 분석 섹션 -->
+        <div id="tab-insight" class="tab-content">
+            <div class="card caster-card">
+                <section class="dashboard-section" style="margin-top: 10px;">
                         <div class="section-header"
                             style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                             <h3 class="section-title" style="margin-bottom: 0;">🔍 개인 분석 리스트</h3>
@@ -340,11 +328,13 @@
                             </div>
                         </div>
                     </section>
-                </div>
+            </div>
+        </div>
 
-                <!-- 6-3. 리포트 탭 내용 -->
-                <div id="subtab-report" style="display: none;">
-                    <div
+        <!-- 8. 분석 리포트 섹션 -->
+        <div id="tab-report" class="tab-content">
+            <div class="card caster-card">
+                <div
                         style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                         <h3 style="color: var(--accent-color);">경기 분석 리포트</h3>
                         <select id="reportSessionSelect" style="max-width: 150px; font-size: 0.85rem;"
@@ -380,11 +370,13 @@
                             style="width: 100%; background: var(--accent-color); color: #0f172a; font-weight: bold;">리포트
                             게시하기</button>
                     </div>
-                </div>
+            </div>
+        </div>
 
-                <!-- 6-2. 비디오 갤러리 탭 내용 (신규) -->
-                <div id="subtab-video" style="display: none;">
-                    <div
+        <!-- 9. 비디오 갤러리 섹션 -->
+        <div id="tab-video" class="tab-content">
+            <div class="card caster-card">
+                <div
                         style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                         <h3 style="color: var(--accent-color);">테니스 영상 자료실</h3>
                         <button id="openVideoModalBtn" class="primary-btn"
@@ -395,9 +387,8 @@
                         <p
                             style="text-align: center; color: var(--text-secondary); padding: 40px; grid-column: 1 / -1;">
                             등록된 영상이 없습니다.</p>
-                    </div>
-                </div>
             </div>
+        </div>
         </div>
     </div>
 

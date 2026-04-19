@@ -68,11 +68,21 @@ header h1 {
     position: sticky;
     top: 10px;
     z-index: 100;
+    overflow-x: auto;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    padding-bottom: 4px;
+}
+.tab-container::-webkit-scrollbar {
+    display: none;
 }
 
 .tab-btn {
-    flex: 1;
-    padding: 14px;
+    flex: 0 0 auto;
+    min-width: max-content;
+    padding: 14px 18px;
     border: 1px solid var(--border-color);
     background: var(--card-bg);
     color: var(--text-secondary);

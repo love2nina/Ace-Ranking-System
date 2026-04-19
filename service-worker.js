@@ -1,7 +1,7 @@
 // service-worker.js — ACE 랭킹 시스템 PWA 캐시 관리
-// [v60] Firebase SDK + 정적 파일 캐시로 완전 오프라인/standalone 지원
+// [v62] Firebase SDK + 정적 파일 캐시로 완전 오프라인/standalone 지원
 
-const CACHE_NAME = 'ace-ranking-v60';
+const CACHE_NAME = 'ace-ranking-v62';
 const STATIC_ASSETS = [
     './',
     './index.html',
@@ -23,7 +23,7 @@ const CDN_ASSETS = [
 
 // 설치: 정적 파일 + CDN SDK 사전 캐시
 self.addEventListener('install', (event) => {
-    console.log('[SW] Installing service worker v60...');
+    console.log('[SW] Installing service worker v62...');
     event.waitUntil(
         caches.open(CACHE_NAME).then((cache) => {
             // 정적 파일 캐시
@@ -43,7 +43,7 @@ self.addEventListener('install', (event) => {
 
 // 활성화: 이전 버전 캐시 정리
 self.addEventListener('activate', (event) => {
-    console.log('[SW] Activating service worker v60...');
+    console.log('[SW] Activating service worker v62...');
     event.waitUntil(
         caches.keys().then((cacheNames) => {
             return Promise.all(
