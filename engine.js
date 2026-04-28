@@ -535,12 +535,24 @@ export function generateSchedule(context) {
             groupsArr.push([...group]);
         });
     } else {
-        const rankedArr = applicants.filter(a => rankMap.has(String(a.id))).sort((a, b) => b.rating - a.rating);
-        const newArr = applicants.filter(a => !rankMap.has(String(a.id)));
-        newArr.sort(() => Math.random() - 0.5);
+        const sorted = [...applicants].sort((a, b) => {
+            const rA = a.rating || 1500;
+            const rB = b.rating || 1500;
+            if (rB !== rA) return rB - rA;
+
+            const mA = a.mmr || 1500;
+            const mB = b.mmr || 1500;
+            if (mB !== mA) return mB - mA;
+
+            return String(a.name).localeCompare(String(b.name));
+        });
+        
         let startVRank = members.length + 1;
-        newArr.forEach(p => { p.vRank = startVRank++; });
-        const sorted = [...rankedArr, ...newArr];
+        sorted.forEach(p => {
+            if (!rankMap.has(String(p.id))) {
+                p.vRank = startVRank++;
+            }
+        });
         let cur = 0;
         split.forEach(s => {
             const groupMembers = sorted.slice(cur, cur + s);

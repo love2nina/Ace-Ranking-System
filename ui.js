@@ -150,13 +150,17 @@ export function renderApplicants(context) {
         return;
     }
 
-    const rankedApplicants = applicants.filter(a => rankMap.has(String(a.id))).sort((a, b) => {
-        const rA = rankMap.get(String(a.id))?.rank || 9999;
-        const rB = rankMap.get(String(b.id))?.rank || 9999;
-        return rA - rB;
+    const sortedApplicants = [...applicants].sort((a, b) => {
+        const rA = a.rating || 1500;
+        const rB = b.rating || 1500;
+        if (rB !== rA) return rB - rA;
+
+        const mA = a.mmr || 1500;
+        const mB = b.mmr || 1500;
+        if (mB !== mA) return mB - mA;
+
+        return String(a.name).localeCompare(String(b.name));
     });
-    const newApplicants = applicants.filter(a => !rankMap.has(String(a.id)));
-    const sortedApplicants = [...rankedApplicants, ...newApplicants];
 
     if (sortedApplicants.length < 4 || currentSessionState.matchMode === 'court') {
         setPreviewGroups(null);
@@ -462,10 +466,15 @@ export function renderSchedulePreview(context) {
     
     // 랭킹 기반 정렬 (New 선수는 하단 배치)
     const sortedApplicants = [...applicants].sort((a, b) => {
-        const rA = rankMap ? (rankMap.get(String(a.id))?.rank || 9999) : 9999;
-        const rB = rankMap ? (rankMap.get(String(b.id))?.rank || 9999) : 9999;
-        if (rA !== rB) return rA - rB;
-        return (b.rating || 1500) - (a.rating || 1500);
+        const rA = a.rating || 1500;
+        const rB = b.rating || 1500;
+        if (rB !== rA) return rB - rA;
+
+        const mA = a.mmr || 1500;
+        const mB = b.mmr || 1500;
+        if (mB !== mA) return mB - mA;
+
+        return String(a.name).localeCompare(String(b.name));
     });
     const sortedPlayerIds = sortedApplicants.map(a => String(a.id)).filter(id => gameCounts[id] !== undefined);
 
