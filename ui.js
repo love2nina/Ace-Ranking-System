@@ -424,11 +424,32 @@ export function updateOptimizationInfo(context) {
     const inputField = document.getElementById('customSplitInput');
     const inputVal = inputField ? inputField.value.trim() : "";
     const info = document.getElementById('optimizationInfo');
+    const status = document.getElementById('splitStatus');
+    const btn = document.getElementById('generateScheduleBtn');
 
     if (!inputVal) {
-        const split = (previewGroups && previewGroups.length > 0) ? previewGroups.map(g => g.length) : getSplits(applicants.length);
+        // [v65-Fix] 입력창이 비었을 때 이전 에러 메시지 초기화 및 추천 모드 복구
+        if (status) status.innerText = "";
+        if (btn) btn.disabled = false;
+        
+        // 만약 커스텀 그룹이 설정되어 있었다면 null로 리셋하여 추천으로 돌아감
+        // [v65-Fix] 루프 방지: 현재 조편성이 이미 추천 방식과 동일하다면 리셋하지 않음
+        const recommendedSplit = getSplits(applicants.length);
+        const currentSplit = previewGroups ? previewGroups.map(g => g.length).join(',') : '';
+        const isSameAsRecommended = currentSplit === recommendedSplit.join(',');
+
+        if (previewGroups !== null && !isSameAsRecommended) {
+            console.log("[UI] Custom input cleared. Resetting preview to recommended.");
+            context.actions.setPreviewGroups(null);
+            // 전체 updateUI 대신 필요한 부분만 렌더링하여 포커스 유지
+            setTimeout(() => {
+                if (context.actions?.renderApplicants) context.actions.renderApplicants();
+            }, 0);
+        }
+
+        const split = getSplits(applicants.length);
         const games = split.reduce((a, b) => a + (GAME_COUNTS[b] || 0), 0);
-        const label = (previewGroups && previewGroups.length > 0) ? "현재 조" : "추천";
+        const label = "추천";
         if (info) info.innerHTML = `<div>현재 참여: ${applicants.length}명 | ${label}: <strong>${split.join(', ')}분할</strong></div><div style="margin-top:5px">총 경기: <span class="session-info" style="background:${games <= 18 ? 'var(--success)' : 'var(--danger)'}; color:white">${games}게임</span></div>`;
     } else {
         validateCustomSplit(context);
@@ -569,16 +590,16 @@ export function renderCurrentMatches(context) {
     container.innerHTML = `<h3 style="text-align:center; margin-bottom:20px">${groupTitle} 대진표</h3>`;
 
     const getRank = (p) => {
+        // [v65] 대진표 내 (순위) 정보 제거 요청에 따른 비활성화
         if (p.vRank) return `<span style="font-size:0.8em; color:var(--accent-color)">(New)</span>`;
-        const info = rankMap.get(String(p.id));
-        return info ? `<span style="font-size:0.8em; color:var(--text-secondary)">(${info.rank})</span>` : '';
+        return '';
     };
 
     const renderMatchCard = (m) => {
-        const r1 = m.t1[0].rating || ELO_INITIAL;
-        const r2 = m.t1[1].rating || ELO_INITIAL;
-        const r3 = m.t2[0].rating || ELO_INITIAL;
-        const r4 = m.t2[1].rating || ELO_INITIAL;
+        const r1 = m.t1[0].mmr || ELO_INITIAL;
+        const r2 = m.t1[1].mmr || ELO_INITIAL;
+        const r3 = m.t2[0].mmr || ELO_INITIAL;
+        const r4 = m.t2[1].mmr || ELO_INITIAL;
         const avg1 = (r1 + r2) / 2;
         const avg2 = (r3 + r4) / 2;
         const expected = 1 / (1 + Math.pow(10, (avg2 - avg1) / 400));
@@ -984,8 +1005,10 @@ export function switchTab(id, context) {
     const btn = document.querySelector(`.tab-btn[data-tab="${id}"]`);
     if (btn) btn.classList.add('active');
 
-    if (id === 'rank' && renderEloChart) renderEloChart(context);
     if (id === 'badge') {
+        renderBadgeHall(context);
+    }
+    if (id === 'compare') {
         renderBadgeHall(context);
         if (renderEloChart) renderEloChart(context);
     }
@@ -1031,75 +1054,113 @@ export function renderStatsDashboard(context) {
  * 🏆 명예의 전당 (Badge Hall) 렌더링
  */
 export function renderBadgeHall(context) {
-    const { members, matchHistory } = context;
-    const badgeContainer = document.getElementById('badgeGrid');
-    if (!badgeContainer) return;
-
+    const { members, matchHistory, achievements = [], isAdmin } = context;
+    const hallGrid = document.getElementById('badgeGridHall');
+    const compareGrid = document.getElementById('badgeGridCompare');
+    
     const badges = calculateBadges(members, matchHistory);
 
-    const badgeHTML = `
-        <div class="stat-card badge-card accent">
-            <div class="card-icon">💎</div>
-            <div class="card-content">
-                <h3>최고의 도토리</h3>
-                <p class="card-desc">현재 랭킹 1위 (ELO 최고)</p>
-                <div class="player-list">
-                    ${badges.topAcorns.length > 0
-            ? badges.topAcorns.map(name => `<span class="player-name highlight">${name}</span>`).join('')
-            : '<span class="empty-msg">대상자 없음</span>'}
+    // --- 1. 명예의 전당용 (최고의 도토리 + 외부 대회) ---
+    if (hallGrid) {
+        const topAcornHTML = `
+            <div class="stat-card badge-card accent">
+                <div class="card-icon">💎</div>
+                <div class="card-content">
+                    <h3>ACE 최고의 도토리</h3>
+                    <p class="card-desc">현재 랭킹 1위 (ELO 최고)</p>
+                    <div class="player-list">
+                        ${badges.topAcorns.length > 0
+                            ? badges.topAcorns.map(name => `<span class="player-name highlight">${name}</span>`).join('')
+                            : '<span class="empty-msg">대상자 없음</span>'}
+                    </div>
                 </div>
             </div>
-        </div>
-        <div class="stat-card badge-card">
-            <div class="card-icon">🥇</div>
-            <div class="card-content">
-                <h3>베이글 장인</h3>
-                <p class="card-desc">6:0 완승 최다 기록자</p>
-                <div class="player-list">
-                    ${badges.bagelMasters.names.length > 0
-            ? badges.bagelMasters.names.map(name => `<span class="player-name">${name}</span>`).join('') + ` <small class="count-tag">${badges.bagelMasters.count}회</small>`
-            : '<span class="empty-msg">대상자 없음</span>'}
+        `;
+
+        let externalHTML = '';
+        if (achievements && achievements.length > 0) {
+            const groups = {};
+            achievements.forEach(ach => {
+                const key = `${ach.competitionName}_${ach.result}`;
+                if (!groups[key]) groups[key] = { comp: ach.competitionName, result: ach.result, players: [], ids: [] };
+                groups[key].players.push(ach.playerName);
+                groups[key].ids.push(ach.id);
+            });
+
+            externalHTML = Object.values(groups).map(g => `
+                <div class="stat-card badge-card external-premium">
+                    <div class="card-icon">🏆</div>
+                    <div class="card-content">
+                        <h3>${g.comp}</h3>
+                        <p class="card-desc" style="color: var(--accent-color); font-weight: bold;">${g.result}</p>
+                        <div class="player-list">
+                            ${g.players.map(name => `<span class="player-name">${name}</span>`).join('')}
+                        </div>
+                        ${isAdmin ? `
+                            <div style="margin-top:10px; display:flex; gap:5px; justify-content:flex-end;">
+                                ${g.ids.map((id, i) => `<button class="delete-btn" style="padding:2px 5px; font-size:0.6rem; opacity:0.5;" onclick="event.stopPropagation(); if(confirm('${g.players[i]} 선수의 기록을 삭제하시겠습니까?')) window.deleteAchievement('${id}')">삭제(${g.players[i]})</button>`).join('')}
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `).join('');
+        }
+        hallGrid.innerHTML = topAcornHTML + externalHTML;
+    }
+
+    // --- 2. 도토리 키재기용 (기타 배지) ---
+    if (compareGrid) {
+        compareGrid.innerHTML = `
+            <div class="stat-card badge-card">
+                <div class="card-icon">🥇</div>
+                <div class="card-content">
+                    <h3>베이글 장인</h3>
+                    <p class="card-desc">6:0 완승 최다 기록자</p>
+                    <div class="player-list">
+                        ${badges.bagelMasters.names.length > 0
+                            ? badges.bagelMasters.names.map(name => `<span class="player-name">${name}</span>`).join('') + ` <small class="count-tag">${badges.bagelMasters.count}회</small>`
+                            : '<span class="empty-msg">대상자 없음</span>'}
+                    </div>
                 </div>
             </div>
-        </div>
-        <div class="stat-card badge-card">
-            <div class="card-icon">🔥</div>
-            <div class="card-content">
-                <h3>불타는 연승</h3>
-                <p class="card-desc">현재 3연승 이상 순항 중</p>
-                <div class="player-list">
-                    ${badges.hotStreaks.length > 0
-            ? badges.hotStreaks.map(name => `<span class="player-name">${name}</span>`).join('')
-            : '<span class="empty-msg">대상자 없음</span>'}
+            <div class="stat-card badge-card">
+                <div class="card-icon">🔥</div>
+                <div class="card-content">
+                    <h3>불타는 연승</h3>
+                    <p class="card-desc">현재 3연승 이상 순항 중</p>
+                    <div class="player-list">
+                        ${badges.hotStreaks.length > 0
+                            ? badges.hotStreaks.map(name => `<span class="player-name">${name}</span>`).join('')
+                            : '<span class="empty-msg">대상자 없음</span>'}
+                    </div>
                 </div>
             </div>
-        </div>
-        <div class="stat-card badge-card">
-            <div class="card-icon">🛡️</div>
-            <div class="card-content">
-                <h3>늪지대 방어군</h3>
-                <p class="card-desc">끈질긴 5:5 무승부 최다</p>
-                <div class="player-list">
-                    ${badges.swampGuards.names.length > 0
-            ? badges.swampGuards.names.map(name => `<span class="player-name">${name}</span>`).join('') + ` <small class="count-tag">${badges.swampGuards.count}회</small>`
-            : '<span class="empty-msg">대상자 없음</span>'}
+            <div class="stat-card badge-card">
+                <div class="card-icon">🛡️</div>
+                <div class="card-content">
+                    <h3>늪지대 방어군</h3>
+                    <p class="card-desc">끈질긴 5:5 무승부 최다</p>
+                    <div class="player-list">
+                        ${badges.swampGuards.names.length > 0
+                            ? badges.swampGuards.names.map(name => `<span class="player-name">${name}</span>`).join('') + ` <small class="count-tag">${badges.swampGuards.count}회</small>`
+                            : '<span class="empty-msg">대상자 없음</span>'}
+                    </div>
                 </div>
             </div>
-        </div>
-        <div class="stat-card badge-card">
-            <div class="card-icon">🏋️‍♂️</div>
-            <div class="card-content">
-                <h3>코트의 철인</h3>
-                <p class="card-desc">최다 매치 소화 리스펙</p>
-                <div class="player-list">
-                    ${badges.ironMen.length > 0
-            ? badges.ironMen.map(name => `<span class="player-name">${name}</span>`).join('')
-            : '<span class="empty-msg">대상자 없음</span>'}
+            <div class="stat-card badge-card">
+                <div class="card-icon">🏋️‍♂️</div>
+                <div class="card-content">
+                    <h3>코트의 철인</h3>
+                    <p class="card-desc">최다 매치 소화 리스펙</p>
+                    <div class="player-list">
+                        ${badges.ironMen.length > 0
+                            ? badges.ironMen.map(name => `<span class="player-name">${name}</span>`).join('')
+                            : '<span class="empty-msg">대상자 없음</span>'}
+                    </div>
                 </div>
             </div>
-        </div>
-    `;
-    badgeContainer.innerHTML = badgeHTML;
+        `;
+    }
 }
 
 /**
@@ -1690,4 +1751,11 @@ export function renderCurrentMatchEditModal(match) {
         modal.classList.remove('hidden');
         modal.style.display = 'flex';
     }
+}
+
+/**
+ * 외부 대회 입상 기록을 렌더링합니다. (renderBadgeHall로 통합되어 현재는 사용되지 않음)
+ */
+export function renderExternalAchievements(context) {
+    // 통합 렌더링을 위해 renderBadgeHall 호출 유도
 }

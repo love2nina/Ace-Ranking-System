@@ -1332,3 +1332,98 @@ td {
     background: var(--accent-hover);
     transform: scale(1.05);
 }
+
+/* v65: 외부 대회 입상 기록 스타일 */
+.achievement-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.achievement-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 15px 20px;
+    transition: all 0.3s ease;
+}
+
+.achievement-card:hover {
+    background: rgba(56, 189, 248, 0.05);
+    border-color: var(--accent-color);
+    transform: translateX(5px);
+}
+
+.achieve-main {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.achieve-rank-badge {
+    background: linear-gradient(135deg, #facc15, #eab308);
+    color: #0f172a;
+    font-weight: 800;
+    font-size: 0.8rem;
+    padding: 4px 10px;
+    border-radius: 6px;
+    min-width: 65px;
+    text-align: center;
+    box-shadow: 0 0 10px rgba(250, 204, 21, 0.3);
+}
+
+.achieve-info {
+    display: flex;
+    flex-direction: column;
+}
+
+.achieve-player {
+    font-weight: 800;
+    font-size: 1.1rem;
+    color: var(--text-primary);
+}
+
+.achieve-comp {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.achieve-date {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    opacity: 0.6;
+}
+
+/* [v65] 외부 대회 입상 기록 프리미엄 스타일 */
+.badge-card.external-premium {
+    background: linear-gradient(135deg, rgba(251, 191, 36, 0.12) 0%, rgba(245, 158, 11, 0.04) 100%) !important;
+    border: 1px solid rgba(251, 191, 36, 0.4) !important;
+    box-shadow: 0 4px 15px rgba(245, 158, 11, 0.15);
+    position: relative;
+    overflow: hidden;
+}
+
+.badge-card.external-premium::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(circle, rgba(251, 191, 36, 0.1) 0%, transparent 70%);
+    pointer-events: none;
+}
+
+.badge-card.external-premium h3 {
+    color: #fbbf24 !important; /* Gold Title */
+    text-shadow: 0 0 8px rgba(251, 191, 36, 0.3);
+}
+
+.badge-card.external-premium .card-icon {
+    filter: drop-shadow(0 0 5px rgba(251, 191, 36, 0.5));
+    transform: scale(1.1);
+}
+

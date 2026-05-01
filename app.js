@@ -16,10 +16,11 @@ import {
     fetchDbList,
     saveReport as fbSaveReport,
     saveMatchScoreWithTransaction as fbSaveMatchScoreWithTransaction,
-    addHistoryItem as fbAddHistoryItem,
-    deleteHistoryItem as fbDeleteHistoryItem,
     updateHistoryItem as fbUpdateHistoryItem,
-    saveCourtConfig as fbSaveCourtConfig
+    saveCourtConfig as fbSaveCourtConfig,
+    subscribeToAchievements as fbSubscribeToAchievements,
+    addAchievement as fbAddAchievement,
+    deleteAchievement as fbDeleteAchievement
 } from './firebase-api.js';
 
 import {
@@ -43,7 +44,8 @@ import {
     updatePlayerSelect as uiUpdatePlayerSelect,
     renderPlayerTrend as uiRenderPlayerTrend,
     renderHistoryEditModal as uiRenderHistoryEditModal,
-    renderCurrentMatchEditModal as uiRenderCurrentMatchEditModal
+    renderCurrentMatchEditModal as uiRenderCurrentMatchEditModal,
+    renderExternalAchievements as uiRenderExternalAchievements
 } from './ui.js';
 
 import {
@@ -61,6 +63,7 @@ let applicants = [];
 let currentSchedule = [];
 let reports = {};
 let videos = [];
+let achievements = [];
 let currentSessionState = { status: 'idle', sessionNum: 0, info: '', matchMode: 'court' };
 let systemSettings = { admin_pw: 'ace_dot' };
 
@@ -176,6 +179,15 @@ async function init() {
         }
     });
 
+    fbSubscribeToAchievements(async (list) => {
+        achievements = list;
+        // [v68] DB 직접 수정 시에도 실시간으로 점수에 반영되도록 재계산 트리거 추가
+        recalculateAll(); 
+        // [v69] 재계산된 결과를 다시 DB에 저장하여 DB 콘솔에서도 동기화된 점수를 볼 수 있게 함
+        await fbSaveToCloud({ members, applicants }, 'achievementListener:sync');
+        updateUI(); 
+    });
+
     setupEventListeners();
     // [v63] 보안 강화: 자동 로그인 기능을 위해 저장된 민감 정보를 초기화합니다.
     localStorage.removeItem('ace_admin_pw');
@@ -191,6 +203,7 @@ window.retryFirebaseInit = () => {
 window.switchTab = (id) => {
     const ctx = {
         members, matchHistory, reports, currentSessionState, isAdmin, videos,
+        achievements, // 누락된 데이터 추가
         applicants, currentSchedule, sessionEndRatings, sessionRankSnapshots,
         ELO_INITIAL, rankMap,
         actions: {
@@ -209,6 +222,12 @@ window.switchTab = (id) => {
     if (activeTabBtn) {
         activeTabBtn.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
     }
+};
+
+window.renderExternalAchievements = () => uiRenderExternalAchievements({ achievements, isAdmin });
+window.deleteAchievement = async (id) => {
+    if (!isAdmin) return;
+    await fbDeleteAchievement(id);
 };
 
 // 모달 및 서브탭 제어
@@ -418,6 +437,9 @@ function setupEventListeners() {
     const restoreCsvBtn = document.getElementById('restoreCsvBtn');
     if (restoreCsvBtn) restoreCsvBtn.onclick = () => handleRestoreCsv();
 
+    const saveAchievementBtn = document.getElementById('saveAchievementBtn');
+    if (saveAchievementBtn) saveAchievementBtn.onclick = () => handleAddAchievement();
+
     // [v44] 조편성 저장 버튼 클릭 시 즉시 반영
     const savePreviewBtn = document.getElementById('savePreviewBtn');
     if (savePreviewBtn) savePreviewBtn.onclick = () => {
@@ -433,7 +455,24 @@ function setupEventListeners() {
             const context = {
                 currentSessionState, applicants, previewGroups, GAME_COUNTS, 
                 getSplits,
-                actions: { selfRender: () => {}, setPreviewGroups: (val) => { previewGroups = val; }, updateUI: () => updateUI() }
+                actions: { 
+                    selfRender: () => {}, 
+                    setPreviewGroups: (val) => { previewGroups = val; }, 
+                    updateUI: () => updateUI(),
+                    renderApplicants: () => {
+                        // [v65-Fix] 부분 렌더링 시 자기 자신을 다시 호출(selfRender)할 수 있도록 컨텍스트 구성
+                        const partialCtx = {
+                            applicants, previewGroups, isAdmin, currentSessionState,
+                            members, matchHistory, rankMap, getSplits, GAME_COUNTS,
+                            actions: { 
+                                setPreviewGroups: (v) => { previewGroups = v; },
+                                updateOptimizationInfo: (c) => uiUpdateOptimizationInfo(c || partialCtx),
+                                renderApplicants: () => uiRenderApplicants(partialCtx)
+                            }
+                        };
+                        uiRenderApplicants(partialCtx);
+                    }
+                }
             };
             uiUpdateOptimizationInfo(context);
         };
@@ -495,6 +534,7 @@ function updateUI() {
         members, matchHistory, applicants, currentSchedule, reports, videos,
         currentSessionState, isAdmin, rankMap, sessionRankSnapshots, sessionStartRatings,
         sessionEndRatings, previewGroups, activeGroupTab, tempSchedule, historyViewMode,
+        achievements, // 컨텍스트에 추가
         ELO_INITIAL, GAME_COUNTS,
         getSplits,
         actions: {
@@ -524,6 +564,7 @@ function updateUI() {
     uiUpdateStatistics(context);
     uiRenderAnalystReport(context);
     uiRenderVideoGallery(context);
+    uiRenderExternalAchievements(context);
 
     // [v62] 현재 활성화된 탭의 렌더링 함수를 트리거 (수정된 탭 구조 대응)
     const activeTabObj = document.querySelector('.tab-content.active');
@@ -542,7 +583,36 @@ function recalculateAll() {
         sessionStartRatings, 
         sessionEndRatings,
         applicants,
-        currentSchedule
+        currentSchedule,
+        achievements // 추가
+    });
+
+    // [v66] 데이터 일관성 보장: members에서 계산된 최신 점수를 applicants 및 currentSchedule에도 동기화
+    const memberMap = new Map(members.map(m => [String(m.id), m]));
+    
+    applicants.forEach(a => {
+        const m = memberMap.get(String(a.id));
+        if (m) {
+            a.rating = m.rating;
+            a.mmr = m.mmr;
+        }
+    });
+
+    currentSchedule.forEach(match => {
+        ['t1', 't2'].forEach(teamKey => {
+            const idKey = teamKey + '_ids';
+            const ids = match[idKey] || [];
+            ids.forEach((id, idx) => {
+                const m = memberMap.get(String(id));
+                if (m) {
+                    // match 객체 내부의 상세 선수 데이터(t1, t2 배열) 동기화
+                    if (match[teamKey] && match[teamKey][idx]) {
+                        match[teamKey][idx].rating = m.rating;
+                        match[teamKey][idx].mmr = m.mmr;
+                    }
+                }
+            });
+        });
     });
 }
 window.removeApplicant = (id) => {
@@ -973,6 +1043,112 @@ async function handleSaveReport() {
     document.getElementById('reportPostContent').value = '';
     alert("리포트가 저장되었습니다.");
 }
+
+
+/**
+ * 외부 대회 입상 기록을 추가합니다.
+ */
+async function handleAddAchievement() {
+    if (!isAdmin) return;
+    const nameInput = document.getElementById('achievePlayerName');
+    const compInput = document.getElementById('achieveCompName');
+    const resultInput = document.getElementById('achieveResult');
+    const mmrInput = document.getElementById('achieveMmrBonus');
+    
+    const playerName = nameInput?.value.trim();
+    const competitionName = compInput?.value.trim();
+    const result = resultInput?.value.trim();
+    const mmrBonus = parseInt(mmrInput?.value || "0");
+
+    if (!playerName || !competitionName || !result) {
+        alert("선수명, 대회명, 성적을 모두 입력해주세요.");
+        return;
+    }
+
+    try {
+        // 1. 외부 대회 기록 저장
+        await fbAddAchievement({
+            playerName,
+            competitionName,
+            result,
+            mmrBonus,
+            timestamp: Date.now()
+        });
+        
+        // 2. 해당 선수 실시간 상태 반영 (재계산 트리거로 처리)
+        // [v67] 더 이상 baseMmr을 직접 수정하지 않습니다. 
+        // 대신 recalculateAll이 타임라인에 맞춰 보너스를 합산합니다.
+        console.log(`[App] Achievement registered for ${playerName}. MMR Bonus: +${mmrBonus}`);
+        
+        // 명단에 없는 신규 선수인 경우 명단에만 추가
+        let member = members.find(m => m.name.trim() === playerName.trim());
+        if (!member) {
+            console.log(`[App] New member '${playerName}' detected via achievement. Adding to list.`);
+            const newMember = {
+                id: "M" + Date.now(),
+                name: playerName,
+                rating: ELO_INITIAL,
+                mmr: ELO_INITIAL,
+                matchCount: 0,
+                wins: 0,
+                losses: 0,
+                draws: 0,
+                scoreDiff: 0,
+                participationArr: [],
+                prevRating: ELO_INITIAL,
+                timestamp: Date.now()
+            };
+            members.push(newMember);
+            await fbSaveToCloud({ members }, 'addAchievement:newMemberAutoAdd');
+        }
+
+        // 입력 필드 초기화
+        if (nameInput) nameInput.value = '';
+        if (compInput) compInput.value = '';
+        if (resultInput) resultInput.value = '';
+        if (mmrInput) mmrInput.value = '0';
+        
+        // [v68] 전체 재계산 후 변경된 회원들의 점수(MMR 등)를 DB에 최종 동기화
+        recalculateAll();
+        await fbSaveToCloud({ members }, 'addAchievement:syncScores');
+        
+        alert("외부 대회 입상 기록이 등록되었습니다!");
+        updateUI();
+    } catch (e) {
+        console.error("Add Achievement Error:", e);
+        alert("기록 등록 중 오류가 발생했습니다: " + e.message);
+    }
+}
+
+async function handleDeleteAchievement(id) {
+    if (!isAdmin) return;
+    
+    // 1. 삭제할 기록 찾기 (MMR 회수를 위함)
+    const ach = achievements.find(a => a.id === id);
+    if (!ach) return;
+
+    try {
+        // [v67] 더 이상 baseMmr을 직접 수정하지 않으므로 삭제 시에도 기록만 지우면 됨
+        // recalculateAll이 타임라인에서 이 기록을 제외하면 MMR이 자연스럽게 회수됨
+        
+        // 3. 기록 삭제
+        await fbDeleteAchievement(id);
+        
+        // [v68] 재계산 후 DB 동기화 (보너스 회수 반영)
+        recalculateAll();
+        await fbSaveToCloud({ members }, 'deleteAchievement:syncScores');
+        
+        updateUI();
+        console.log("[App] Achievement deleted and scores synced:", id);
+    } catch (e) {
+        console.error("Delete Achievement Error:", e);
+        alert("기록 삭제 중 오류가 발생했습니다.");
+    }
+}
+
+// 전역 함수 등록
+window.deleteAchievement = handleDeleteAchievement;
+
 
 // --- 관리자/모달 로직 (생략된 기타 함수들) ---
 async function checkAdminLogin() {

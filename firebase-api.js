@@ -840,3 +840,51 @@ export async function migrateReports(reportsObj) {
         throw e;
     }
 }
+
+// --- 외부 대회 입상 기록 데이터 통신 ---
+/**
+ * 외부 대회 입상 기록을 실시간 구독합니다.
+ */
+export function subscribeToAchievements(callback) {
+    if (!window.FB_SDK) return;
+    const { collection, onSnapshot } = window.FB_SDK;
+    const path = currentClubId === 'Default' ? "achievements" : `clubs/${currentClubId}/achievements`;
+
+    return onSnapshot(collection(db, path), (snapshot) => {
+        const list = [];
+        snapshot.forEach(doc => {
+            list.push({ id: doc.id, ...doc.data() });
+        });
+        list.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        callback(list);
+    }, (error) => {
+        console.error("Error subscribing to achievements:", error);
+    });
+}
+
+/**
+ * 외부 대회 입상 기록을 추가합니다.
+ */
+export async function addAchievement(data) {
+    if (!window.FB_SDK) return;
+    const { doc, setDoc } = window.FB_SDK;
+    const path = currentClubId === 'Default' ? "achievements" : `clubs/${currentClubId}/achievements`;
+
+    const id = String(Date.now());
+    data.timestamp = Date.now();
+
+    const docRef = doc(db, path, id);
+    await setDoc(docRef, data);
+}
+
+/**
+ * 외부 대회 입상 기록을 삭제합니다.
+ */
+export async function deleteAchievement(id) {
+    if (!window.FB_SDK) return;
+    const { doc, deleteDoc } = window.FB_SDK;
+    const path = currentClubId === 'Default' ? "achievements" : `clubs/${currentClubId}/achievements`;
+
+    const docRef = doc(db, path, id);
+    await deleteDoc(docRef);
+}

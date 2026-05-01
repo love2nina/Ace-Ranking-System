@@ -55,6 +55,7 @@
         <!-- 탭 네비게이션 -->
         <div class="tab-container" id="mainTabContainer">
             <button class="tab-btn" data-tab="badge" onclick="switchTab('badge')">명예의 전당</button>
+            <button class="tab-btn" data-tab="compare" onclick="switchTab('compare')">도토리 키재기</button>
             <button class="tab-btn" data-tab="rank" onclick="switchTab('rank')">종합랭킹</button>
             <button class="tab-btn" data-tab="insight" onclick="switchTab('insight')">개인분석</button>
             <button class="tab-btn" data-tab="apply" onclick="switchTab('apply')">참가신청</button>
@@ -285,19 +286,52 @@
         </div>
 
 
-                <!-- 6. 명예의 전당 섹션 -->
+        <!-- 6. 명예의 전당 섹션 -->
         <div id="tab-badge" class="tab-content active">
             <div class="card caster-card">
                 <section class="dashboard-section" style="margin-top: 10px;">
-                        <div id="badgeGrid" class="badge-grid">
-                            <!-- statsService.js 기반으로 동적 생성됨 -->
+                        <!-- 최고의 도토리 및 외부 대회 입상자 전용 그리드 -->
+                        <div id="badgeGridHall" class="badge-grid">
                             <p class="loading-msg">데이터 분석 중...</p>
                         </div>
                         
-                        <!-- v62-hotfix: 도토리 키재기 차트는 명예의 전당 하단으로 재이동 -->
-                        <div style="margin-top: 35px;">
-                            <h4 style="margin: 0 0 10px 0; color: var(--accent-color);">📊 도토리 키재기</h4>
-                            <div style="height: 300px; position: relative;">
+                        <!-- v65: 외부 대회 입상 기록 섹션 -->
+                        <div id="externalAchievementsSection" style="margin-top: 45px; padding-top: 30px; border-top: 1px solid var(--border-color);">
+                            <div class="admin-only" style="display: none; padding: 20px; border: 1px dashed var(--accent-color); border-radius: 12px; background: rgba(56, 189, 248, 0.02);">
+                                <h5 style="margin: 0 0 15px 0; color: var(--accent-color); display: flex; align-items: center; gap: 6px;">
+                                    <span>🏆 외부 대회 입상 기록 등록 (관리자)</span>
+                                </h5>
+                                <div style="display: flex; flex-direction: column; gap: 12px;">
+                                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                                        <input type="text" id="achievePlayerName" placeholder="선수명" style="flex: 1; min-width: 120px;">
+                                        <input type="text" id="achieveCompName" placeholder="대회명" style="flex: 2; min-width: 200px;">
+                                        <input type="text" id="achieveResult" placeholder="성적" style="flex: 1; min-width: 100px;">
+                                        <input type="number" id="achieveMmrBonus" placeholder="MMR 보너스" style="width: 100px;" value="0">
+                                    </div>
+                                    <button id="saveAchievementBtn" class="primary" style="background: var(--accent-color); color: #0f172a; font-weight: bold; padding: 12px;">등록하기</button>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+            </div>
+        </div>
+
+        <!-- 6.5 도토리 키재기 섹션 (신설) -->
+        <div id="tab-compare" class="tab-content">
+            <div class="card caster-card">
+                <section class="dashboard-section" style="margin-top: 10px;">
+                        <h4 style="margin: 0 0 20px 0; color: var(--accent-color); display: flex; align-items: center; gap: 8px;">
+                            <span>🥜 도토리 키재기</span>
+                        </h4>
+                        <!-- 기타 배지(베이글, 연승 등) 그리드 -->
+                        <div id="badgeGridCompare" class="badge-grid">
+                            <p class="loading-msg">데이터 분석 중...</p>
+                        </div>
+
+                        <!-- 도토리 키재기 차트 -->
+                        <div style="margin-top: 45px; padding-top: 30px; border-top: 1px solid var(--border-color);">
+                            <h4 style="margin: 0 0 15px 0; color: var(--accent-color);">📊 도토리 키재기</h4>
+                            <div style="height: 350px; position: relative;">
                                 <canvas id="eloChart"></canvas>
                             </div>
                         </div>

@@ -52,9 +52,11 @@ export function getSplits(n) {
 }
 
 export function recalculateAll(context) {
-    const { members, matchHistory, rankMap, sessionRankSnapshots, sessionStartRatings } = context;
+    const { members, matchHistory, rankMap, sessionRankSnapshots, sessionStartRatings, achievements = [] } = context;
     try {
-        // [v41] 신규 DB 지원: 히스토리에만 있고 회원 목록에 없는 선수를 자동 등재 (로컬 복구용)
+        // [v68] 순수 타임라인 모델: 모든 점수 변화를 시간순 사건으로 처리
+        
+        // 1. 회원 목록 초기화 및 히스토리 기반 신규 멤버 자동 등재
         const memberIdSet = new Set(members.map(m => String(m.id)));
         matchHistory.forEach(h => {
             const ids = [...(h.t1_ids || []), ...(h.t2_ids || [])];
@@ -63,183 +65,136 @@ export function recalculateAll(context) {
                 const sId = String(id);
                 if (id && !memberIdSet.has(sId)) {
                     members.push({
-                        id: sId,
-                        name: names[idx] || "Unknown",
-                        rating: ELO_INITIAL,
-                        matchCount: 0, wins: 0, losses: 0, draws: 0, scoreDiff: 0,
-                        mmr: ELO_INITIAL,
-                        participationArr: [],
-                        prevRating: ELO_INITIAL
+                        id: sId, name: names[idx] || "Unknown", rating: ELO_INITIAL, mmr: ELO_INITIAL,
+                        matchCount: 0, wins: 0, losses: 0, draws: 0, scoreDiff: 0, participationArr: [], prevRating: ELO_INITIAL
                     });
                     memberIdSet.add(sId);
                 }
             });
         });
 
+        // 모든 멤버 상태 리셋
         rankMap.clear();
         members.forEach(m => {
-            m.rating = ELO_INITIAL; m.matchCount = 0; m.wins = 0; m.losses = 0; m.draws = 0; m.scoreDiff = 0;
-            // 누적 MMR: baseMmr(시즌 시작 기준값)으로 리셋 후 재계산 (멱등성 보장)
-            m.mmr = m.baseMmr !== undefined ? m.baseMmr : ELO_INITIAL;
-            m.participationArr = [];
-            m.prevRating = ELO_INITIAL;
+            m.rating = ELO_INITIAL; m.mmr = ELO_INITIAL;
+            m.matchCount = 0; m.wins = 0; m.losses = 0; m.draws = 0; m.scoreDiff = 0;
+            m.participationArr = []; m.prevRating = ELO_INITIAL;
             delete m.vRank;
         });
 
-        const memberMap = new Map();
-        members.forEach(m => memberMap.set(String(m.id), m));
+        const memberMap = new Map(members.map(m => [String(m.id), m]));
 
-        const sessionIds = [...new Set(matchHistory.map(h => (h.sessionNum || '').toString()))].filter(Boolean).sort((a, b) => parseInt(a) - parseInt(b));
+        // 2. 통합 타임라인 생성 (경기 + 입상 보너스)
+        const events = [
+            ...matchHistory.map(h => ({ ...h, eventType: 'match' })),
+            ...achievements.map(a => ({ ...a, eventType: 'achievement' }))
+        ].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
 
-        let previousRanking = [];
+        // 3. 타임라인 순차 연산
+        if (!context.sessionEndRatings) context.sessionEndRatings = {};
+        let currentSessionId = null;
+        let previousRankingIds = [];
 
-        sessionIds.forEach((sId, idx) => {
-            const isLastSession = idx === sessionIds.length - 1;
-            if (isLastSession) {
-                members.forEach(m => m.prevRating = m.rating);
-                // [v43] 순위 변동 계산은 경기를 한 번이라도 치른 활성 멤버들 사이의 상대적 순위로 계산함
-                previousRanking = members.filter(m => m.matchCount > 0).sort((a, b) => {
-                    if (b.rating !== a.rating) return b.rating - a.rating;
-                    return String(a.id).localeCompare(String(b.id));
-                }).map(m => m.id);
-            }
-
-            const sessionMatches = matchHistory.filter(h => (h.sessionNum || '').toString() === sId);
-            const ratingSnapshot = {};
-            const mmrSnapshot = {};
-            members.forEach(m => {
-                ratingSnapshot[m.id] = m.rating;
-                mmrSnapshot[m.id] = m.mmr || ELO_INITIAL;
-            });
-
-            const existingMembers = members.filter(m => m.matchCount > 0);
-            const newMembers = members.filter(m => m.matchCount === 0);
-            existingMembers.sort((a, b) => {
-                if (b.rating !== a.rating) return b.rating - a.rating;
-                return String(a.id).localeCompare(String(b.id));
-            });
-            newMembers.sort((a, b) => String(a.id).localeCompare(String(b.id)));
-            const finalSorted = [...existingMembers, ...newMembers];
-            sessionRankSnapshots[sId] = {};
-            finalSorted.forEach((m, idx) => {
-                sessionRankSnapshots[sId][m.id] = idx + 1;
-            });
-
-            sessionStartRatings[sId] = { ...ratingSnapshot };
-
-            sessionMatches.forEach(h => {
-                const team1 = h.t1_ids.map(id => memberMap.get(String(id))).filter(Boolean);
-                const team2 = h.t2_ids.map(id => memberMap.get(String(id))).filter(Boolean);
-                if (team1.length < 2 || team2.length < 2) return;
-
-                // [시즌제 고도화] 기대승률은 MMR(누적 실력) 기준으로 계산
-                const mmr1 = ((mmrSnapshot[team1[0].id] || ELO_INITIAL) + (mmrSnapshot[team1[1].id] || ELO_INITIAL)) / 2;
-                const mmr2 = ((mmrSnapshot[team2[0].id] || ELO_INITIAL) + (mmrSnapshot[team2[1].id] || ELO_INITIAL)) / 2;
-                const avg1 = ((ratingSnapshot[team1[0].id] || ELO_INITIAL) + (ratingSnapshot[team1[1].id] || ELO_INITIAL)) / 2;
-                const avg2 = ((ratingSnapshot[team2[0].id] || ELO_INITIAL) + (ratingSnapshot[team2[1].id] || ELO_INITIAL)) / 2;
-                const expected = 1 / (1 + Math.pow(10, (mmr2 - mmr1) / 400));
-                let actual = h.score1 > h.score2 ? 1 : (h.score1 < h.score2 ? 0 : 0.5);
-                const diff = Math.abs(h.score1 - h.score2);
-
-                const exp1 = 1 / (1 + Math.pow(10, (mmr2 - mmr1) / 400));
-                const exp2 = 1 / (1 + Math.pow(10, (mmr1 - mmr2) / 400));
-
-                let act1 = 0.5;
-                let act2 = 0.5;
-                if (actual === 1) { act1 = 1; act2 = 0; }
-                else if (actual === 0) { act1 = 0; act2 = 1; }
-
-                let changeT1 = K_FACTOR * (act1 - exp1);
-                let changeT2 = K_FACTOR * (act2 - exp2);
-
-                if (diff >= 6) {
-                    changeT1 *= 1.5;
-                    changeT2 *= 1.5;
+        events.forEach(event => {
+            if (event.eventType === 'achievement') {
+                // 입상 보너스: MMR에만 즉시 합산
+                const member = members.find(m => m.name.trim() === event.playerName.trim());
+                if (member) {
+                    member.mmr += (event.mmrBonus || 0);
+                }
+            } 
+            else if (event.eventType === 'match') {
+                const sId = (event.sessionNum || '').toString();
+                
+                // 세션 경계 감지 및 스냅샷 촬영
+                if (sId !== currentSessionId) {
+                    if (currentSessionId !== null) {
+                        finalizeSession(currentSessionId, members, sessionRankSnapshots, context.sessionEndRatings);
+                        previousRankingIds = members.filter(m => m.matchCount > 0)
+                            .sort((a, b) => (b.rating - a.rating) || String(a.id).localeCompare(String(b.id)))
+                            .map(m => m.id);
+                    }
+                    currentSessionId = sId;
+                    sessionStartRatings[sId] = members.reduce((acc, m) => { acc[m.id] = m.rating; return acc; }, {});
                 }
 
-                h.elo_at_match = { t1_before: avg1, t2_before: avg2, mmr1_before: mmr1, mmr2_before: mmr2, expected, change1: changeT1, change2: changeT2 };
+                // 경기 결과 반영
+                const team1 = (event.t1_ids || []).map(id => memberMap.get(String(id))).filter(Boolean);
+                const team2 = (event.t2_ids || []).map(id => memberMap.get(String(id))).filter(Boolean);
+                if (team1.length < 2 || team2.length < 2) return;
 
-                [...team1, ...team2].forEach(p => {
-                    p.matchCount++;
-                    if (!p.participationArr.includes(sId)) p.participationArr.push(sId);
+                const mmr1 = (team1[0].mmr + team1[1].mmr) / 2;
+                const mmr2 = (team2[0].mmr + team2[1].mmr) / 2;
+                const expected = 1 / (1 + Math.pow(10, (mmr2 - mmr1) / 400));
+                const actual = event.score1 > event.score2 ? 1 : (event.score1 < event.score2 ? 0 : 0.5);
+                
+                let change = 32 * (actual - expected);
+                // 베이글(6점 차 이상) 가중치 적용
+                if (Math.abs(event.score1 - event.score2) >= 6) change *= 1.5;
+                change = Math.round(change);
+
+                // [v68] 경기 기록 내 상세 정보 업데이트 (히스토리 표시용)
+                event.elo_at_match = {
+                    expected: expected,
+                    change1: change,
+                    change2: -change,
+                    mmr1_before: mmr1,
+                    mmr2_before: mmr2
+                };
+
+                [...team1, ...team2].forEach(m => {
+                    m.matchCount++;
+                    if (!m.participationArr.includes(sId)) m.participationArr.push(sId);
                 });
 
-                team1.forEach(p => {
-                    p.rating += changeT1;
-                    p.mmr += changeT1;  // MMR 동시 업데이트
-                    p.scoreDiff += (h.score1 - h.score2);
-                    if (actual === 1) { p.wins++; }
-                    else if (actual === 0) { p.losses++; }
-                    else { p.draws++; }
-                });
-                team2.forEach(p => {
-                    p.rating += changeT2;
-                    p.mmr += changeT2;  // MMR 동시 업데이트
-                    p.scoreDiff += (h.score2 - h.score1);
-                    if (actual === 0) { p.wins++; }
-                    else if (actual === 1) { p.losses++; }
-                    else { p.draws++; }
-                });
-            });
-
-            // [핵심 개선] 세션 경기 처리 후(종료 시점)의 랭킹 스냅샷 기록
-            // 대시보드와 동일한 정렬 로직 적용
-            const sessionEndSorted = [...members].sort((a, b) => {
-                const aActive = a.matchCount > 0;
-                const bActive = b.matchCount > 0;
-                if (aActive !== bActive) return bActive ? 1 : -1;
-
-                if (b.rating !== a.rating) return b.rating - a.rating;
-                if (b.wins !== a.wins) return b.wins - a.wins;
-                const bWinRate = b.matchCount > 0 ? b.wins / b.matchCount : 0;
-                const aWinRate = a.matchCount > 0 ? a.wins / a.matchCount : 0;
-                if (bWinRate !== aWinRate) return bWinRate - aWinRate;
-                if (b.scoreDiff !== a.scoreDiff) return b.scoreDiff - a.scoreDiff;
-                return String(a.name).localeCompare(String(b.name));
-            });
-
-            sessionRankSnapshots[sId] = {};
-            sessionEndSorted.forEach((m, idx) => {
-                sessionRankSnapshots[sId][m.id] = idx + 1;
-            });
-
-            // 세션 종료 시점의 레이팅 기록
-            if (!context.sessionEndRatings) context.sessionEndRatings = {};
-            context.sessionEndRatings[sId] = members.reduce((acc, m) => { acc[m.id] = m.rating; return acc; }, {});
+                if (actual === 1) {
+                    team1.forEach(m => { m.wins++; m.rating += change; m.mmr += change; m.scoreDiff += (event.score1 - event.score2); });
+                    team2.forEach(m => { m.losses++; m.rating -= change; m.mmr -= change; m.scoreDiff += (event.score2 - event.score1); });
+                } else if (actual === 0) {
+                    team1.forEach(m => { m.losses++; m.rating += change; m.mmr += change; m.scoreDiff += (event.score1 - event.score2); });
+                    team2.forEach(m => { m.wins++; m.rating -= change; m.mmr -= change; m.scoreDiff += (event.score2 - event.score1); });
+                } else {
+                    [...team1, ...team2].forEach(m => m.draws++);
+                }
+            }
         });
 
-        // [v43, v59] 최종 순위 맵 업데이트: UI(랭킹보드)와 동일한 활동성 필터 적용
-        const allSessionsSorted = [...sessionIds];
-        const recent3 = [...allSessionsSorted].reverse().slice(0, 3);
+        // 마지막 세션 종료 처리
+        if (currentSessionId !== null) {
+            finalizeSession(currentSessionId, members, sessionRankSnapshots, context.sessionEndRatings);
+        }
 
-        const currentRanking = members.filter(m => {
-            if (m.matchCount === 0) return false;
-            
-            const isRecentlyActive = m.participationArr?.some(s => recent3.includes(s.toString()));
-            const isCurrentParticipant = (context.applicants && context.applicants.some(a => String(a.id) === String(m.id))) ||
-                (context.currentSchedule && context.currentSchedule.some(match =>
-                    [...match.t1, ...match.t2].some(p => String(p.id) === String(m.id))
-                ));
-            
-            return isRecentlyActive || isCurrentParticipant;
-        }).sort((a, b) => {
-            if (b.rating !== a.rating) return b.rating - a.rating;
-            if (b.wins !== a.wins) return b.wins - a.wins;
-            const bWinRate = b.matchCount > 0 ? b.wins / b.matchCount : 0;
-            const aWinRate = a.matchCount > 0 ? a.wins / a.matchCount : 0;
-            if (bWinRate !== aWinRate) return bWinRate - aWinRate;
-            if (b.scoreDiff !== a.scoreDiff) return b.scoreDiff - a.scoreDiff;
-            return String(a.name).localeCompare(String(b.name));
-        });
+        // 4. 최종 순위(rankMap) 업데이트
+        updateRankMap(members, rankMap, previousRankingIds, context);
 
-        currentRanking.forEach((m, idx) => {
-            const prevIdx = previousRanking.indexOf(m.id);
-            let change = 0;
-            if (prevIdx !== -1) change = prevIdx - idx;
-            rankMap.set(String(m.id), { rank: idx + 1, change });
-        });
+    } catch (e) {
+        console.error("Recalculate Error:", e);
+    }
+}
 
-    } catch (e) { console.error("Recalculate Error:", e); }
+function finalizeSession(sId, members, snapshots, ratings) {
+    const sorted = [...members].sort((a, b) => (b.rating - a.rating) || String(a.id).localeCompare(String(b.id)));
+    snapshots[sId] = {};
+    sorted.forEach((m, idx) => { snapshots[sId][m.id] = idx + 1; });
+    ratings[sId] = members.reduce((acc, m) => { acc[m.id] = m.rating; return acc; }, {});
+}
+
+function updateRankMap(members, rankMap, previousRankingIds, context) {
+    const sessionIds = [...new Set(context.matchHistory.map(h => (h.sessionNum || '').toString()))].filter(Boolean).sort((a, b) => parseInt(a) - parseInt(b));
+    const recent3 = [...sessionIds].reverse().slice(0, 3);
+
+    const currentRanking = members.filter(m => {
+        if (m.matchCount === 0) return false;
+        const isRecentlyActive = m.participationArr?.some(s => recent3.includes(s.toString()));
+        const isCurrentParticipant = (context.applicants || []).some(a => String(a.id) === String(m.id)) ||
+            (context.currentSchedule || []).some(match => [...(match.t1_ids || []), ...(match.t2_ids || [])].some(id => String(id) === String(m.id)));
+        return isRecentlyActive || isCurrentParticipant;
+    }).sort((a, b) => (b.rating - a.rating) || (b.wins - a.wins) || String(a.name).localeCompare(String(b.name)));
+
+    currentRanking.forEach((m, idx) => {
+        const prevIdx = previousRankingIds.indexOf(m.id);
+        rankMap.set(String(m.id), { rank: idx + 1, change: prevIdx !== -1 ? prevIdx - idx : 0 });
+    });
 }
 
 export function optimizeCourtRoundLayout(availablePool, numMatches, partners, opponents, matchMode = 'court', gameCounts) {
