@@ -71,6 +71,7 @@ let isAdmin = false;
 let rankMap = new Map();
 let sessionRankSnapshots = {};
 let sessionStartRatings = {};
+let sessionStartMmrs = {}; // [v75] 세션 시작 시점 MMR 추적용 추가
 let sessionEndRatings = {};
 let previewGroups = null; // 조편성 미리보기용 임시 데이터
 let activeGroupTab = ''; // 현재 활성 대진표 탭
@@ -181,9 +182,16 @@ async function init() {
 
     fbSubscribeToAchievements(async (list) => {
         achievements = list;
-        // [v68] DB 직접 수정 시에도 실시간으로 점수에 반영되도록 재계산 트리거 추가
+        // [v73] 안전장치: 경기 기록이 아직 하나도 로드되지 않았다면(초기 로딩 중) DB 저장을 건너뜁니다.
+        // 이는 데이터가 없는 상태에서 1500점으로 초기화되어 DB에 덮어씌워지는 것을 방지합니다.
+        if (!matchHistory || matchHistory.length === 0) {
+            recalculateAll(); 
+            updateUI();
+            return;
+        }
+
         recalculateAll(); 
-        // [v69] 재계산된 결과를 다시 DB에 저장하여 DB 콘솔에서도 동기화된 점수를 볼 수 있게 함
+        // 재계산된 결과를 DB에 동기화
         await fbSaveToCloud({ members, applicants }, 'achievementListener:sync');
         updateUI(); 
     });
@@ -533,7 +541,7 @@ function updateUI() {
     const context = {
         members, matchHistory, applicants, currentSchedule, reports, videos,
         currentSessionState, isAdmin, rankMap, sessionRankSnapshots, sessionStartRatings,
-        sessionEndRatings, previewGroups, activeGroupTab, tempSchedule, historyViewMode,
+        sessionStartMmrs, sessionEndRatings, previewGroups, activeGroupTab, tempSchedule, historyViewMode,
         achievements, // 컨텍스트에 추가
         ELO_INITIAL, GAME_COUNTS,
         getSplits,
@@ -581,6 +589,7 @@ function recalculateAll() {
         rankMap, 
         sessionRankSnapshots, 
         sessionStartRatings, 
+        sessionStartMmrs, // 추가
         sessionEndRatings,
         applicants,
         currentSchedule,

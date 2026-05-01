@@ -314,7 +314,7 @@ export async function saveCourtConfig(courtConfigs) {
     if (!window.FB_SDK) return;
     const { doc, setDoc } = window.FB_SDK;
     const settingsPath = currentClubId === 'Default' ? "system/settings" : `clubs/${currentClubId}/config/settings`;
-    
+
     try {
         await setDoc(doc(db, settingsPath), { courtConfigs }, { merge: true });
         console.log("[Firebase] Court config saved successfully.");
@@ -343,7 +343,7 @@ export async function saveToCloud(appState, caller = 'unknown') {
     ].some(arr => Array.isArray(arr) && arr.length > 0);
 
     // 2. 멤버와 히스토리가 모두 '명시적으로' 포함되어 있는데 둘 다 비어있는 경우(완전 초기화 시도)만 차단
-    const isExplicitWipeAttempt = 
+    const isExplicitWipeAttempt =
         (appState.hasOwnProperty('members') && Array.isArray(appState.members) && appState.members.length === 0) &&
         (appState.hasOwnProperty('matchHistory') && Array.isArray(appState.matchHistory) && appState.matchHistory.length === 0);
 
@@ -357,10 +357,10 @@ export async function saveToCloud(appState, caller = 'unknown') {
 
     try {
         // [v36] 전달된 필드만 업데이트하기 위해 merge: true 사용 및 유효한 데이터만 구성
-        const dataToSave = { 
-            updatedAt: window.FB_SDK.serverTimestamp() 
+        const dataToSave = {
+            updatedAt: window.FB_SDK.serverTimestamp()
         };
-        
+
         // appState에 존재하는 키만 dataToSave에 포함 (undefined 제외)
         const validKeys = ['members', 'matchHistory', 'currentSchedule', 'sessionNum', 'applicants', 'reports'];
         validKeys.forEach(key => {
@@ -481,7 +481,7 @@ export async function switchDatabase() {
         return;
     }
 
-    const confirmMsg = option === 'carryover' 
+    const confirmMsg = option === 'carryover'
         ? `'${prevDbName}'의 MMR과 전적 요약을 이관하여 신규 시즌 '${newName}'을 생성하시겠습니까?`
         : `'${newName}' 데이터베이스를 완전히 초기화된 상태로 새로 생성하시겠습니까? (MMR 포함 모든 데이터 초기화)`;
 
@@ -505,7 +505,7 @@ export async function switchDatabase() {
                     newMembers = prevMembers.map(m => {
                         const stats = {};
                         const prevSummary = m.prevSeasonStats || {};
-                        const playerMatches = prevHistory.filter(h => 
+                        const playerMatches = prevHistory.filter(h =>
                             [...h.t1_ids, ...h.t2_ids].some(id => String(id) === String(m.id))
                         );
 
@@ -592,21 +592,21 @@ export async function loadDatabase() {
     const dbSelect = document.getElementById('dbListSelect');
     if (!dbSelect) { console.error("[Firebase] dbListSelect not found"); return; }
     const selectedDb = dbSelect.value;
-    
+
     console.log(`[Firebase] Attempting to load DB: ${selectedDb}`);
-    
+
     if (!selectedDb) {
         window.alert('불러올 데이터베이스를 선택해주세요.');
         return;
     }
-    
+
     if (window.confirm(`'${selectedDb}' 데이터베이스로 전환하시겠습니까?`)) {
         try {
             const sdk = window.FB_SDK;
             const settingsPath = currentClubId === 'Default' ? "system/settings" : `clubs/${currentClubId}/config/settings`;
-            
+
             console.log(`[Firebase] Updating settingsPath: ${settingsPath} with cluster: ${selectedDb}`);
-            
+
             // 4. 전역 설정의 active_cluster 업데이트 (v49: robust global scope)
             await sdk.setDoc(sdk.doc(db, settingsPath), {
                 active_cluster: selectedDb,
@@ -615,7 +615,7 @@ export async function loadDatabase() {
 
             window.alert(`'${selectedDb}'(으)로 전환되었습니다. 페이지를 새로고침합니다.`);
             window.location.reload();
-        } catch(e) {
+        } catch (e) {
             console.error("[Firebase] DB Load Error:", e);
             window.alert("DB 불러오기 중 오류가 발생했습니다: " + e.message);
         }
@@ -684,7 +684,7 @@ export async function saveMatchScoreWithTransaction(matchId, s1, s2) {
             if (match) {
                 match.s1 = s1;
                 match.s2 = s2;
-                transaction.update(docRef, { 
+                transaction.update(docRef, {
                     currentSchedule: schedule,
                     updatedAt: serverTimestamp()
                 });
@@ -774,7 +774,7 @@ export async function updateHistoryItem(itemId, updates) {
  */
 export async function migrateHistory(historyArray) {
     if (!historyArray || historyArray.length === 0) return;
-    
+
     const { doc, collection, setDoc, serverTimestamp } = window.FB_SDK;
     const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
     const docRef = doc(db, clusterPath, currentDbName);
@@ -793,7 +793,7 @@ export async function migrateHistory(historyArray) {
         }
 
         // 2. 메인 문서에서 히스토리 비우기
-        await window.FB_SDK.updateDoc(docRef, { 
+        await window.FB_SDK.updateDoc(docRef, {
             matchHistory: [],
             updatedAt: serverTimestamp()
         });
@@ -829,7 +829,7 @@ export async function migrateReports(reportsObj) {
         }
 
         // 메인 문서에서 reports 비우기
-        await updateDoc(docRef, { 
+        await updateDoc(docRef, {
             reports: {},
             updatedAt: serverTimestamp()
         });

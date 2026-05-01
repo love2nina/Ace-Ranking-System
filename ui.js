@@ -596,13 +596,27 @@ export function renderCurrentMatches(context) {
     };
 
     const renderMatchCard = (m) => {
-        const r1 = m.t1[0].mmr || ELO_INITIAL;
-        const r2 = m.t1[1].mmr || ELO_INITIAL;
-        const r3 = m.t2[0].mmr || ELO_INITIAL;
-        const r4 = m.t2[1].mmr || ELO_INITIAL;
+        // [v76] 전역 상태가 아닌, 해당 경기 객체의 실제 회차 번호(m.sessionNum)를 기준으로 스냅샷을 찾습니다.
+        const sId = (m.sessionNum || "").toString();
+        const startMmrs = context.sessionStartMmrs?.[sId] || {};
+
+        const getMemberMmr = (p) => {
+            // 해당 세션 시작 시점의 MMR이 있으면 사용, 없으면 현재 MMR 사용
+            return startMmrs[p.id] !== undefined ? startMmrs[p.id] : (p.mmr || ELO_INITIAL);
+        };
+
+        const r1 = getMemberMmr(m.t1[0]);
+        const r2 = m.t1[1] ? getMemberMmr(m.t1[1]) : r1;
+        const r3 = getMemberMmr(m.t2[0]);
+        const r4 = m.t2[1] ? getMemberMmr(m.t2[1]) : r3;
+
         const avg1 = (r1 + r2) / 2;
         const avg2 = (r3 + r4) / 2;
-        const expected = 1 / (1 + Math.pow(10, (avg2 - avg1) / 400));
+        // 엔진이 계산해둔 기대승률(elo_at_match.expected)이 있다면 그것을 최우선으로 신뢰합니다.
+        const expected = (m.elo_at_match && m.elo_at_match.expected !== undefined) 
+            ? m.elo_at_match.expected 
+            : 1 / (1 + Math.pow(10, (avg2 - avg1) / 400));
+        
         const expPcnt = (expected * 100).toFixed(0);
 
         const div = document.createElement('div');
@@ -760,8 +774,8 @@ export function renderHistory(context) {
 
         if (historyViewMode === 'match') {
             contentHtml = sessionMatches.map(h => {
-                const s1 = h.score1 !== null ? h.score1 : 0;
-                const s2 = h.score2 !== null ? h.score2 : 0;
+                const s1 = (h.score1 !== undefined && h.score1 !== null) ? h.score1 : (h.s1 !== undefined ? h.s1 : 0);
+                const s2 = (h.score2 !== undefined && h.score2 !== null) ? h.score2 : (h.s2 !== undefined ? h.s2 : 0);
                 const chg1 = h.elo_at_match?.change1 || 0;
                 const chg2 = h.elo_at_match?.change2 || 0;
                 const exp1 = h.elo_at_match ? Math.round(h.elo_at_match.expected * 100) : 50;

@@ -86,27 +86,37 @@ export function recalculateAll(context) {
 
         // 2. 통합 타임라인 생성 (경기 + 입상 보너스)
         const events = [
-            ...matchHistory.map(h => ({ ...h, eventType: 'match' })),
-            ...achievements.map(a => ({ ...a, eventType: 'achievement' }))
-        ].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+            ...matchHistory.map(h => { h.eventType = 'match'; return h; }),
+            ...achievements.map(a => { a.eventType = 'achievement'; return a; })
+        ].sort((a, b) => {
+            // [v77] 정렬 우선순위: 
+            // 1. 세션 번호가 있는 경우 세션 번호 순 (회차 정보가 없는 보너스는 무한대(미래)로 취급)
+            const sA = a.sessionNum !== undefined ? parseInt(a.sessionNum) : 999999;
+            const sB = b.sessionNum !== undefined ? parseInt(b.sessionNum) : 999999;
+            if (sA !== sB) return sA - sB;
+            
+            // 2. 같은 세션 내에서는 타임스탬프 순
+            const tA = a.timestamp || 0;
+            const tB = b.timestamp || 0;
+            return tA - tB;
+        });
 
         // 3. 타임라인 순차 연산
         if (!context.sessionEndRatings) context.sessionEndRatings = {};
+        if (!context.sessionStartMmrs) context.sessionStartMmrs = {}; // [v75] 세션 시작 시점 MMR 저장용 추가
         let currentSessionId = null;
         let previousRankingIds = [];
 
         events.forEach(event => {
             if (event.eventType === 'achievement') {
-                // 입상 보너스: MMR에만 즉시 합산
-                const member = members.find(m => m.name.trim() === event.playerName.trim());
+                const member = members.find(m => m.name.trim() === (event.playerName || "").trim());
                 if (member) {
-                    member.mmr += (event.mmrBonus || 0);
+                    member.mmr += (Number(event.mmrBonus) || 0);
                 }
             } 
             else if (event.eventType === 'match') {
                 const sId = (event.sessionNum || '').toString();
                 
-                // 세션 경계 감지 및 스냅샷 촬영
                 if (sId !== currentSessionId) {
                     if (currentSessionId !== null) {
                         finalizeSession(currentSessionId, members, sessionRankSnapshots, context.sessionEndRatings);
@@ -115,25 +125,60 @@ export function recalculateAll(context) {
                             .map(m => m.id);
                     }
                     currentSessionId = sId;
+                    // [v75] 세션 시작 시점의 ELO 및 MMR 스냅샷 촬영
                     sessionStartRatings[sId] = members.reduce((acc, m) => { acc[m.id] = m.rating; return acc; }, {});
+                    context.sessionStartMmrs[sId] = members.reduce((acc, m) => { acc[m.id] = m.mmr; return acc; }, {});
                 }
 
-                // 경기 결과 반영
-                const team1 = (event.t1_ids || []).map(id => memberMap.get(String(id))).filter(Boolean);
-                const team2 = (event.t2_ids || []).map(id => memberMap.get(String(id))).filter(Boolean);
-                if (team1.length < 2 || team2.length < 2) return;
+                // 점수 파싱
+                const val1 = event.score1 !== undefined && event.score1 !== null ? event.score1 : event.s1;
+                const val2 = event.score2 !== undefined && event.score2 !== null ? event.score2 : event.s2;
+                if (val1 === undefined || val1 === null || val2 === undefined || val2 === null) return;
+                
+                const s1 = parseInt(val1);
+                const s2 = parseInt(val2);
+                if (isNaN(s1) || isNaN(s2)) return;
 
-                const mmr1 = (team1[0].mmr + team1[1].mmr) / 2;
-                const mmr2 = (team2[0].mmr + team2[1].mmr) / 2;
+                // [v72] 선수 매칭 로직 극대화 (ID 배열 또는 이름 배열 어디에서든 추출)
+                const getMember = (id, name) => {
+                    let m = id ? memberMap.get(String(id)) : null;
+                    if (!m && name) m = members.find(x => x.name.trim() === name.trim());
+                    return m;
+                };
+
+                // ID 배열 우선, 없으면 이름 배열 사용
+                const t1Base = (event.t1_ids && event.t1_ids.length > 0) ? event.t1_ids : (event.t1_names || []);
+                const t2Base = (event.t2_ids && event.t2_ids.length > 0) ? event.t2_ids : (event.t2_names || []);
+
+                const team1 = t1Base.map((item, i) => {
+                    const id = event.t1_ids ? event.t1_ids[i] : null;
+                    const name = event.t1_names ? event.t1_names[i] : (typeof item === 'string' ? item : null);
+                    return getMember(id, name);
+                }).filter(Boolean);
+
+                const team2 = t2Base.map((item, i) => {
+                    const id = event.t2_ids ? event.t2_ids[i] : null;
+                    const name = event.t2_names ? event.t2_names[i] : (typeof item === 'string' ? item : null);
+                    return getMember(id, name);
+                }).filter(Boolean);
+                
+                // 팀 구성이 안 되면 스킵
+                if (team1.length === 0 || team2.length === 0) return;
+
+                // [v78] 기대승률 계산 기준: 실시간 변동 MMR이 아닌, 해당 세션 시작 시점의 스냅샷 MMR을 사용합니다.
+                // 이로써 동일 회차 내 모든 경기가 동일한 시작 점수를 기준으로 승률이 계산됩니다.
+                const startMmrs = context.sessionStartMmrs[sId] || {};
+                const getStartMmr = (m) => (startMmrs[m.id] !== undefined ? startMmrs[m.id] : m.mmr);
+
+                const mmr1 = team1.reduce((sum, m) => sum + getStartMmr(m), 0) / team1.length;
+                const mmr2 = team2.reduce((sum, m) => sum + getStartMmr(m), 0) / team2.length;
                 const expected = 1 / (1 + Math.pow(10, (mmr2 - mmr1) / 400));
-                const actual = event.score1 > event.score2 ? 1 : (event.score1 < event.score2 ? 0 : 0.5);
+                const actual = s1 > s2 ? 1 : (s1 < s2 ? 0 : 0.5);
                 
                 let change = 32 * (actual - expected);
-                // 베이글(6점 차 이상) 가중치 적용
-                if (Math.abs(event.score1 - event.score2) >= 6) change *= 1.5;
+                if (Math.abs(s1 - s2) >= 6) change *= 1.5;
                 change = Math.round(change);
 
-                // [v68] 경기 기록 내 상세 정보 업데이트 (히스토리 표시용)
                 event.elo_at_match = {
                     expected: expected,
                     change1: change,
