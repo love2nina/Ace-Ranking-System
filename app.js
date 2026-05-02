@@ -338,24 +338,43 @@ window.exportHistoryToCSV = () => {
     }
     const header = ["회차", "날짜", "팀1_선수1", "팀1_선수2", "팀2_선수1", "팀2_선수2", "팀1_점수", "팀2_점수", "승리팀"];
     const rows = matchHistory.map(m => {
-        const team1 = Array.isArray(m.t1) ? m.t1 : [];
-        const team2 = Array.isArray(m.t2) ? m.t2 : [];
-        const t1p1 = team1[0]?.name || "";
-        const t1p2 = team1[1]?.name || "";
-        const t2p1 = team2[0]?.name || "";
-        const t2p2 = team2[1]?.name || "";
-        const s1 = m.s1 !== undefined ? m.s1 : "";
-        const s2 = m.s2 !== undefined ? m.s2 : "";
+        // [v89] 다양한 데이터 형식(t1_names, t1) 및 객체/문자열 배열 대응
+        const getNames = (arr) => {
+            if (!Array.isArray(arr)) return ["", ""];
+            return [
+                typeof arr[0] === 'object' ? arr[0].name : (arr[0] || ""),
+                typeof arr[1] === 'object' ? arr[1].name : (arr[1] || "")
+            ];
+        };
+        
+        const [t1p1, t1p2] = getNames(m.t1_names || m.t1);
+        const [t2p1, t2p2] = getNames(m.t2_names || m.t2);
+        
+        // 점수 필드 대응 (score1 vs s1)
+        const s1 = (m.score1 !== undefined && m.score1 !== null) ? m.score1 : (m.s1 !== undefined ? m.s1 : "");
+        const s2 = (m.score2 !== undefined && m.score2 !== null) ? m.score2 : (m.s2 !== undefined ? m.s2 : "");
+        
+        // 날짜 처리 (Firestore Timestamp vs Number vs String)
+        let dateStr = m.date || "";
+        if (!dateStr && m.timestamp) {
+            try {
+                const d = m.timestamp.toDate ? m.timestamp.toDate() : new Date(m.timestamp);
+                if (!isNaN(d.getTime())) dateStr = d.toLocaleDateString();
+            } catch(e) {}
+        }
+
         let win = "무승부";
-        if (s1 > s2) win = "팀1";
-        else if (s2 > s1) win = "팀2";
+        if (s1 !== "" && s2 !== "") {
+            if (Number(s1) > Number(s2)) win = "팀1";
+            else if (Number(s2) > Number(s1)) win = "팀2";
+        }
         
         return [
             m.sessionNum,
-            m.timestamp ? new Date(m.timestamp).toLocaleDateString() : "",
+            dateStr,
             t1p1, t1p2, t2p1, t2p2,
             s1, s2, win
-        ].map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(",");
+        ].map(cell => `"${String(cell || "").replace(/"/g, '""')}"`).join(",");
     });
     
     const csvContent = "\uFEFF" + header.join(",") + "\n" + rows.join("\n");
@@ -366,6 +385,37 @@ window.exportHistoryToCSV = () => {
     link.download = `ACE_매치기록_${new Date().toISOString().split('T')[0]}.csv`;
     link.click();
     URL.revokeObjectURL(url);
+};
+
+// [v89] 전체 시스템 백업 (JSON - 모든 데이터 포함)
+window.exportFullBackupJSON = async () => {
+    if (!isAdmin) { alert("관리자만 백업할 수 있습니다."); return; }
+    try {
+        const backupData = {
+            version: "v89",
+            backupDate: new Date().toISOString(),
+            dbName: currentDbName,
+            members: members,
+            matchHistory: matchHistory,
+            achievements: achievements,
+            videos: videos,
+            reports: reports,
+            systemSettings: systemSettings
+        };
+
+        const jsonContent = JSON.stringify(backupData, null, 2);
+        const blob = new Blob([jsonContent], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `ACE_전체백업_${currentDbName}_${new Date().toISOString().split('T')[0]}.json`;
+        link.click();
+        URL.revokeObjectURL(url);
+        alert("전체 시스템 백업 파일(.json)이 생성되었습니다.\n이 파일에는 경기 기록, 입상 보너스, 리포트 등이 모두 포함되어 있습니다.");
+    } catch (e) {
+        console.error("Backup failed:", e);
+        alert("백업 중 오류가 발생했습니다.");
+    }
 };
 window.renderVideoGallery = () => uiRenderVideoGallery({ videos, isAdmin });
 window.toggleLateJoin = (id) => {
