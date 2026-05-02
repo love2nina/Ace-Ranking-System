@@ -1,7 +1,7 @@
 // service-worker.js — ACE 랭킹 시스템 PWA 캐시 관리
 // [v62] Firebase SDK + 정적 파일 캐시로 완전 오프라인/standalone 지원
 
-const CACHE_NAME = 'ace-ranking-v62';
+const CACHE_NAME = 'ace-ranking-v86';
 const STATIC_ASSETS = [
     './',
     './index.html',

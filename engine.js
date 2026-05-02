@@ -52,10 +52,16 @@ export function getSplits(n) {
 }
 
 export function recalculateAll(context) {
-    const { members, matchHistory, rankMap, sessionRankSnapshots, sessionStartRatings, achievements = [] } = context;
+    const { 
+        members, matchHistory, rankMap, sessionRankSnapshots, 
+        sessionStartRatings, sessionStartMmrs, achievements = [] 
+    } = context;
+
+    console.log(`[Engine] Recalculate Start. History count: ${matchHistory?.length}`);
+
+    const memberMap = new Map(members.map(m => [String(m.id), m]));
+
     try {
-        // [v68] 순수 타임라인 모델: 모든 점수 변화를 시간순 사건으로 처리
-        
         // 1. 회원 목록 초기화 및 히스토리 기반 신규 멤버 자동 등재
         const memberIdSet = new Set(members.map(m => String(m.id)));
         matchHistory.forEach(h => {
@@ -82,88 +88,145 @@ export function recalculateAll(context) {
             delete m.vRank;
         });
 
-        const memberMap = new Map(members.map(m => [String(m.id), m]));
-
         // 2. 통합 타임라인 생성 (경기 + 입상 보너스)
         const events = [
             ...matchHistory.map(h => { h.eventType = 'match'; return h; }),
             ...achievements.map(a => { a.eventType = 'achievement'; return a; })
         ].sort((a, b) => {
-            // [v77] 정렬 우선순위: 
-            // 1. 세션 번호가 있는 경우 세션 번호 순 (회차 정보가 없는 보너스는 무한대(미래)로 취급)
-            const sA = a.sessionNum !== undefined ? parseInt(a.sessionNum) : 999999;
-            const sB = b.sessionNum !== undefined ? parseInt(b.sessionNum) : 999999;
+            const parseSession = (s) => {
+                if (s === undefined || s === null || s === '') return 999999;
+                const match = String(s).match(/\d+/);
+                return match ? parseInt(match[0]) : 999999;
+            };
+            const sA = parseSession(a.sessionNum);
+            const sB = parseSession(b.sessionNum);
             if (sA !== sB) return sA - sB;
-            
-            // 2. 같은 세션 내에서는 타임스탬프 순
+
+            // [v89] 동일 회차 내에서는 입상 보너스(achievement)를 경기(match)보다 먼저 처리하여
+            // 해당 회차 경기들의 기대승률 계산 시 보너스 점수가 이미 합산된 상태가 되도록 함
+            const priorityA = a.eventType === 'achievement' ? 0 : 1;
+            const priorityB = b.eventType === 'achievement' ? 0 : 1;
+            if (priorityA !== priorityB) return priorityA - priorityB;
+
             const tA = a.timestamp || 0;
             const tB = b.timestamp || 0;
             return tA - tB;
         });
 
+        console.log(`[Engine] Timeline created: ${events.length} events sorted by session/time.`);
+
         // 3. 타임라인 순차 연산
-        if (!context.sessionEndRatings) context.sessionEndRatings = {};
-        if (!context.sessionStartMmrs) context.sessionStartMmrs = {}; // [v75] 세션 시작 시점 MMR 저장용 추가
+        if (context.sessionEndRatings === undefined) context.sessionEndRatings = {};
+        if (context.sessionStartMmrs === undefined) context.sessionStartMmrs = {}; 
+
         let currentSessionId = null;
         let previousRankingIds = [];
+        let processedSessions = [];
 
-        events.forEach(event => {
-            if (event.eventType === 'achievement') {
-                const member = members.find(m => m.name.trim() === (event.playerName || "").trim());
-                if (member) {
-                    member.mmr += (Number(event.mmrBonus) || 0);
-                }
-            } 
-            else if (event.eventType === 'match') {
-                const sId = (event.sessionNum || '').toString();
-                
+        events.forEach((event, idx) => {
+            try {
+                let sId = (event.sessionNum !== undefined && event.sessionNum !== null) ? event.sessionNum.toString() : "999";
                 if (sId !== currentSessionId) {
                     if (currentSessionId !== null) {
-                        finalizeSession(currentSessionId, members, sessionRankSnapshots, context.sessionEndRatings);
-                        previousRankingIds = members.filter(m => m.matchCount > 0)
-                            .sort((a, b) => (b.rating - a.rating) || String(a.id).localeCompare(String(b.id)))
-                            .map(m => m.id);
+                        console.log(`[Engine] Finalizing Snapshot for Session ${currentSessionId}`);
+                        processedSessions.push(currentSessionId);
+                        finalizeSession(currentSessionId, members, sessionRankSnapshots, context.sessionEndRatings, processedSessions);
+                        // [v88] 직전 스냅샷 기준으로 previousRankingIds 추출 (비활성 멤버 제외된 결과 그대로 사용)
+                        const prevSnapshot = sessionRankSnapshots[currentSessionId] || {};
+                        previousRankingIds = Object.entries(prevSnapshot)
+                            .sort(([, rankA], [, rankB]) => rankA - rankB)
+                            .map(([id]) => id);
                     }
                     currentSessionId = sId;
-                    // [v75] 세션 시작 시점의 ELO 및 MMR 스냅샷 촬영
-                    sessionStartRatings[sId] = members.reduce((acc, m) => { acc[m.id] = m.rating; return acc; }, {});
-                    context.sessionStartMmrs[sId] = members.reduce((acc, m) => { acc[m.id] = m.mmr; return acc; }, {});
+                    // [v89] 회차 변경 시 즉시 캡처하지 않고, 첫 경기를 만날 때까지 대기합니다.
                 }
 
-                // 점수 파싱
-                const val1 = event.score1 !== undefined && event.score1 !== null ? event.score1 : event.s1;
-                const val2 = event.score2 !== undefined && event.score2 !== null ? event.score2 : event.s2;
-                if (val1 === undefined || val1 === null || val2 === undefined || val2 === null) return;
+                // 입상 보너스 판별
+                if (event.mmrBonus !== undefined || event.eventType === 'achievement') {
+                    const member = members.find(m => m.name.trim() === (event.playerName || "").trim());
+                    if (member) {
+                        member.mmr += (Number(event.mmrBonus) || 0);
+                    }
+                    return;
+                } 
+
+                // 경기 데이터 판별
+                if (!(event.t1_ids || event.t1_names || event.t1 || event.eventType === 'match')) {
+                    return;
+                }
+
+                // 점수 파싱 강화
+                const val1 = (event.score1 !== undefined && event.score1 !== null) ? event.score1 : 
+                             (event.s1 !== undefined && event.s1 !== null) ? event.s1 : null;
+                const val2 = (event.score2 !== undefined && event.score2 !== null) ? event.score2 : 
+                             (event.s2 !== undefined && event.s2 !== null) ? event.s2 : null;
+                
+                if (val1 === null || val2 === null) {
+                    console.warn(`[Engine] Skipping match in Session ${sId} - Missing scores.`, event);
+                    return;
+                }
+
+                // [v89] 세션의 첫 경기를 만났을 때, 직전까지 처리된 모든 보너스가 반영된 시점의 MMR을 '시작 MMR'로 캡처
+                if (context.sessionStartMmrs && !context.sessionStartMmrs[sId]) {
+                    context.sessionStartMmrs[sId] = members.reduce((acc, m) => { acc[m.id] = m.mmr; return acc; }, {});
+                }
                 
                 const s1 = parseInt(val1);
                 const s2 = parseInt(val2);
-                if (isNaN(s1) || isNaN(s2)) return;
+                if (isNaN(s1) || isNaN(s2)) {
+                    console.warn(`[Engine] Skipping match in Session ${sId} - Invalid scores: ${val1}, ${val2}`);
+                    return;
+                }
 
                 // [v72] 선수 매칭 로직 극대화 (ID 배열 또는 이름 배열 어디에서든 추출)
                 const getMember = (id, name) => {
                     let m = id ? memberMap.get(String(id)) : null;
-                    if (!m && name) m = members.find(x => x.name.trim() === name.trim());
+                    if (!m && name) {
+                        const cleanName = name.trim();
+                        m = members.find(x => x.name.trim() === cleanName);
+                    }
                     return m;
                 };
 
-                // ID 배열 우선, 없으면 이름 배열 사용
-                const t1Base = (event.t1_ids && event.t1_ids.length > 0) ? event.t1_ids : (event.t1_names || []);
-                const t2Base = (event.t2_ids && event.t2_ids.length > 0) ? event.t2_ids : (event.t2_names || []);
+                // 다양한 형태의 선수 목록 필드 수용 (t1_ids, t1_names, t1(객체배열) 등)
+                let t1Base = event.t1_ids || [];
+                if (t1Base.length === 0 && event.t1_names) t1Base = event.t1_names;
+                if (t1Base.length === 0 && event.t1) t1Base = event.t1.map(p => p.id || p.name);
+
+                let t2Base = event.t2_ids || [];
+                if (t2Base.length === 0 && event.t2_names) t2Base = event.t2_names;
+                if (t2Base.length === 0 && event.t2) t2Base = event.t2.map(p => p.id || p.name);
 
                 const team1 = t1Base.map((item, i) => {
                     const id = event.t1_ids ? event.t1_ids[i] : null;
                     const name = event.t1_names ? event.t1_names[i] : (typeof item === 'string' ? item : null);
-                    return getMember(id, name);
+                    let m = getMember(id, name);
+                    if (!m && name) {
+                        console.warn(`[Engine] Auto-creating missing member: ${name} (Session ${sId})`);
+                        m = { id: id || `tmp_${Date.now()}_${i}`, name: name, rating: ELO_INITIAL, mmr: ELO_INITIAL, matchCount: 0, wins: 0, losses: 0, draws: 0, scoreDiff: 0, participationArr: [] };
+                        members.push(m);
+                        memberMap.set(String(m.id), m);
+                    }
+                    return m;
                 }).filter(Boolean);
 
                 const team2 = t2Base.map((item, i) => {
                     const id = event.t2_ids ? event.t2_ids[i] : null;
                     const name = event.t2_names ? event.t2_names[i] : (typeof item === 'string' ? item : null);
-                    return getMember(id, name);
+                    let m = getMember(id, name);
+                    if (!m && name) {
+                        console.warn(`[Engine] Auto-creating missing member: ${name} (Session ${sId})`);
+                        m = { id: id || `tmp_${Date.now()}_${i}`, name: name, rating: ELO_INITIAL, mmr: ELO_INITIAL, matchCount: 0, wins: 0, losses: 0, draws: 0, scoreDiff: 0, participationArr: [] };
+                        members.push(m);
+                        memberMap.set(String(m.id), m);
+                    }
+                    return m;
                 }).filter(Boolean);
                 
-                // 팀 구성이 안 되면 스킵
-                if (team1.length === 0 || team2.length === 0) return;
+                if (team1.length === 0 || team2.length === 0) {
+                    console.error(`[Engine] Skipping match in Session ${sId} - Team empty: T1=${team1.length}, T2=${team2.length}`);
+                    return;
+                }
 
                 // [v78] 기대승률 계산 기준: 실시간 변동 MMR이 아닌, 해당 세션 시작 시점의 스냅샷 MMR을 사용합니다.
                 // 이로써 동일 회차 내 모든 경기가 동일한 시작 점수를 기준으로 승률이 계산됩니다.
@@ -187,12 +250,13 @@ export function recalculateAll(context) {
                     mmr2_before: mmr2
                 };
 
+
                 [...team1, ...team2].forEach(m => {
                     m.matchCount++;
                     if (!m.participationArr.includes(sId)) m.participationArr.push(sId);
                 });
 
-                if (actual === 1) {
+                if (s1 > s2) {
                     team1.forEach(m => { m.wins++; m.rating += change; m.mmr += change; m.scoreDiff += (event.score1 - event.score2); });
                     team2.forEach(m => { m.losses++; m.rating -= change; m.mmr -= change; m.scoreDiff += (event.score2 - event.score1); });
                 } else if (actual === 0) {
@@ -201,12 +265,15 @@ export function recalculateAll(context) {
                 } else {
                     [...team1, ...team2].forEach(m => m.draws++);
                 }
+            } catch (err) {
+                console.error(`[Engine] Error in loop idx ${idx} (Session ${event.sessionNum}):`, err, event);
             }
         });
 
         // 마지막 세션 종료 처리
         if (currentSessionId !== null) {
-            finalizeSession(currentSessionId, members, sessionRankSnapshots, context.sessionEndRatings);
+            processedSessions.push(currentSessionId);
+            finalizeSession(currentSessionId, members, sessionRankSnapshots, context.sessionEndRatings, processedSessions);
         }
 
         // 4. 최종 순위(rankMap) 업데이트
@@ -217,11 +284,20 @@ export function recalculateAll(context) {
     }
 }
 
-function finalizeSession(sId, members, snapshots, ratings) {
-    const sorted = [...members].sort((a, b) => (b.rating - a.rating) || String(a.id).localeCompare(String(b.id)));
+function finalizeSession(sId, members, snapshots, ratings, processedSessions = []) {
+    const recent3 = processedSessions.slice(-3);
+    const activeRanked = members.filter(m => {
+        if (m.matchCount === 0) return false;
+        const isRecentlyActive = m.participationArr?.some(s => recent3.includes(s.toString()));
+        return isRecentlyActive;
+    });
+    const sorted = [...activeRanked].sort((a, b) => (b.rating - a.rating) || (b.wins - a.wins) || String(a.name).localeCompare(String(b.name)));
+    
     snapshots[sId] = {};
-    sorted.forEach((m, idx) => { snapshots[sId][m.id] = idx + 1; });
-    ratings[sId] = members.reduce((acc, m) => { acc[m.id] = m.rating; return acc; }, {});
+    sorted.forEach((m, idx) => { 
+        snapshots[sId][String(m.id)] = idx + 1; // ID 타입을 문자열로 강제
+    });
+    ratings[sId] = members.reduce((acc, m) => { acc[String(m.id)] = m.rating; return acc; }, {});
 }
 
 function updateRankMap(members, rankMap, previousRankingIds, context) {
@@ -237,7 +313,7 @@ function updateRankMap(members, rankMap, previousRankingIds, context) {
     }).sort((a, b) => (b.rating - a.rating) || (b.wins - a.wins) || String(a.name).localeCompare(String(b.name)));
 
     currentRanking.forEach((m, idx) => {
-        const prevIdx = previousRankingIds.indexOf(m.id);
+        const prevIdx = previousRankingIds.indexOf(String(m.id));
         rankMap.set(String(m.id), { rank: idx + 1, change: prevIdx !== -1 ? prevIdx - idx : 0 });
     });
 }

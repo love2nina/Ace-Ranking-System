@@ -181,7 +181,6 @@ export function subscribeToCluster(dbName) {
             if (historyUnsubscribe) historyUnsubscribe();
             historyUnsubscribe = onSnapshot(historyQuery, (hSnapshot) => {
                 const historyList = hSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                console.log(`[Firebase] History loaded: ${historyList.length} items`);
                 if (_callbacks.onHistoryLoaded) _callbacks.onHistoryLoaded(historyList);
             }, (hError) => {
                 console.warn("[Firebase] History migration check or loading issue:", hError);
@@ -195,7 +194,6 @@ export function subscribeToCluster(dbName) {
                 rSnapshot.docs.forEach(doc => {
                     reportsData[doc.id] = doc.data().content;
                 });
-                console.log(`[Firebase] Reports loaded: ${Object.keys(reportsData).length} sessions`);
                 if (_callbacks.onReportsLoaded) _callbacks.onReportsLoaded(reportsData);
             }, (rError) => {
                 console.warn("[Firebase] Reports loading issue:", rError);
@@ -650,9 +648,21 @@ export async function saveReport(sessionNum, content) {
             content: content,
             updatedAt: serverTimestamp()
         });
-        console.log(`[Firebase] Report saved to subcollection for session ${sessionNum}`);
     } catch (e) {
         console.error("Save Report Error:", e);
+        throw e;
+    }
+}
+
+/** [v89] 입상 기록 수정 */
+export async function fbUpdateAchievement(id, data) {
+    try {
+        const { doc, updateDoc } = window.FB_SDK;
+        const path = currentClubId === 'Default' ? "achievements" : `clubs/${currentClubId}/achievements`;
+        const docRef = doc(db, path, id);
+        await updateDoc(docRef, data);
+    } catch (e) {
+        console.error("fbUpdateAchievement Error:", e);
         throw e;
     }
 }
@@ -713,9 +723,8 @@ export async function fbAddHistoryItem(item) {
         const docRef = item.id ? doc(historyCol, String(item.id)) : doc(historyCol);
         await setDoc(docRef, {
             ...item,
-            timestamp: serverTimestamp() // 순차 로딩 및 정렬용
+            timestamp: item.timestamp || serverTimestamp() // 기존 시간 보존
         });
-        console.log(`[Firebase] History item saved to subcollection: ${docRef.id}`);
     } catch (e) {
         console.error("Add History Error:", e);
         throw e;
@@ -887,4 +896,14 @@ export async function deleteAchievement(id) {
 
     const docRef = doc(db, path, id);
     await deleteDoc(docRef);
+}
+
+/** [v89] 외부 대회 입상 기록 수정 */
+export async function updateAchievement(id, data) {
+    if (!window.FB_SDK) return;
+    const { doc, updateDoc } = window.FB_SDK;
+    const path = currentClubId === 'Default' ? "achievements" : `clubs/${currentClubId}/achievements`;
+
+    const docRef = doc(db, path, id);
+    await updateDoc(docRef, data);
 }

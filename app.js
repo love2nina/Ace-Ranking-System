@@ -22,8 +22,9 @@ import {
     saveCourtConfig as fbSaveCourtConfig,
     subscribeToAchievements as fbSubscribeToAchievements,
     addAchievement as fbAddAchievement,
-    deleteAchievement as fbDeleteAchievement
-} from './firebase-api.js';
+    deleteAchievement as fbDeleteAchievement,
+    updateAchievement as fbUpdateAchievement
+} from './firebase-api.js?v=86';
 
 import {
     updateAdminUI as uiUpdateAdminUI,
@@ -48,7 +49,7 @@ import {
     renderHistoryEditModal as uiRenderHistoryEditModal,
     renderCurrentMatchEditModal as uiRenderCurrentMatchEditModal,
     renderExternalAchievements as uiRenderExternalAchievements
-} from './ui.js';
+} from './ui.js?v=86';
 
 import {
     ELO_INITIAL,
@@ -56,7 +57,7 @@ import {
     getSplits,
     recalculateAll as engineRecalculateAll,
     generateSchedule as engineGenerateSchedule
-} from './engine.js';
+} from './engine.js?v=86';
 
 // --- 전역 애플리케이션 상태 (State) ---
 let members = [];
@@ -135,14 +136,18 @@ async function init() {
         },
         onHistoryLoaded: (historyList) => {
             matchHistory = historyList;
-            recalculateAll();
+            // [v89] 히스토리 순위 스냅샷을 위해 로컬에서만 재계산을 수행합니다.
+            // (클라우드 저장 없이 순수 UI 표시용)
+            recalculateAll(); 
             updateUI();
         },
         onReportsLoaded: (reportsData) => {
             reports = reportsData;
+            
             if (document.querySelector('.tab-content#tab-caster.active')) {
                 window.renderAnalystReport();
             }
+            updateUI(); // 순위 정보가 로드되었으므로 UI 갱신
         },
         onSessionUpdate: (state) => {
             currentSessionState = state;
@@ -164,7 +169,6 @@ async function init() {
             matchHistory = [];
             applicants = [];
             currentSchedule = [];
-            recalculateAll();
             updateUI();
             const overlay = document.getElementById('loadingOverlay');
             if (overlay) overlay.style.display = 'none';
@@ -184,17 +188,20 @@ async function init() {
 
     fbSubscribeToAchievements(async (list) => {
         achievements = list;
-        // [v73] 안전장치: 경기 기록이 아직 하나도 로드되지 않았다면(초기 로딩 중) DB 저장을 건너뜁니다.
-        // 이는 데이터가 없는 상태에서 1500점으로 초기화되어 DB에 덮어씌워지는 것을 방지합니다.
-        if (!matchHistory || matchHistory.length === 0) {
-            recalculateAll(); 
-            updateUI();
-            return;
+
+        // [v89] 요청하신 특정 선수들의 기존 데이터에 회차가 없을 경우 10회차로 자동 보정 (관리자 전용 일회성 로직)
+        if (isAdmin && achievements.length > 0) {
+            const targets = ["곽정엽", "김신", "이석희"];
+            for (const ach of achievements) {
+                if (targets.includes(ach.playerName) && (ach.sessionNum === undefined || ach.sessionNum === null)) {
+                    console.log(`[Migration] Patching sessionNum 10 for ${ach.playerName}`);
+                    await fbUpdateAchievement(ach.id, { sessionNum: 10 });
+                }
+            }
         }
 
-        recalculateAll(); 
-        // 재계산된 결과를 DB에 동기화
-        await fbSaveToCloud({ members, applicants }, 'achievementListener:sync');
+        // [v89] 입상 기록 변경 시에도 순위 스냅샷을 갱신합니다.
+        recalculateAll();
         updateUI(); 
     });
 
@@ -235,10 +242,6 @@ window.switchTab = (id) => {
 };
 
 window.renderExternalAchievements = () => uiRenderExternalAchievements({ achievements, isAdmin });
-window.deleteAchievement = async (id) => {
-    if (!isAdmin) return;
-    await fbDeleteAchievement(id);
-};
 
 // 모달 및 서브탭 제어
 window.openAdminModal = () => openAdminModal();
@@ -448,7 +451,11 @@ function setupEventListeners() {
     if (restoreCsvBtn) restoreCsvBtn.onclick = () => handleRestoreCsv();
 
     const saveAchievementBtn = document.getElementById('saveAchievementBtn');
-    if (saveAchievementBtn) saveAchievementBtn.onclick = () => handleAddAchievement();
+    if (saveAchievementBtn) saveAchievementBtn.onclick = () => processAddAchievement();
+
+    // [v80] 시스템 정밀 재계산 버튼 (관리자 전용)
+    const fullRecalcBtn = document.getElementById('fullRecalcBtn');
+    if (fullRecalcBtn) fullRecalcBtn.onclick = () => runFullSystemRecalculate();
 
     // [v44] 조편성 저장 버튼 클릭 시 즉시 반영
     const savePreviewBtn = document.getElementById('savePreviewBtn');
@@ -538,8 +545,30 @@ function setupEventListeners() {
     });
 }
 
+/**
+ * [v80] 현재 점수를 기준으로 실시간 순위를 매깁니다. (전체 재계산 없이 순위만 갱신)
+ */
+function updateRanks() {
+    if (!members || members.length === 0) return;
+    // [v84] 비활성 회원 제외 필터 추가
+    const activeMembers = members.filter(m => m.isActive !== false);
+    const sorted = [...activeMembers].sort((a, b) => (b.rating || ELO_INITIAL) - (a.rating || ELO_INITIAL));
+    
+    // [v87] 실시간 리스너에 의해 rankMap이 초기화될 때 기존 상승/하락(change) 값을 보존합니다.
+    const tempMap = new Map();
+    sorted.forEach((m, idx) => {
+        const idStr = String(m.id);
+        const prevData = rankMap.get(idStr);
+        tempMap.set(idStr, { rank: idx + 1, change: prevData ? prevData.change : 0 });
+    });
+    
+    rankMap.clear();
+    tempMap.forEach((val, key) => rankMap.set(key, val));
+}
+
 // --- 코어 UI 동기화 ---
 function updateUI() {
+    updateRanks(); // 순위 갱신 추가
     const context = {
         members, matchHistory, applicants, currentSchedule, reports, videos,
         currentSessionState, isAdmin, rankMap, sessionRankSnapshots, sessionStartRatings,
@@ -585,18 +614,29 @@ function updateUI() {
 }
 
 function recalculateAll() {
+    // [v80] 데이터가 읽기 전용일 경우를 대비해 복제본을 생성합니다. 
+    // JSON 복제 대신 전개 연산자를 사용하여 Timestamp 객체(Reference)를 보존합니다.
+    const clonedHistory = matchHistory.map(h => ({ ...h, eventType: 'match' }));
+    const clonedAchievements = achievements.map(a => ({ ...a, eventType: 'achievement' }));
+
     engineRecalculateAll({ 
         members, 
-        matchHistory, 
+        matchHistory: clonedHistory, 
         rankMap, 
         sessionRankSnapshots, 
         sessionStartRatings, 
-        sessionStartMmrs, // 추가
+        sessionStartMmrs,
         sessionEndRatings,
         applicants,
         currentSchedule,
-        achievements // 추가
+        achievements: clonedAchievements
     });
+
+    // 계산된 결과(elo_at_match 등)가 포함된 복제본을 다시 원본 전역 변수에 반영합니다.
+    matchHistory.length = 0;
+    matchHistory.push(...clonedHistory);
+    achievements.length = 0;
+    achievements.push(...clonedAchievements);
 
     // [v66] 데이터 일관성 보장: members에서 계산된 최신 점수를 applicants 및 currentSchedule에도 동기화
     const memberMap = new Map(members.map(m => [String(m.id), m]));
@@ -814,8 +854,12 @@ async function commitSession() {
         await fbSaveToCloud({ members }, 'commitSession:autoMember');
     }
 
-    // 상태 초기화
-    await fbSaveToCloud({ currentSchedule: [], applicants: [] }, 'commitSession');
+    // [v80] 중요: 자동 재계산을 껐으므로, 세션 종료 시점에 명시적으로 재계산을 수행하여 
+    // 방금 추가된 경기 결과를 MMR 스냅샷(members)에 반영합니다.
+    recalculateAll();
+
+    // 상태 초기화 및 최종 점수(members) 저장
+    await fbSaveToCloud({ members, currentSchedule: [], applicants: [] }, 'commitSession:final');
     await fbSaveSessionState('idle', currentSessionState.sessionNum, "", currentSessionState.matchMode);
     alert("결과가 성공적으로 반영되었습니다.");
 }
@@ -1056,109 +1100,6 @@ async function handleSaveReport() {
 }
 
 
-/**
- * 외부 대회 입상 기록을 추가합니다.
- */
-async function handleAddAchievement() {
-    if (!isAdmin) return;
-    const nameInput = document.getElementById('achievePlayerName');
-    const compInput = document.getElementById('achieveCompName');
-    const resultInput = document.getElementById('achieveResult');
-    const mmrInput = document.getElementById('achieveMmrBonus');
-    
-    const playerName = nameInput?.value.trim();
-    const competitionName = compInput?.value.trim();
-    const result = resultInput?.value.trim();
-    const mmrBonus = parseInt(mmrInput?.value || "0");
-
-    if (!playerName || !competitionName || !result) {
-        alert("선수명, 대회명, 성적을 모두 입력해주세요.");
-        return;
-    }
-
-    try {
-        // 1. 외부 대회 기록 저장
-        await fbAddAchievement({
-            playerName,
-            competitionName,
-            result,
-            mmrBonus,
-            timestamp: Date.now()
-        });
-        
-        // 2. 해당 선수 실시간 상태 반영 (재계산 트리거로 처리)
-        // [v67] 더 이상 baseMmr을 직접 수정하지 않습니다. 
-        // 대신 recalculateAll이 타임라인에 맞춰 보너스를 합산합니다.
-        console.log(`[App] Achievement registered for ${playerName}. MMR Bonus: +${mmrBonus}`);
-        
-        // 명단에 없는 신규 선수인 경우 명단에만 추가
-        let member = members.find(m => m.name.trim() === playerName.trim());
-        if (!member) {
-            console.log(`[App] New member '${playerName}' detected via achievement. Adding to list.`);
-            const newMember = {
-                id: "M" + Date.now(),
-                name: playerName,
-                rating: ELO_INITIAL,
-                mmr: ELO_INITIAL,
-                matchCount: 0,
-                wins: 0,
-                losses: 0,
-                draws: 0,
-                scoreDiff: 0,
-                participationArr: [],
-                prevRating: ELO_INITIAL,
-                timestamp: Date.now()
-            };
-            members.push(newMember);
-            await fbSaveToCloud({ members }, 'addAchievement:newMemberAutoAdd');
-        }
-
-        // 입력 필드 초기화
-        if (nameInput) nameInput.value = '';
-        if (compInput) compInput.value = '';
-        if (resultInput) resultInput.value = '';
-        if (mmrInput) mmrInput.value = '0';
-        
-        // [v68] 전체 재계산 후 변경된 회원들의 점수(MMR 등)를 DB에 최종 동기화
-        recalculateAll();
-        await fbSaveToCloud({ members }, 'addAchievement:syncScores');
-        
-        alert("외부 대회 입상 기록이 등록되었습니다!");
-        updateUI();
-    } catch (e) {
-        console.error("Add Achievement Error:", e);
-        alert("기록 등록 중 오류가 발생했습니다: " + e.message);
-    }
-}
-
-async function handleDeleteAchievement(id) {
-    if (!isAdmin) return;
-    
-    // 1. 삭제할 기록 찾기 (MMR 회수를 위함)
-    const ach = achievements.find(a => a.id === id);
-    if (!ach) return;
-
-    try {
-        // [v67] 더 이상 baseMmr을 직접 수정하지 않으므로 삭제 시에도 기록만 지우면 됨
-        // recalculateAll이 타임라인에서 이 기록을 제외하면 MMR이 자연스럽게 회수됨
-        
-        // 3. 기록 삭제
-        await fbDeleteAchievement(id);
-        
-        // [v68] 재계산 후 DB 동기화 (보너스 회수 반영)
-        recalculateAll();
-        await fbSaveToCloud({ members }, 'deleteAchievement:syncScores');
-        
-        updateUI();
-        console.log("[App] Achievement deleted and scores synced:", id);
-    } catch (e) {
-        console.error("Delete Achievement Error:", e);
-        alert("기록 삭제 중 오류가 발생했습니다.");
-    }
-}
-
-// 전역 함수 등록
-window.deleteAchievement = handleDeleteAchievement;
 
 
 // --- 관리자/모달 로직 (생략된 기타 함수들) ---
@@ -1272,6 +1213,93 @@ window.deleteVideo = async (id) => {
     if (!confirm("영상을 삭제하시겠습니까? (이 작업은 되돌릴 수 없습니다)")) return;
     await fbDeleteVideo(id);
 };
+
+/**
+ * 🏆 [v80] 입상 보너스 추가 핸들러 (증분 업데이트 방식)
+ */
+async function processAddAchievement() {
+    const name = document.getElementById('achievePlayerName').value.trim();
+    const sessionNum = parseInt(document.getElementById('achieveSession').value);
+    const bonus = parseInt(document.getElementById('achieveMmrBonus').value);
+    const compName = document.getElementById('achieveCompName').value.trim();
+    const result = document.getElementById('achieveResult').value.trim();
+
+    if (!name || isNaN(bonus)) { alert("이름과 보너스 점수를 입력하세요."); return; }
+
+    const data = { 
+        playerName: name, 
+        sessionNum: isNaN(sessionNum) ? null : sessionNum,
+        mmrBonus: bonus, 
+        compName: compName,
+        result: result
+    };
+    
+    // 1. 현재 메모리의 회원 MMR에 즉시 반영 (Snapshot Update)
+    const member = members.find(m => m.name.trim() === name);
+    if (member) {
+        member.mmr += bonus;
+        // DB에 즉시 동기화
+        await fbSaveToCloud({ members }, 'addAchievement');
+    }
+
+    // 2. 입상 기록 저장
+    await fbAddAchievement(data);
+    
+    alert(`'${name}' 선수에게 ${bonus}점이 즉시 부여되었습니다. (회차: ${isNaN(sessionNum) ? '미지정' : sessionNum})`);
+    document.getElementById('achievePlayerName').value = '';
+    document.getElementById('achieveSession').value = '';
+    document.getElementById('achieveMmrBonus').value = '0';
+    document.getElementById('achieveCompName').value = '';
+    document.getElementById('achieveResult').value = '';
+}
+
+/**
+ * 🏆 [v80] 입상 보너스 삭제 핸들러 (증분 업데이트 방식)
+ */
+window.deleteAchievement = async (id) => {
+    if (!confirm("이 입상 기록을 삭제하시겠습니까? (부여된 점수도 회수됩니다)")) return;
+    
+    const target = achievements.find(a => a.id === id);
+    if (target) {
+        const member = members.find(m => m.name.trim() === target.playerName.trim());
+        if (member) {
+            member.mmr -= (Number(target.mmrBonus) || 0);
+            await fbSaveToCloud({ members }, 'deleteAchievement');
+        }
+    }
+    await fbDeleteAchievement(id);
+};
+
+/**
+ * 🛠️ [v80] 시스템 전체 정밀 재계산 실행
+ */
+async function runFullSystemRecalculate() {
+    if (!confirm("시스템의 모든 경기 기록을 처음부터 다시 계산하여 현재 MMR 및 히스토리 점수를 교정하시겠습니까?\n이 작업은 데이터 양에 따라 시간이 다소 소요될 수 있습니다.")) return;
+    
+    // 1. 엔진 실행 (전체 히스토리 기반 재계산 수행)
+    // [v83] 기존 순위 스냅샷 데이터를 초기화한 후 재계산을 시작합니다.
+    for (let key in sessionRankSnapshots) delete sessionRankSnapshots[key];
+    recalculateAll(); // 이 시점에 전역 sessionRankSnapshots는 10개 회차 정보를 완벽히 갖춤
+    
+    const historySnapshot = matchHistory.map(h => ({ ...h }));
+
+    // 2. 선수 총점(스냅샷) 저장 (이때 DB 업데이트로 인해 onMembersLoaded, onReportsLoaded가 트리거될 수 있음)
+    await fbSaveToCloud({ members, applicants }, 'fullSystemRecalculate:members');
+    
+    // 3. 개별 경기 기록(elo_at_match 포함) 일괄 업데이트
+    console.log(`[Maintenance] Syncing ${historySnapshot.length} history items from protected snapshot...`);
+    for (const h of historySnapshot) {
+        await fbAddHistoryItem(h);
+    }
+    
+    // [v80] 리스너가 백그라운드에서 데이터를 덮어쓰더라도, 최종 계산된 스냅샷으로 강제 갱신
+    setTimeout(() => {
+        matchHistory.length = 0;
+        matchHistory.push(...historySnapshot);
+        updateUI();
+        alert("시스템 재계산 및 히스토리 데이터 동기화가 완료되었습니다.");
+    }, 500);
+}
 
 function openCurrentMatchEditModal(id) {
     editingMatchId = id;

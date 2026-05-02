@@ -811,6 +811,11 @@ export function renderHistory(context) {
                 const t1_arr = getRankStrArr(t1Ids, t1Names, h.sessionNum);
                 const t2_arr = getRankStrArr(t2Ids, t2Names, h.sessionNum);
 
+                const mmr1_val = Math.round(h.elo_at_match?.mmr1_before || 1500);
+                const mmr2_val = Math.round(h.elo_at_match?.mmr2_before || 1500);
+                const avgMmr1 = isSwap ? mmr2_val : mmr1_val;
+                const avgMmr2 = isSwap ? mmr1_val : mmr2_val;
+
                 return `
                     <div class="history-match-item">
                         <div style="flex:2; display:flex; flex-direction:column; gap:2px;">
@@ -830,7 +835,7 @@ export function renderHistory(context) {
                             <div style="color:var(--accent-color); font-weight:bold; font-size:1.1rem">${s1_disp} : ${s2_disp}</div>
                         </div>
                         <div style="flex:1; text-align:right; display:flex; flex-direction:column; justify-content:center; align-items:flex-end;">
-                            <div style="font-size:0.65rem; color:var(--text-secondary); opacity:0.8; margin-bottom:2px;">기대승률 ${expPcnt}%</div>
+                            <div style="font-size:0.6rem; color:var(--text-secondary); opacity:0.8; margin-bottom:2px;">기대승률 ${expPcnt}% (${avgMmr1}:${avgMmr2})</div>
                             <span class="history-elo-tag" style="color:${elo_change >= 0 ? 'var(--success)' : 'var(--danger)'}">
                                 ${elo_change >= 0 ? '+' : ''}${elo_change.toFixed(1)}
                             </span>
@@ -856,15 +861,27 @@ export function renderHistory(context) {
                     });
                 });
             });
-            // [v44] 랭킹보드와 동일한 현재 순위(rankMap) 기준으로 정렬 및 표시
-            const sortedPlayers = Object.values(playerStats).sort((a, b) => {
-                const rankA = rankMap?.get(String(a.id))?.rank || 9999;
-                const rankB = rankMap?.get(String(b.id))?.rank || 9999;
-                return rankA - rankB;
-            });
+            // [v85] 정렬 기준: 해당 회차 종료 시점의 스냅샷 순위(sessionRankSnapshots)를 우선 참조
+            const sSnapshot = sessionRankSnapshots?.[sNum.toString()] || {};
+            
+            // 비활성 회원은 히스토리 목록에서 완전히 제외
+            const activePlayerIds = new Set(context.members.filter(m => m.isActive !== false).map(m => String(m.id)));
+
+            const sortedPlayers = Object.values(playerStats)
+                .filter(p => activePlayerIds.has(String(p.id)))
+                .sort((a, b) => {
+                    const rankA = sSnapshot[String(a.id)] || rankMap?.get(String(a.id))?.rank || 9999;
+                    const rankB = sSnapshot[String(b.id)] || rankMap?.get(String(b.id))?.rank || 9999;
+                    return rankA - rankB;
+                });
+
             contentHtml = sortedPlayers.map(p => {
-                const rInfo = rankMap?.get(String(p.id));
-                let rankVal = rInfo ? rInfo.rank : '-';
+                // 당시 순위 정보 가져오기
+                const pIdStr = String(p.id);
+                const histRank = sSnapshot[pIdStr];
+                const currentRank = rankMap?.get(pIdStr)?.rank;
+                const rankVal = histRank || currentRank || '-';
+
                 return `
                 <div class="player-history-item">
                     <div>
@@ -1503,12 +1520,22 @@ export function renderAnalystReport(context) {
     if (!select.value && targetSession) select.value = targetSession;
 
     const report = reports[targetSession];
-    if (!report) {
+    if (!report || typeof report !== 'string') {
+        const adminGuide = isAdmin ? `
+            <div style="margin-top:25px;">
+                <button onclick="document.getElementById('reportPostContent').focus(); document.getElementById('reportPostContent').scrollIntoView({behavior:'smooth'});" 
+                        style="padding:10px 20px; background:var(--accent-color); color:white; border:none; border-radius:8px; cursor:pointer; font-weight:500;">
+                    지금 리포트 작성하기
+                </button>
+            </div>
+        ` : '';
+
         contentArea.innerHTML = `
-            <div style="text-align:center; padding:60px 20px; color:var(--text-secondary); background:rgba(255,255,255,0.02); border-radius:12px; border:1px dashed rgba(255,255,255,0.1);">
-                <div style="font-size:3rem; margin-bottom:20px; opacity:0.5;">📊</div>
-                <h3 style="font-weight:400;">제 ${targetSession}회차 리포트가 아직 없습니다.</h3>
-                <p style="font-size:0.9rem; opacity:0.7;">관리자가 리포트를 작성 중일 수 있습니다.</p>
+            <div style="text-align:center; padding:60px 20px; color:var(--text-secondary); background:rgba(255,255,255,0.02); border-radius:16px; border:1px dashed rgba(255,255,255,0.1); margin:10px;">
+                <div style="font-size:3.5rem; margin-bottom:20px; filter: grayscale(1) opacity(0.3);">✍️</div>
+                <h3 style="font-weight:400; color:var(--text-primary); margin-bottom:10px;">제 ${targetSession}회차 리포트가 준비되지 않았습니다.</h3>
+                <p style="font-size:0.9rem; opacity:0.6; line-height:1.5;">아직 분석관의 리포트가 등록되지 않은 회차입니다.<br>잠시 후 다시 확인해 주세요.</p>
+                ${adminGuide}
             </div>
         `;
     } else {
@@ -1528,7 +1555,7 @@ export function renderAnalystReport(context) {
 }
 
 function parseMarkdown(text) {
-    if (!text) return "";
+    if (!text || typeof text !== 'string') return "";
 
     // 이스케이프 및 기본 치환
     let html = text
