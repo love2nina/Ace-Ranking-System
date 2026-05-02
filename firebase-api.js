@@ -593,28 +593,7 @@ export async function loadDatabase() {
     if (!dbSelect) { console.error("[Firebase] dbListSelect not found"); return; }
     const selectedDb = dbSelect.value;
 
-/**
- * 개별 경기 기록을 히스토리 하위 컬렉션에 추가합니다.
- * @param {Object} data - 저장할 경기 데이터
- */
-export async function addHistoryItem(data) {
-    if (!window.FB_SDK) return;
-    const { collection, addDoc, serverTimestamp } = window.FB_SDK;
-    const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
-    const historyRef = collection(db, clusterPath, currentDbName, "history");
-    
-    try {
-        // [v79] 타임스탬프 보정: 정렬을 위해 필수
-        if (!data.timestamp) data.timestamp = Date.now();
-        data.createdAt = serverTimestamp();
-        
-        await addDoc(historyRef, data);
-        console.log("[Firebase] Match history item added successfully.");
-    } catch (e) {
-        console.error("[Firebase] Add History Item Error:", e);
-        throw e;
-    }
-}
+    console.log(`[Firebase] Attempting to load DB: ${selectedDb}`);
 
     if (!selectedDb) {
         window.alert('불러올 데이터베이스를 선택해주세요.');
