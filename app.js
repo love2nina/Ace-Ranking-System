@@ -16,7 +16,9 @@ import {
     fetchDbList,
     saveReport as fbSaveReport,
     saveMatchScoreWithTransaction as fbSaveMatchScoreWithTransaction,
-    updateHistoryItem as fbUpdateHistoryItem,
+    fbAddHistoryItem,
+    fbDeleteHistoryItem,
+    fbUpdateHistoryItem,
     saveCourtConfig as fbSaveCourtConfig,
     subscribeToAchievements as fbSubscribeToAchievements,
     addAchievement as fbAddAchievement,
@@ -557,7 +559,7 @@ function updateUI() {
             updatePlayerSelect: (ctx) => uiUpdatePlayerSelect(ctx),
             renderPlayerTrend: (ctx) => uiRenderPlayerTrend(ctx),
             openEditModal: (id) => openHistoryEditModal(id),
-            deleteHistory: (id) => deleteHistory(id),
+            deleteHistory: (id) => deleteHistoryItem(id),
             updateUI: () => updateUI()
         }
     };

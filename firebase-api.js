@@ -593,7 +593,28 @@ export async function loadDatabase() {
     if (!dbSelect) { console.error("[Firebase] dbListSelect not found"); return; }
     const selectedDb = dbSelect.value;
 
-    console.log(`[Firebase] Attempting to load DB: ${selectedDb}`);
+/**
+ * 개별 경기 기록을 히스토리 하위 컬렉션에 추가합니다.
+ * @param {Object} data - 저장할 경기 데이터
+ */
+export async function addHistoryItem(data) {
+    if (!window.FB_SDK) return;
+    const { collection, addDoc, serverTimestamp } = window.FB_SDK;
+    const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
+    const historyRef = collection(db, clusterPath, currentDbName, "history");
+    
+    try {
+        // [v79] 타임스탬프 보정: 정렬을 위해 필수
+        if (!data.timestamp) data.timestamp = Date.now();
+        data.createdAt = serverTimestamp();
+        
+        await addDoc(historyRef, data);
+        console.log("[Firebase] Match history item added successfully.");
+    } catch (e) {
+        console.error("[Firebase] Add History Item Error:", e);
+        throw e;
+    }
+}
 
     if (!selectedDb) {
         window.alert('불러올 데이터베이스를 선택해주세요.');
@@ -703,7 +724,7 @@ export async function saveMatchScoreWithTransaction(matchId, s1, s2) {
  * 개별 경기를 히스토리 서브컬렉션에 추가합니다.
  * @param {Object} item - 히스토리 경기 객체
  */
-export async function addHistoryItem(item) {
+export async function fbAddHistoryItem(item) {
     const { collection, setDoc, serverTimestamp, doc } = window.FB_SDK;
     const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
     const historyCol = collection(db, clusterPath, currentDbName, "history");
@@ -722,7 +743,7 @@ export async function addHistoryItem(item) {
     }
 }
 
-export async function deleteHistoryItem(itemId) {
+export async function fbDeleteHistoryItem(itemId) {
     const { doc, deleteDoc } = window.FB_SDK;
     const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
     const docRef = doc(db, clusterPath, currentDbName, "history", String(itemId));
@@ -746,7 +767,7 @@ export async function deleteHistoryItem(itemId) {
  * @param {string} itemId - 수정할 항목의 ID
  * @param {Object} updates - 수정할 내용
  */
-export async function updateHistoryItem(itemId, updates) {
+export async function fbUpdateHistoryItem(itemId, updates) {
     const { doc, updateDoc, serverTimestamp } = window.FB_SDK;
     const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
     const docRef = doc(db, clusterPath, currentDbName, "history", String(itemId));
