@@ -385,6 +385,37 @@ window.exportHistoryToCSV = () => {
     link.download = `ACE_매치기록_${new Date().toISOString().split('T')[0]}.csv`;
     link.click();
     URL.revokeObjectURL(url);
+
+    // [v90] 개인 통계 (MMR, ELO) 다운로드 병행
+    if (members && members.length > 0) {
+        const statsHeader = ["이름", "MMR", "ELO(Rating)", "총경기", "승", "무", "패", "승률", "상태"];
+        const statsRows = members.map(m => {
+            const winRate = m.matchCount > 0 ? (m.wins / m.matchCount * 100).toFixed(1) + "%" : "0%";
+            return [
+                m.name,
+                m.mmr !== undefined ? Math.round(m.mmr) : "-",
+                m.rating !== undefined ? Math.round(m.rating) : "-",
+                m.matchCount || 0,
+                m.wins || 0,
+                m.draws || 0,
+                m.losses || 0,
+                winRate,
+                m.active !== false ? "활성" : "비활성"
+            ].map(cell => `"${String(cell || "").replace(/"/g, '""')}"`).join(",");
+        });
+        const statsCsvContent = "\uFEFF" + statsHeader.join(",") + "\n" + statsRows.join("\n");
+        const statsBlob = new Blob([statsCsvContent], { type: 'text/csv;charset=utf-8;' });
+        const statsUrl = URL.createObjectURL(statsBlob);
+        const statsLink = document.createElement("a");
+        statsLink.href = statsUrl;
+        statsLink.download = `ACE_개인통계_${new Date().toISOString().split('T')[0]}.csv`;
+        
+        // 브라우저가 다중 다운로드를 차단하지 않도록 0.5초 지연 후 실행
+        setTimeout(() => {
+            statsLink.click();
+            URL.revokeObjectURL(statsUrl);
+        }, 500);
+    }
 };
 
 // [v89] 전체 시스템 백업 (JSON - 모든 데이터 포함)
