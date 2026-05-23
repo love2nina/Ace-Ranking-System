@@ -8,7 +8,7 @@ export const GAME_COUNTS = { 4: 3, 5: 5, 6: 6, 7: 7, 8: 8 };
 
 export const MATCH_PATTERNS = {
     8: [[[0, 4], [1, 5]], [[2, 6], [3, 7]], [[0, 5], [3, 6]], [[1, 4], [2, 7]], [[2, 4], [0, 6]], [[3, 5], [1, 7]], [[0, 7], [3, 4]], [[2, 5], [1, 6]]],
-    7: [[[0, 3], [2, 6]], [[1, 4], [2, 5]], [[0, 4], [1, 3]], [[4, 5], [3, 6]], [[1, 6], [2, 3]], [[0, 5], [2, 4]], [[0, 6], [1, 5]]],
+    7: [[[2, 5], [3, 6]], [[0, 4], [1, 5]], [[2, 6], [3, 4]], [[0, 1], [3, 5]], [[1, 2], [4, 6]], [[0, 5], [2, 3]], [[0, 6], [1, 4]]],
     6: [[[0, 2], [1, 4]], [[1, 3], [4, 5]], [[0, 5], [2, 4]], [[0, 3], [1, 2]], [[0, 4], [3, 5]], [[1, 5], [2, 3]]],
     5: [[[0, 2], [1, 4]], [[0, 4], [1, 3]], [[1, 2], [3, 4]], [[0, 3], [2, 4]], [[0, 1], [2, 3]]],
     4: [[[0, 1], [2, 3]], [[0, 3], [1, 2]], [[0, 2], [1, 3]]]
@@ -914,9 +914,9 @@ function generateGroupScheduleDeterministic(group, targetGamesPerPlayer) {
         });
 
       for (const { c, i } of candidates) {
-        // 연속 휴식 체크 (5~6명 조에서만 적용: 1~2명만 쉬므로 연속 방지 가능)
-        // 7명 이상은 매 라운드 3명+ 가 쉬므로 연속 휴식이 구조적으로 불가피
-        if (group.length <= 6) {
+        // [v7.5] 연속 휴식 체크 (5~7명 조에 적용)
+        // 7명 조도 라운드 배치를 최적화하면 연속 휴식 방지 가능
+        if (group.length <= 7) {
           const playing = new Set([...c.t1, ...c.t2].map(p => p.id));
           let restFail = false;
           for (const p of group) {
@@ -946,7 +946,11 @@ function generateGroupScheduleDeterministic(group, targetGamesPerPlayer) {
     if (tryAssign(1)) {
       return result;
     }
-    // 라운드 배정 실패 시 폴백: 단순 정렬 (연속 휴식 가능하지만 대진 자체는 유효)
+    // [v7.5] 7명 조: DFS 실패 시 null 반환 → 다른 세트 시도 또는 MATCH_PATTERNS 폴백 유도
+    if (group.length >= 7) {
+      return null;
+    }
+    // 5~6명 조 폴백: 단순 정렬 (연속 휴식 가능하지만 대진 자체는 유효)
     return [...set].sort((a, b) => {
       if (a.eloDiff !== b.eloDiff) return a.eloDiff - b.eloDiff;
       return a.id.localeCompare(b.id);
@@ -957,25 +961,69 @@ function generateGroupScheduleDeterministic(group, targetGamesPerPlayer) {
   const allCombos = buildUniqCombos(group);
   const allSets   = findAllSets(allCombos);
 
-  if (allSets.length === 0) return null;
+  if (allSets.length > 0) {
+    // [v7.5] 모든 세트를 점수순으로 정렬한 뒤, 라운드 배정(연속 휴식 방지)이 성공하는 첫 번째 세트를 채택
+    const sortedSets = allSets
+      .map(s => ({ set: s, score: scoreSet(s) }))
+      .sort((a, b) => {
+        const sa = a.score, sb = b.score;
+        if (sa.totalDiff !== sb.totalDiff) return sa.totalDiff - sb.totalDiff;
+        if (sa.maxDiff   !== sb.maxDiff)   return sa.maxDiff   - sb.maxDiff;
+        if (sa.diffSeq   !== sb.diffSeq)   return sa.diffSeq.localeCompare(sb.diffSeq);
+        return sa.setKey.localeCompare(sb.setKey);
+      });
 
-  const best = allSets
-    .map(s => ({ set: s, score: scoreSet(s) }))
-    .sort((a, b) => {
-      const sa = a.score, sb = b.score;
-      if (sa.totalDiff !== sb.totalDiff) return sa.totalDiff - sb.totalDiff;
-      if (sa.maxDiff   !== sb.maxDiff)   return sa.maxDiff   - sb.maxDiff;
-      if (sa.diffSeq   !== sb.diffSeq)   return sa.diffSeq.localeCompare(sb.diffSeq);
-      return sa.setKey.localeCompare(sb.setKey);
-    })[0];
+    for (const { set } of sortedSets) {
+      const ordered = assignRounds(set);
+      if (ordered) {
+        return ordered.map(c => ({
+          t1: c.t1,
+          t2: c.t2,
+          prevLastPlayed: {}
+        }));
+      }
+    }
+  }
 
-  const ordered = assignRounds(best.set);
-  if (!ordered) return null;
-
-  // 현행 generateGroupScheduleDFS와 동일한 반환 형식 유지
-  return ordered.map(c => ({
-    t1: c.t1,
-    t2: c.t2,
+  // [v7.5] DFS 라운드 배정 실패 시 기존 추천 패턴(MATCH_PATTERNS) 폴백
+const pattern = MATCH_PATTERNS[group.length];
+if (pattern) {
+  console.log(`[Engine] DFS 라운드 배정 실패 → MATCH_PATTERNS[${group.length}] 폴백 사용`);
+  const sorted = [...group].sort((a, b) => {
+    if ((b.rating || 1500) !== (a.rating || 1500)) return (b.rating || 1500) - (a.rating || 1500);
+    return String(a.id).localeCompare(String(b.id));
+  });
+  const matches = pattern.map(([t1Idx, t2Idx]) => ({
+    t1: [sorted[t1Idx[0]], sorted[t1Idx[1]]],
+    t2: [sorted[t2Idx[0]], sorted[t2Idx[1]]],
     prevLastPlayed: {}
   }));
+  // If there are lateJoin members, move matches containing them to round 2
+  if (group.some(p => p.lateJoin)) {
+    const hasLate = m => [...m.t1, ...m.t2].some(p => p.lateJoin);
+    const lateMatches = matches.filter(hasLate);
+    const otherMatches = matches.filter(m => !hasLate(m));
+    if (otherMatches.length > 0) {
+      // place first non-late match, then all late matches, then remaining others
+      return [otherMatches[0], ...lateMatches, ...otherMatches.slice(1)];
+    }
+    return lateMatches;
+  }
+  return matches;
+}
+  const pattern = MATCH_PATTERNS[group.length];
+  if (pattern) {
+    console.log(`[Engine] DFS 라운드 배정 실패 → MATCH_PATTERNS[${group.length}] 폴백 사용`);
+    const sorted = [...group].sort((a, b) => {
+      if ((b.rating || 1500) !== (a.rating || 1500)) return (b.rating || 1500) - (a.rating || 1500);
+      return String(a.id).localeCompare(String(b.id));
+    });
+    return pattern.map(([t1Idx, t2Idx]) => ({
+      t1: [sorted[t1Idx[0]], sorted[t1Idx[1]]],
+      t2: [sorted[t2Idx[0]], sorted[t2Idx[1]]],
+      prevLastPlayed: {}
+    }));
+  }
+
+  return null;
 }
