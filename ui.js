@@ -151,13 +151,13 @@ export function renderApplicants(context) {
     }
 
     const sortedApplicants = [...applicants].sort((a, b) => {
+        const rankA = rankMap.get(String(a.id))?.rank || 9999;
+        const rankB = rankMap.get(String(b.id))?.rank || 9999;
+        if (rankA !== rankB) return rankA - rankB;
+
         const rA = a.rating || 1500;
         const rB = b.rating || 1500;
         if (rB !== rA) return rB - rA;
-
-        const mA = a.mmr || 1500;
-        const mB = b.mmr || 1500;
-        if (mB !== mA) return mB - mA;
 
         return String(a.name).localeCompare(String(b.name));
     });
@@ -487,13 +487,13 @@ export function renderSchedulePreview(context) {
     
     // 랭킹 기반 정렬 (New 선수는 하단 배치)
     const sortedApplicants = [...applicants].sort((a, b) => {
+        const rankA = rankMap.get(String(a.id))?.rank || 9999;
+        const rankB = rankMap.get(String(b.id))?.rank || 9999;
+        if (rankA !== rankB) return rankA - rankB;
+
         const rA = a.rating || 1500;
         const rB = b.rating || 1500;
         if (rB !== rA) return rB - rA;
-
-        const mA = a.mmr || 1500;
-        const mB = b.mmr || 1500;
-        if (mB !== mA) return mB - mA;
 
         return String(a.name).localeCompare(String(b.name));
     });
@@ -1112,8 +1112,9 @@ export function renderBadgeHall(context) {
         if (achievements && achievements.length > 0) {
             const groups = {};
             achievements.forEach(ach => {
-                const key = `${ach.competitionName}_${ach.result}`;
-                if (!groups[key]) groups[key] = { comp: ach.competitionName, result: ach.result, players: [], ids: [] };
+                const compName = ach.compName || ach.competitionName || '대회명 미상';
+                const key = `${compName}_${ach.result}`;
+                if (!groups[key]) groups[key] = { comp: compName, result: ach.result, players: [], ids: [] };
                 groups[key].players.push(ach.playerName);
                 groups[key].ids.push(ach.id);
             });
