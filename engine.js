@@ -1011,19 +1011,7 @@ if (pattern) {
   }
   return matches;
 }
-  const pattern = MATCH_PATTERNS[group.length];
-  if (pattern) {
-    console.log(`[Engine] DFS 라운드 배정 실패 → MATCH_PATTERNS[${group.length}] 폴백 사용`);
-    const sorted = [...group].sort((a, b) => {
-      if ((b.rating || 1500) !== (a.rating || 1500)) return (b.rating || 1500) - (a.rating || 1500);
-      return String(a.id).localeCompare(String(b.id));
-    });
-    return pattern.map(([t1Idx, t2Idx]) => ({
-      t1: [sorted[t1Idx[0]], sorted[t1Idx[1]]],
-      t2: [sorted[t2Idx[0]], sorted[t2Idx[1]]],
-      prevLastPlayed: {}
-    }));
-  }
+
 
   return null;
 }

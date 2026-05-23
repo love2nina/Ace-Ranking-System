@@ -24,7 +24,7 @@ import {
     addAchievement as fbAddAchievement,
     deleteAchievement as fbDeleteAchievement,
     updateAchievement as fbUpdateAchievement
-} from './firebase-api.js?v=86';
+} from './firebase-api.js?v=89';
 
 import {
     updateAdminUI as uiUpdateAdminUI,
@@ -49,7 +49,7 @@ import {
     renderHistoryEditModal as uiRenderHistoryEditModal,
     renderCurrentMatchEditModal as uiRenderCurrentMatchEditModal,
     renderExternalAchievements as uiRenderExternalAchievements
-} from './ui.js?v=86';
+} from './ui.js?v=89';
 
 import {
     ELO_INITIAL,
@@ -57,7 +57,7 @@ import {
     getSplits,
     recalculateAll as engineRecalculateAll,
     generateSchedule as engineGenerateSchedule
-} from './engine.js?v=86';
+} from './engine.js?v=89';
 
 // --- 전역 애플리케이션 상태 (State) ---
 let members = [];
