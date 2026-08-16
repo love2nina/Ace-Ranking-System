@@ -835,7 +835,7 @@ export function renderHistory(context) {
                             <div style="color:var(--accent-color); font-weight:bold; font-size:1.1rem">${s1_disp} : ${s2_disp}</div>
                         </div>
                         <div style="flex:1; text-align:right; display:flex; flex-direction:column; justify-content:center; align-items:flex-end;">
-                            <div style="font-size:0.6rem; color:var(--text-secondary); opacity:0.8; margin-bottom:2px;">기대승률 ${expPcnt}% (${avgMmr1}:${avgMmr2})</div>
+                            <div style="font-size:0.6rem; color:var(--text-secondary); opacity:0.8; margin-bottom:2px;">기대승률 ${expPcnt}%</div>
                             <span class="history-elo-tag" style="color:${elo_change >= 0 ? 'var(--success)' : 'var(--danger)'}">
                                 ${elo_change >= 0 ? '+' : ''}${elo_change.toFixed(1)}
                             </span>
