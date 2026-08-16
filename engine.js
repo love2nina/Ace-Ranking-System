@@ -265,17 +265,19 @@ export function recalculateAll(context) {
 
                 [...team1, ...team2].forEach(m => {
                     m.matchCount++;
-                    if (!m.participationArr.includes(sId)) m.participationArr.push(sId);
+                    if (!m.participationArr.includes(sId)) {
+                        m.participationArr.push(sId);
+                    }
                 });
 
                 if (s1 > s2) {
-                    team1.forEach(m => { m.wins++; m.rating += (change + attendanceBonus); m.mmr += change; m.scoreDiff += (s1 - s2); m.peakMmr = Math.max(m.peakMmr || m.mmr, m.mmr); });
-                    team2.forEach(m => { m.losses++; m.rating += (-change + attendanceBonus); m.mmr -= change; m.scoreDiff += (s2 - s1); m.peakMmr = Math.max(m.peakMmr || m.mmr, m.mmr); });
+                    team1.forEach(m => { m.wins++; m.rating += change; m.mmr += change; m.scoreDiff += (s1 - s2); m.peakMmr = Math.max(m.peakMmr || m.mmr, m.mmr); });
+                    team2.forEach(m => { m.losses++; m.rating -= change; m.mmr -= change; m.scoreDiff += (s2 - s1); m.peakMmr = Math.max(m.peakMmr || m.mmr, m.mmr); });
                 } else if (actual === 0) {
-                    team1.forEach(m => { m.losses++; m.rating += (change + attendanceBonus); m.mmr += change; m.scoreDiff += (s1 - s2); m.peakMmr = Math.max(m.peakMmr || m.mmr, m.mmr); });
-                    team2.forEach(m => { m.wins++; m.rating += (-change + attendanceBonus); m.mmr -= change; m.scoreDiff += (s2 - s1); m.peakMmr = Math.max(m.peakMmr || m.mmr, m.mmr); });
+                    team1.forEach(m => { m.losses++; m.rating += change; m.mmr += change; m.scoreDiff += (s1 - s2); m.peakMmr = Math.max(m.peakMmr || m.mmr, m.mmr); });
+                    team2.forEach(m => { m.wins++; m.rating -= change; m.mmr -= change; m.scoreDiff += (s2 - s1); m.peakMmr = Math.max(m.peakMmr || m.mmr, m.mmr); });
                 } else {
-                    [...team1, ...team2].forEach(m => { m.draws++; m.rating += attendanceBonus; m.peakMmr = Math.max(m.peakMmr || m.mmr, m.mmr); });
+                    [...team1, ...team2].forEach(m => { m.draws++; m.peakMmr = Math.max(m.peakMmr || m.mmr, m.mmr); });
                 }
             } catch (err) {
                 console.error(`[Engine] Error in loop idx ${idx} (Session ${event.sessionNum}):`, err, event);
@@ -297,6 +299,14 @@ export function recalculateAll(context) {
 }
 
 function finalizeSession(sId, members, snapshots, ratings, processedSessions = []) {
+    // [v90] 회차 종료 시 해당 회차 참석자 전원에게 출석 보너스 부여
+    const attendanceBonus = Math.round(K_FACTOR / 2);
+    members.forEach(m => {
+        if (m.participationArr.includes(sId)) {
+            m.rating += attendanceBonus;
+        }
+    });
+
     const activeRanked = members.filter(m => m.matchCount > 0);
     const sorted = [...activeRanked].sort((a, b) => (b.rating - a.rating) || (b.wins - a.wins) || String(a.name).localeCompare(String(b.name)));
     

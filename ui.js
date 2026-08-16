@@ -861,6 +861,20 @@ export function renderHistory(context) {
                     });
                 });
             });
+
+            // [v90] Add attendance bonus ONCE per session to eloSum
+            let sessionAttendanceBonus = 0;
+            for (let h of sessionMatches) {
+                if (h.elo_at_match && h.elo_at_match.attendanceBonus) {
+                    sessionAttendanceBonus = h.elo_at_match.attendanceBonus;
+                    break;
+                }
+            }
+            if (sessionAttendanceBonus > 0) {
+                Object.values(playerStats).forEach(p => {
+                    p.eloSum += sessionAttendanceBonus;
+                });
+            }
             // [v85] 정렬 기준: 해당 회차 종료 시점의 스냅샷 순위(sessionRankSnapshots)를 우선 참조
             const sSnapshot = sessionRankSnapshots?.[sNum.toString()] || {};
             
