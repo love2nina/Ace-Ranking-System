@@ -168,7 +168,9 @@ export function renderApplicants(context) {
             const div = document.createElement('div'); div.className = 'player-tag';
             if (a.lateJoin) div.classList.add('late-join');
             const info = rankMap.get(String(a.id));
-            const rankLabel = info ? `<span style="font-size:0.8em; color:var(--text-secondary)">(${info.rank})</span>` : `<span style="font-size:0.8em; color:var(--accent-color)">(New)</span>`;
+            const member = context.members && context.members.find(m => String(m.id) === String(a.id));
+            const hasMatches = member && member.matchCount > 0;
+            const rankLabel = (info && hasMatches) ? `<span style="font-size:0.8em; color:var(--text-secondary)">(${info.rank})</span>` : `<span style="font-size:0.8em; color:var(--accent-color)">(New)</span>`;
             
             let lateBtn = '';
             if (isAdmin) {
@@ -299,7 +301,9 @@ export function renderApplicants(context) {
             tag.className = 'player-tag' + (isAdmin ? ' draggable' : '');
             if (a.lateJoin) tag.classList.add('late-join');
             const info = rankMap.get(String(a.id));
-            const rankLabel = info ? `<span style="font-size:0.8em; color:var(--text-secondary)">(${info.rank})</span>` : `<span style="font-size:0.8em; color:var(--accent-color)">(New)</span>`;
+            const member = context.members && context.members.find(m => String(m.id) === String(a.id));
+            const hasMatches = member && member.matchCount > 0;
+            const rankLabel = (info && hasMatches) ? `<span style="font-size:0.8em; color:var(--text-secondary)">(${info.rank})</span>` : `<span style="font-size:0.8em; color:var(--accent-color)">(New)</span>`;
             
             let lateBtn = '';
             if (isAdmin) {
