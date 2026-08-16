@@ -1105,35 +1105,20 @@ export function renderBadgeHall(context) {
 
     // --- 1. 명예의 전당용 (최고의 도토리 + 외부 대회) ---
     if (hallGrid) {
-        const isSeasonMode = mode === 'season';
-        const topAcornTitle = isSeasonMode ? '이번 시즌 최고의 도토리' : '역대 최고의 도토리';
-        const topAcornDesc = isSeasonMode ? '이번 시즌 ELO 1위' : '역대 최고 MMR 기록자';
-        const peakMmrPlayers = !isSeasonMode 
-            ? (() => {
-                const maxPeak = Math.max(...members.map(m => Math.max(m.cumulativeStats?.peakMmr || 0, m.peakMmr || m.mmr || 0)), 0);
-                return maxPeak > 0 ? members.filter(m => Math.max(m.cumulativeStats?.peakMmr || 0, m.peakMmr || m.mmr || 0) === maxPeak).map(m => m.name) : badges.topAcorns;
-              })()
-            : badges.topAcorns;
-        const displayPlayers = isSeasonMode ? badges.topAcorns : peakMmrPlayers;
-
         const topAcornHTML = `
             <div class="stat-card badge-card accent" style="flex-direction: column; align-items: flex-start;">
                 <div style="display: flex; align-items: center; gap: 12px; width: 100%; margin-bottom: 12px;">
                     <div class="card-icon">💎</div>
                     <div class="card-content" style="flex: 1;">
-                        <h3>${topAcornTitle}</h3>
-                        <p class="card-desc">${topAcornDesc}</p>
+                        <h3>최고의 도토리</h3>
+                        <p class="card-desc">이번 시즌 ELO 1위</p>
                     </div>
                 </div>
                 <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 12px; flex-wrap: wrap;">
                     <div class="player-list" style="flex: 1;">
-                        ${displayPlayers.length > 0
-                            ? displayPlayers.map(name => `<span class="player-name highlight">${name}</span>`).join('')
+                        ${badges.topAcorns.length > 0
+                            ? badges.topAcorns.map(name => `<span class="player-name highlight">${name}</span>`).join('')
                             : '<span class="empty-msg">대상자 없음</span>'}
-                    </div>
-                    <div class="view-toggle-group" style="display: inline-flex; flex-shrink: 0; font-size: 0.75rem;">
-                        <button class="toggle-btn ${isSeasonMode ? 'active' : ''}" style="padding: 4px 10px; font-size: 0.75rem;" onclick="window.setBadgeViewMode && window.setBadgeViewMode('season')">🌱 이번 시즌</button>
-                        <button class="toggle-btn ${!isSeasonMode ? 'active' : ''}" style="padding: 4px 10px; font-size: 0.75rem;" onclick="window.setBadgeViewMode && window.setBadgeViewMode('cumulative')">🏆 역대 누적</button>
                     </div>
                 </div>
             </div>
