@@ -77,8 +77,13 @@ export const calculateBadges = (members, matchHistory, mode = 'season') => {
     const ironMen = maxMatches > 0 ? matchCounts.filter(m => m.count === maxMatches).map(m => m.name) : [];
 
     // --- 5. 최고의 도토리 ---
-    const maxRating = Math.max(...members.filter(m => m.matchCount > 0).map(m => m.rating || 0), 0);
-    const topAcorns = maxRating > 0 ? members.filter(m => m.matchCount > 0 && m.rating === maxRating).map(m => m.name) : [];
+    const activeForAcorn = members.filter(m => mode === 'cumulative' 
+        ? (m.matchCount > 0 || (m.cumulativeStats && m.cumulativeStats.totalMatches > 0) || (m.prevSeasonStats && Object.keys(m.prevSeasonStats).length > 0))
+        : m.matchCount > 0
+    );
+    const getScore = m => mode === 'cumulative' ? (m.mmr || 0) : (m.rating || 0);
+    const maxScore = Math.max(...activeForAcorn.map(getScore), 0);
+    const topAcorns = maxScore > 0 ? activeForAcorn.filter(m => getScore(m) === maxScore).map(m => m.name) : [];
 
     // --- 6. 국민파트너 --- (함께 뛴 파트너 수 최다)
     const partnerCounts = members.map(m => {

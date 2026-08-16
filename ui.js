@@ -1118,7 +1118,7 @@ export function renderBadgeHall(context) {
     const hallGrid = document.getElementById('badgeGridHall');
     const compareGrid = document.getElementById('badgeGridCompare');
     
-    const mode = window.badgeViewMode || 'season';
+    const mode = 'cumulative'; // 강제로 누적 모드 사용
     const badges = calculateBadges(members, matchHistory, mode);
 
     // --- 1. 명예의 전당용 (최고의 도토리 + 외부 대회) ---
@@ -1289,7 +1289,11 @@ export function updateInsightPlayerSelect(context) {
     const currentVal = select.value;
     select.innerHTML = '<option value="" disabled selected>선수 선택</option>';
 
-    const activeMembers = members.filter(m => m.matchCount > 0).sort((a, b) => a.name.localeCompare(b.name));
+    const activeMembers = members.filter(m => 
+        m.matchCount > 0 || 
+        (m.cumulativeStats && m.cumulativeStats.totalMatches > 0) || 
+        (m.prevSeasonStats && Object.keys(m.prevSeasonStats).length > 0)
+    ).sort((a, b) => a.name.localeCompare(b.name));
     activeMembers.forEach(m => {
         const opt = document.createElement('option');
         opt.value = m.id;
@@ -1307,7 +1311,7 @@ export function updateInsightPlayerSelect(context) {
 
     // 기본값 설정 (최상위 랭커)
     if (!currentVal && activeMembers.length > 0) {
-        const topPlayer = [...activeMembers].sort((a, b) => b.rating - a.rating)[0];
+        const topPlayer = [...activeMembers].sort((a, b) => (b.mmr || 0) - (a.mmr || 0))[0];
         select.value = topPlayer.id;
         renderPlayerInsights(topPlayer.id, context);
         renderPlayerTrend(context);
