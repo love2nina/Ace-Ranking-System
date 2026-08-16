@@ -23,7 +23,9 @@ import {
     subscribeToAchievements as fbSubscribeToAchievements,
     addAchievement as fbAddAchievement,
     deleteAchievement as fbDeleteAchievement,
-    updateAchievement as fbUpdateAchievement
+    updateAchievement as fbUpdateAchievement,
+    saveSessionSnapshot as fbSaveSessionSnapshot,
+    loadSessionSnapshots as fbLoadSessionSnapshots
 } from './firebase-api.js?v=89';
 
 import {
@@ -136,9 +138,9 @@ async function init() {
         },
         onHistoryLoaded: (historyList) => {
             matchHistory = historyList;
-            // [v89] 히스토리 순위 스냅샷을 위해 로컬에서만 재계산을 수행합니다.
-            // (클라우드 저장 없이 순수 UI 표시용)
-            recalculateAll(); 
+            // recalculateAll() 제거 (최적화)
+            // members는 DB에서 이미 올바른 값으로 로드됨
+            updateRanks(); // 순위 맵만 가볍게 갱신
             updateUI();
         },
         onReportsLoaded: (reportsData) => {
@@ -179,6 +181,9 @@ async function init() {
     // 비동기 초기화를 기다려서 SDK가 로드된 이후에만 subscribeToVideos가 정상 동작하게 함
     await initFirebase(callbacks);
 
+    // 순위 스냅샷 로드 (로딩 부하 최적화)
+    sessionRankSnapshots = await fbLoadSessionSnapshots();
+
     subscribeToVideos((videoList) => {
         videos = videoList;
         if (document.querySelector('.tab-content#tab-caster.active')) {
@@ -200,8 +205,8 @@ async function init() {
             }
         }
 
-        // [v89] 입상 기록 변경 시에도 순위 스냅샷을 갱신합니다.
-        recalculateAll();
+        // [v89] 입상 기록 변경 시에도 순위 스냅샷을 갱신합니다. -> 최적화로 인해 제거
+        // 입상 보너스는 등록 시 members.mmr에 즉시 반영되므로 재계산 불필요
         updateUI(); 
     });
 
@@ -242,6 +247,8 @@ window.switchTab = (id) => {
 };
 
 window.renderExternalAchievements = () => uiRenderExternalAchievements({ achievements, isAdmin });
+window.updateUI = () => updateUI();
+window.updateRanks = () => { updateRanks(); uiRenderRanking({ members, matchHistory, rankMap, currentSessionState, applicants, currentSchedule }); };
 
 // 모달 및 서브탭 제어
 window.openAdminModal = () => openAdminModal();
@@ -901,22 +908,30 @@ async function commitSession() {
     if (!isAdmin) return;
     if (!confirm("모든 경기가 완료되었습니다. 결과를 확정하고 랭킹에 반영하시겠습니까?")) return;
 
-    // 현재 스케줄의 모든 경기를 히스토리에 추가
-    for (const m of currentSchedule) {
-        const historyItem = {
-            id: Date.now() + Math.random(),
-            sessionNum: m.sessionNum,
-            date: new Date().toLocaleDateString(),
-            t1_ids: m.t1.map(p => p.id),
-            t1_names: m.t1.map(p => p.name),
-            t2_ids: m.t2.map(p => p.id),
-            t2_names: m.t2.map(p => p.name),
-            score1: m.s1,
-            score2: m.s2,
-            group: m.group, // [v26] 조별 정렬을 위해 그룹 정보 명시적 저장
-            groupRound: m.groupRound || 0 // [v30] 라운드 정보 명시적 저장
-        };
-        await fbAddHistoryItem(historyItem);
+    // 1. 경기 데이터를 matchHistory 형식으로 변환하여 임시 배열 생성
+    const newMatches = currentSchedule.map(m => ({
+        id: Date.now() + Math.random(),
+        sessionNum: m.sessionNum,
+        date: new Date().toLocaleDateString(),
+        t1_ids: m.t1.map(p => p.id),
+        t1_names: m.t1.map(p => p.name),
+        t2_ids: m.t2.map(p => p.id),
+        t2_names: m.t2.map(p => p.name),
+        score1: m.s1,
+        score2: m.s2,
+        group: m.group,
+        groupRound: m.groupRound || 0
+    }));
+
+    // 2. 임시 배열을 메모리상의 matchHistory에 추가하고 로컬 재계산 실행
+    const newCount = newMatches.length;
+    matchHistory.push(...newMatches);
+    recalculateAll(); // newMatches가 반영된 상태로 elo_at_match가 재계산됨
+
+    // 3. 재계산된 elo_at_match가 포함된 최신 내역을 DB에 저장
+    const calculatedNewMatches = matchHistory.slice(-newCount);
+    for (const h of calculatedNewMatches) {
+        await fbAddHistoryItem(h);
     }
 
     // [v41] 신규 회원 자동 등재: members에 없는 참가자를 자동 저장
@@ -935,9 +950,11 @@ async function commitSession() {
         await fbSaveToCloud({ members }, 'commitSession:autoMember');
     }
 
-    // [v80] 중요: 자동 재계산을 껐으므로, 세션 종료 시점에 명시적으로 재계산을 수행하여 
-    // 방금 추가된 경기 결과를 MMR 스냅샷(members)에 반영합니다.
-    recalculateAll();
+    // 3. sessionRankSnapshots DB 저장
+    const sessionNum = currentSchedule[0]?.sessionNum || currentSessionState.sessionNum;
+    if (sessionNum && sessionRankSnapshots[sessionNum]) {
+        await fbSaveSessionSnapshot(sessionNum, sessionRankSnapshots[sessionNum]);
+    }
 
     // 상태 초기화 및 최종 점수(members) 저장
     await fbSaveToCloud({ members, currentSchedule: [], applicants: [] }, 'commitSession:final');
@@ -1449,7 +1466,7 @@ async function saveEdit() {
                 score2: s2 
             });
             membersUpdated = true;
-            alert("히스토리 기록이 수정되었습니다. 선수 명단 및 랭킹이 재계산됩니다.");
+            alert("히스토리 기록이 수정되었습니다. 정확한 순위 반영을 위해 '시스템 재계산'을 실행해 주세요.");
 
         } else if (modalMode === 'current') {
             const match = currentSchedule.find(m => String(m.id) === String(editingMatchId));

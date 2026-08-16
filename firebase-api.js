@@ -503,17 +503,48 @@ export async function switchDatabase() {
                     newMembers = prevMembers.map(m => {
                         const stats = {};
                         const prevSummary = m.prevSeasonStats || {};
+                        const prevCumulative = m.cumulativeStats || {
+                            totalMatches: 0, totalWins: 0, totalBagels: 0, kingsSlayerCount: 0, uniquePartners: 0,
+                            consecutiveAttendance: 0, maxConsecutiveAttendance: 0, extremeMatchCount: 0, peakMmr: m.mmr || 1500
+                        };
+                        
                         const playerMatches = prevHistory.filter(h =>
                             [...h.t1_ids, ...h.t2_ids].some(id => String(id) === String(m.id))
                         );
 
+                        let wins = 0;
+                        let bagels = 0;
+                        let extremeMatches = 0;
+                        let kingsSlayerCount = 0;
+                        let peakMmr = Math.max(m.peakMmr || 0, prevCumulative.peakMmr || 0, m.mmr || 1500);
+                        let partnersSet = new Set();
+                        let activeSessions = new Set();
+
                         playerMatches.forEach(h => {
                             const isT1 = h.t1_ids.some(id => String(id) === String(m.id));
                             const opponents = isT1 ? h.t2_ids : h.t1_ids;
+                            const myTeam = isT1 ? h.t1_ids : h.t2_ids;
                             const won = (isT1 && h.score1 > h.score2) || (!isT1 && h.score2 > h.score1);
                             const lost = (isT1 && h.score1 < h.score2) || (!isT1 && h.score2 < h.score1);
                             const draw = h.score1 === h.score2;
                             const eloChange = isT1 ? (h.elo_at_match?.change1 || 0) : (h.elo_at_match?.change2 || 0);
+
+                            if (won) wins++;
+                            const myScore = isT1 ? h.score1 : h.score2;
+                            const oppScore = isT1 ? h.score2 : h.score1;
+                            if (myScore === 6 && oppScore === 0) bagels++;
+                            if ((myScore === 6 && oppScore === 0) || (myScore === 0 && oppScore === 6)) extremeMatches++;
+
+                            if (h.elo_at_match) {
+                                const myMmrBefore = isT1 ? h.elo_at_match.mmr1_before : h.elo_at_match.mmr2_before;
+                                const oppMmrBefore = isT1 ? h.elo_at_match.mmr2_before : h.elo_at_match.mmr1_before;
+                                if (won && oppMmrBefore > myMmrBefore) kingsSlayerCount++;
+                            }
+
+                            myTeam.forEach(pid => {
+                                if (String(pid) !== String(m.id)) partnersSet.add(String(pid));
+                            });
+                            if (h.sessionNum) activeSessions.add(String(h.sessionNum));
 
                             opponents.forEach(oppId => {
                                 const id = String(oppId);
@@ -524,6 +555,18 @@ export async function switchDatabase() {
                                 stats[id].eloGain += eloChange;
                             });
                         });
+
+                        const cumulativeStats = {
+                            totalMatches: prevCumulative.totalMatches + playerMatches.length,
+                            totalWins: prevCumulative.totalWins + wins,
+                            totalBagels: prevCumulative.totalBagels + bagels,
+                            kingsSlayerCount: prevCumulative.kingsSlayerCount + kingsSlayerCount,
+                            uniquePartners: prevCumulative.uniquePartners + partnersSet.size, 
+                            consecutiveAttendance: 0, 
+                            maxConsecutiveAttendance: Math.max(prevCumulative.maxConsecutiveAttendance || 0, activeSessions.size),
+                            extremeMatchCount: prevCumulative.extremeMatchCount + extremeMatches,
+                            peakMmr: peakMmr
+                        };
 
                         // [추가] 이전 시즌들의 누적 요약(만약 있다면)을 현재 계산된 통계에 병합
                         Object.entries(prevSummary).forEach(([oppId, val]) => {
@@ -542,6 +585,7 @@ export async function switchDatabase() {
                             mmr: carriedMmr,
                             baseMmr: carriedMmr, // recalculateAll용 시즌 시작 기준값
                             prevSeasonStats: stats,
+                            cumulativeStats: cumulativeStats,
                             matchCount: 0, wins: 0, losses: 0, draws: 0, scoreDiff: 0, participationArr: []
                         };
                     });
@@ -554,6 +598,10 @@ export async function switchDatabase() {
                     mmr: 1500,
                     baseMmr: 1500, // recalculateAll용 시즌 시작 기준값
                     prevSeasonStats: {},
+                    cumulativeStats: {
+                        totalMatches: 0, totalWins: 0, totalBagels: 0, kingsSlayerCount: 0, uniquePartners: 0,
+                        consecutiveAttendance: 0, maxConsecutiveAttendance: 0, extremeMatchCount: 0, peakMmr: 1500
+                    },
                     matchCount: 0, wins: 0, losses: 0, draws: 0, scoreDiff: 0, participationArr: []
                 }));
             }
@@ -906,4 +954,40 @@ export async function updateAchievement(id, data) {
 
     const docRef = doc(db, path, id);
     await updateDoc(docRef, data);
+}
+
+/**
+ * 회차 종료 시 순위 스냅샷을 Firestore에 저장
+ * @param {string|number} sessionNum - 회차 번호
+ * @param {Object} snapshot - { memberId: rank } 형태의 순위 객체
+ */
+export async function saveSessionSnapshot(sessionNum, snapshot) {
+    if (!window.FB_SDK) return;
+    const { doc, setDoc } = window.FB_SDK;
+    const clusterPath = currentClubId === 'Default' ? 'clusters' : `clubs/${currentClubId}/clusters`;
+    const snapRef = doc(db, clusterPath, currentDbName, 'snapshots', String(sessionNum));
+    try {
+        await setDoc(snapRef, { ranks: snapshot, savedAt: new Date().toISOString() });
+    } catch (e) {
+        console.error('[Firebase] saveSessionSnapshot Error:', e);
+    }
+}
+
+/**
+ * 앱 로드 시 저장된 순위 스냅샷을 일괄 로드
+ */
+export async function loadSessionSnapshots() {
+    if (!window.FB_SDK) return {};
+    const { collection, getDocs } = window.FB_SDK;
+    const clusterPath = currentClubId === 'Default' ? 'clusters' : `clubs/${currentClubId}/clusters`;
+    const snapCol = collection(db, clusterPath, currentDbName, 'snapshots');
+    try {
+        const snap = await getDocs(snapCol);
+        const result = {};
+        snap.forEach(d => { result[d.id] = d.data().ranks; });
+        return result;
+    } catch (e) {
+        console.error('[Firebase] loadSessionSnapshots Error:', e);
+        return {};
+    }
 }

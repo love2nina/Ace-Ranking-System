@@ -9,74 +9,175 @@ const PARTNER_MIN_GAMES = 3;
 /**
  * 1. 뱃지 현황 계산
  */
-export const calculateBadges = (members, matchHistory) => {
-    if (!members || !matchHistory) return [];
+export const calculateBadges = (members, matchHistory, mode = 'season') => {
+    if (!members || !matchHistory) return {
+        bagelMasters: {names: [], count: 0}, hotStreaks: [], swampGuards: {names: [], count: 0},
+        ironMen: [], topAcorns: [], nationalPartners: {names: [], count: 0},
+        nemesisMakers: {names: [], count: 0}, kingSlayers: {names: [], count: 0},
+        attendanceKings: {names: [], count: 0}
+    };
 
-    // [🥇 베이글 장인]: 6:0 승리 최다 기록자
-    const memberBagelCounts = members.map(member => {
-        const count = matchHistory.filter(match => {
-            const isParticipating = [...match.t1_ids, ...match.t2_ids].map(id => id.toString()).includes(member.id.toString());
-            if (!isParticipating) return false;
-
-            const isT1 = match.t1_ids.map(id => id.toString()).includes(member.id.toString());
-            const myScore = isT1 ? match.score1 : match.score2;
-            const opScore = isT1 ? match.score2 : match.score1;
-
-            return (myScore === 6 && opScore === 0);
-        }).length;
-        return { name: member.name, count };
+    // --- 1. 베이글 장인 ---
+    const bagelCounts = members.map(m => {
+        let count = 0;
+        if (mode === 'cumulative' && m.cumulativeStats) count += (m.cumulativeStats.totalBagels || 0);
+        else {
+            count = matchHistory.filter(match => {
+                const isParticipating = [...match.t1_ids, ...match.t2_ids].some(id => String(id) === String(m.id));
+                if (!isParticipating) return false;
+                const isT1 = match.t1_ids.some(id => String(id) === String(m.id));
+                const myScore = isT1 ? match.score1 : match.score2;
+                const opScore = isT1 ? match.score2 : match.score1;
+                return (myScore === 6 && opScore === 0);
+            }).length;
+        }
+        return { name: m.name, count };
     });
-
-    const maxBagels = Math.max(...memberBagelCounts.map(m => m.count));
+    const maxBagels = Math.max(...bagelCounts.map(m => m.count), 0);
     const bagelMasters = maxBagels > 0 
-        ? { names: memberBagelCounts.filter(m => m.count === maxBagels).map(m => m.name), count: maxBagels }
+        ? { names: bagelCounts.filter(m => m.count === maxBagels).map(m => m.name), count: maxBagels }
         : { names: [], count: 0 };
 
-    // [🔥 불타는 연승]: 현재 3연승 이상 진행 중인 선수
+    // --- 2. 불타는 연승 --- (항상 현재 진행형이므로 mode 상관없이 현재 시즌 기록 최우선, 또는 누적이면 이전 기록 무시하고 현재 연승만 측정)
     const hotStreaks = members.filter(member => {
         const myMatches = matchHistory
-            .filter(m => [...m.t1_ids, ...m.t2_ids].map(id => id.toString()).includes(member.id.toString()))
+            .filter(m => [...m.t1_ids, ...m.t2_ids].some(id => String(id) === String(member.id)))
             .sort((a, b) => b.sessionNum - a.sessionNum || b.id - a.id);
-
         let streak = 0;
         for (const match of myMatches) {
-            const isT1 = match.t1_ids.map(id => id.toString()).includes(member.id.toString());
+            const isT1 = match.t1_ids.some(id => String(id) === String(member.id));
             const isWin = isT1 ? match.score1 > match.score2 : match.score2 > match.score1;
             const isDraw = match.score1 === match.score2;
-
             if (isWin) streak++;
             else if (isDraw) continue;
             else break;
         }
         return streak >= WIN_STREAK_THRESHOLD;
-    });
+    }).map(m => m.name);
 
-    // [🛡️ 늪지대 방어군]: 5:5 무승부 기록이 가장 많은 선수
+    // --- 3. 늪지대 방어군 ---
     const drawCounts = members.map(m => {
         const count = matchHistory.filter(match => {
-            const isParticipating = [...match.t1_ids, ...match.t2_ids].map(id => id.toString()).includes(m.id.toString());
+            const isParticipating = [...match.t1_ids, ...match.t2_ids].some(id => String(id) === String(m.id));
             return isParticipating && match.score1 === 5 && match.score2 === 5;
         }).length;
+        // 누적의 경우 cumulativeStats에 5:5 횟수만 따로 없으므로 현재 시즌만 계산(근사)
         return { id: m.id, name: m.name, count };
     });
-    const maxDraws = Math.max(...drawCounts.map(d => d.count));
-    const swampGuards = maxDraws > 0 ? drawCounts.filter(d => d.count === maxDraws) : [];
+    const maxDraws = Math.max(...drawCounts.map(d => d.count), 0);
+    const swampGuards = maxDraws > 0 ? { names: drawCounts.filter(d => d.count === maxDraws).map(m => m.name), count: maxDraws } : { names: [], count: 0 };
 
-    // [🏋️‍♂️ 코트의 철인]: 최다 경기 소화
-    const maxMatches = Math.max(...members.map(m => m.matchCount || 0));
-    const ironMen = maxMatches > 0 ? members.filter(m => m.matchCount === maxMatches) : [];
+    // --- 4. 코트의 철인 ---
+    const matchCounts = members.map(m => {
+        let count = m.matchCount || 0;
+        if (mode === 'cumulative' && m.cumulativeStats) count += (m.cumulativeStats.totalMatches || 0);
+        return { name: m.name, count };
+    });
+    const maxMatches = Math.max(...matchCounts.map(m => m.count), 0);
+    const ironMen = maxMatches > 0 ? matchCounts.filter(m => m.count === maxMatches).map(m => m.name) : [];
 
-    // [💎 최고의 도토리]: 현재 전체 1위 (ELO 최고점)
-    const activeMembers = members.filter(m => m.matchCount > 0);
-    const maxRating = Math.max(...activeMembers.map(m => m.rating || 0));
-    const topAcorns = maxRating > 0 ? activeMembers.filter(m => m.rating === maxRating) : [];
+    // --- 5. 최고의 도토리 ---
+    const maxRating = Math.max(...members.filter(m => m.matchCount > 0).map(m => m.rating || 0), 0);
+    const topAcorns = maxRating > 0 ? members.filter(m => m.matchCount > 0 && m.rating === maxRating).map(m => m.name) : [];
+
+    // --- 6. 국민파트너 --- (함께 뛴 파트너 수 최다)
+    const partnerCounts = members.map(m => {
+        let count = 0;
+        if (mode === 'cumulative' && m.cumulativeStats) {
+            count = m.cumulativeStats.uniquePartners || 0;
+        } else {
+            const partners = new Set();
+            matchHistory.forEach(match => {
+                const isT1 = match.t1_ids.some(id => String(id) === String(m.id));
+                const isT2 = match.t2_ids.some(id => String(id) === String(m.id));
+                if (isT1) match.t1_ids.forEach(id => { if (String(id) !== String(m.id)) partners.add(String(id)); });
+                if (isT2) match.t2_ids.forEach(id => { if (String(id) !== String(m.id)) partners.add(String(id)); });
+            });
+            count = partners.size;
+        }
+        return { name: m.name, count };
+    });
+    const maxPartners = Math.max(...partnerCounts.map(m => m.count), 0);
+    const nationalPartners = maxPartners > 0 ? { names: partnerCounts.filter(m => m.count === maxPartners).map(m => m.name), count: maxPartners } : { names: [], count: 0 };
+
+    // --- 7. 천적 제조기 ---
+    const nemesisMakerCounts = members.map(m => {
+        let makerCount = 0;
+        const oppStats = {};
+        if (mode === 'cumulative' && m.prevSeasonStats) {
+            Object.entries(m.prevSeasonStats).forEach(([oppId, stats]) => {
+                if (!oppStats[oppId]) oppStats[oppId] = { wins: 0, games: 0 };
+                oppStats[oppId].wins += stats.wins || 0;
+                oppStats[oppId].games += (stats.wins || 0) + (stats.losses || 0) + (stats.draws || 0);
+            });
+        }
+        matchHistory.forEach(match => {
+            const isT1 = match.t1_ids.some(id => String(id) === String(m.id));
+            const isT2 = match.t2_ids.some(id => String(id) === String(m.id));
+            if (!isT1 && !isT2) return;
+            const won = (isT1 && match.score1 > match.score2) || (isT2 && match.score2 > match.score1);
+            const opps = isT1 ? match.t2_ids : match.t1_ids;
+            opps.forEach(oppId => {
+                const idStr = String(oppId);
+                if (!oppStats[idStr]) oppStats[idStr] = { wins: 0, games: 0 };
+                if (won) oppStats[idStr].wins++;
+                oppStats[idStr].games++;
+            });
+        });
+        
+        Object.values(oppStats).forEach(st => {
+            if (st.games >= 3 && (st.wins / st.games) >= 0.8) makerCount++; // 80% 이상 승률을 기준으로 완화
+        });
+        return { name: m.name, count: makerCount };
+    });
+    const maxNemesisMakers = Math.max(...nemesisMakerCounts.map(m => m.count), 0);
+    const nemesisMakers = maxNemesisMakers > 0 ? { names: nemesisMakerCounts.filter(m => m.count === maxNemesisMakers).map(m => m.name), count: maxNemesisMakers } : { names: [], count: 0 };
+
+    // --- 8. 킹슬레이어 ---
+    const slayerCounts = members.map(m => {
+        let count = 0;
+        if (mode === 'cumulative' && m.cumulativeStats) count += (m.cumulativeStats.kingsSlayerCount || 0);
+        else {
+            matchHistory.forEach(match => {
+                const isT1 = match.t1_ids.some(id => String(id) === String(m.id));
+                const isT2 = match.t2_ids.some(id => String(id) === String(m.id));
+                if (!isT1 && !isT2) return;
+                const won = (isT1 && match.score1 > match.score2) || (isT2 && match.score2 > match.score1);
+                if (won && match.elo_at_match) {
+                    const myMmr = isT1 ? match.elo_at_match.mmr1_before : match.elo_at_match.mmr2_before;
+                    const oppMmr = isT1 ? match.elo_at_match.mmr2_before : match.elo_at_match.mmr1_before;
+                    if (oppMmr > myMmr) count++;
+                }
+            });
+        }
+        return { name: m.name, count };
+    });
+    const maxSlayers = Math.max(...slayerCounts.map(m => m.count), 0);
+    const kingSlayers = maxSlayers > 0 ? { names: slayerCounts.filter(m => m.count === maxSlayers).map(m => m.name), count: maxSlayers } : { names: [], count: 0 };
+
+    // --- 9. 출석왕 ---
+    const attCounts = members.map(m => {
+        let count = 0;
+        if (mode === 'cumulative' && m.cumulativeStats) {
+            count = Math.max(m.cumulativeStats.maxConsecutiveAttendance || 0, m.participationArr ? m.participationArr.length : 0);
+        } else {
+            count = m.participationArr ? m.participationArr.length : 0; // 이번 시즌 출석 횟수
+        }
+        return { name: m.name, count };
+    });
+    const maxAtt = Math.max(...attCounts.map(m => m.count), 0);
+    const attendanceKings = maxAtt > 0 ? { names: attCounts.filter(m => m.count === maxAtt).map(m => m.name), count: maxAtt } : { names: [], count: 0 };
 
     return {
         bagelMasters,
-        hotStreaks: hotStreaks.map(m => m.name),
-        swampGuards: maxDraws > 0 ? { names: swampGuards.map(m => m.name), count: maxDraws } : { names: [], count: 0 },
-        ironMen: ironMen.map(m => m.name),
-        topAcorns: topAcorns.map(m => m.name)
+        hotStreaks,
+        swampGuards,
+        ironMen,
+        topAcorns,
+        nationalPartners,
+        nemesisMakers,
+        kingSlayers,
+        attendanceKings
     };
 };
 

@@ -80,9 +80,14 @@ export function recalculateAll(context) {
         });
 
         // 모든 멤버 상태 리셋
+        // [v91] rating(이번 시즌 순위 지표)은 1500으로 초기화
+        //       mmr(역대 누적 실력 지표)은 이전 시즌 이관값(baseMmr) 유지 - 없으면 1500
+        //       peakMmr(역대 최고점)은 이전 시즌 최고점과 이관 MMR 중 높은 값 기준으로 시작
         rankMap.clear();
         members.forEach(m => {
-            m.rating = ELO_INITIAL; m.mmr = ELO_INITIAL;
+            m.rating = ELO_INITIAL;
+            m.mmr = (m.baseMmr !== undefined) ? m.baseMmr : ELO_INITIAL;
+            m.peakMmr = Math.max(m.cumulativeStats?.peakMmr || 0, m.baseMmr || ELO_INITIAL);
             m.matchCount = 0; m.wins = 0; m.losses = 0; m.draws = 0; m.scoreDiff = 0;
             m.participationArr = []; m.prevRating = ELO_INITIAL;
             delete m.vRank;
@@ -116,8 +121,11 @@ export function recalculateAll(context) {
         console.log(`[Engine] Timeline created: ${events.length} events sorted by session/time.`);
 
         // 3. 타임라인 순차 연산
-        if (context.sessionEndRatings === undefined) context.sessionEndRatings = {};
-        if (context.sessionStartMmrs === undefined) context.sessionStartMmrs = {}; 
+        // [v91] 매 재계산 시 세션별 캐시를 완전 초기화 (stale 값 방지)
+        if (!context.sessionEndRatings) context.sessionEndRatings = {};
+        else Object.keys(context.sessionEndRatings).forEach(k => delete context.sessionEndRatings[k]);
+        if (!context.sessionStartMmrs) context.sessionStartMmrs = {};
+        else Object.keys(context.sessionStartMmrs).forEach(k => delete context.sessionStartMmrs[k]);
 
         let currentSessionId = null;
         let previousRankingIds = [];
@@ -146,6 +154,7 @@ export function recalculateAll(context) {
                     const member = members.find(m => m.name.trim() === (event.playerName || "").trim());
                     if (member) {
                         member.mmr += (Number(event.mmrBonus) || 0);
+                        member.peakMmr = Math.max(member.peakMmr || member.mmr, member.mmr);
                     }
                     return;
                 } 
@@ -238,18 +247,21 @@ export function recalculateAll(context) {
                 const expected = 1 / (1 + Math.pow(10, (mmr2 - mmr1) / 400));
                 const actual = s1 > s2 ? 1 : (s1 < s2 ? 0 : 0.5);
                 
-                let change = 32 * (actual - expected);
+                let change = K_FACTOR * (actual - expected);
                 if (Math.abs(s1 - s2) >= 6) change *= 1.5;
                 change = Math.round(change);
+
+                // [v90] 출석 보너스: rating에만 부여 (순수 실력 지표인 mmr에는 미반영)
+                const attendanceBonus = Math.round(K_FACTOR / 2);
 
                 event.elo_at_match = {
                     expected: expected,
                     change1: change,
                     change2: -change,
+                    attendanceBonus: attendanceBonus, // 추가
                     mmr1_before: mmr1,
                     mmr2_before: mmr2
                 };
-
 
                 [...team1, ...team2].forEach(m => {
                     m.matchCount++;
@@ -257,13 +269,13 @@ export function recalculateAll(context) {
                 });
 
                 if (s1 > s2) {
-                    team1.forEach(m => { m.wins++; m.rating += change; m.mmr += change; m.scoreDiff += (event.score1 - event.score2); });
-                    team2.forEach(m => { m.losses++; m.rating -= change; m.mmr -= change; m.scoreDiff += (event.score2 - event.score1); });
+                    team1.forEach(m => { m.wins++; m.rating += (change + attendanceBonus); m.mmr += change; m.scoreDiff += (s1 - s2); m.peakMmr = Math.max(m.peakMmr || m.mmr, m.mmr); });
+                    team2.forEach(m => { m.losses++; m.rating += (-change + attendanceBonus); m.mmr -= change; m.scoreDiff += (s2 - s1); m.peakMmr = Math.max(m.peakMmr || m.mmr, m.mmr); });
                 } else if (actual === 0) {
-                    team1.forEach(m => { m.losses++; m.rating += change; m.mmr += change; m.scoreDiff += (event.score1 - event.score2); });
-                    team2.forEach(m => { m.wins++; m.rating -= change; m.mmr -= change; m.scoreDiff += (event.score2 - event.score1); });
+                    team1.forEach(m => { m.losses++; m.rating += (change + attendanceBonus); m.mmr += change; m.scoreDiff += (s1 - s2); m.peakMmr = Math.max(m.peakMmr || m.mmr, m.mmr); });
+                    team2.forEach(m => { m.wins++; m.rating += (-change + attendanceBonus); m.mmr -= change; m.scoreDiff += (s2 - s1); m.peakMmr = Math.max(m.peakMmr || m.mmr, m.mmr); });
                 } else {
-                    [...team1, ...team2].forEach(m => m.draws++);
+                    [...team1, ...team2].forEach(m => { m.draws++; m.rating += attendanceBonus; m.peakMmr = Math.max(m.peakMmr || m.mmr, m.mmr); });
                 }
             } catch (err) {
                 console.error(`[Engine] Error in loop idx ${idx} (Session ${event.sessionNum}):`, err, event);
@@ -285,12 +297,7 @@ export function recalculateAll(context) {
 }
 
 function finalizeSession(sId, members, snapshots, ratings, processedSessions = []) {
-    const recent3 = processedSessions.slice(-3);
-    const activeRanked = members.filter(m => {
-        if (m.matchCount === 0) return false;
-        const isRecentlyActive = m.participationArr?.some(s => recent3.includes(s.toString()));
-        return isRecentlyActive;
-    });
+    const activeRanked = members.filter(m => m.matchCount > 0);
     const sorted = [...activeRanked].sort((a, b) => (b.rating - a.rating) || (b.wins - a.wins) || String(a.name).localeCompare(String(b.name)));
     
     snapshots[sId] = {};
@@ -302,14 +309,13 @@ function finalizeSession(sId, members, snapshots, ratings, processedSessions = [
 
 function updateRankMap(members, rankMap, previousRankingIds, context) {
     const sessionIds = [...new Set(context.matchHistory.map(h => (h.sessionNum || '').toString()))].filter(Boolean).sort((a, b) => parseInt(a) - parseInt(b));
-    const recent3 = [...sessionIds].reverse().slice(0, 3);
-
     const currentRanking = members.filter(m => {
-        if (m.matchCount === 0) return false;
-        const isRecentlyActive = m.participationArr?.some(s => recent3.includes(s.toString()));
+        if (m.matchCount > 0) return true;
+        
+        // 아직 경기를 안 뛰었더라도 현재 신청자거나 대진표에 포함된 경우 표시
         const isCurrentParticipant = (context.applicants || []).some(a => String(a.id) === String(m.id)) ||
             (context.currentSchedule || []).some(match => [...(match.t1_ids || []), ...(match.t2_ids || [])].some(id => String(id) === String(m.id)));
-        return isRecentlyActive || isCurrentParticipant;
+        return isCurrentParticipant;
     }).sort((a, b) => (b.rating - a.rating) || (b.wins - a.wins) || String(a.name).localeCompare(String(b.name)));
 
     currentRanking.forEach((m, idx) => {

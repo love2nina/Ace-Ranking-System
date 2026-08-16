@@ -952,21 +952,27 @@ export function renderRanking(context) {
     // 최근 3회차 세션 ID 추출 (내림차순 정렬: [3, 2, 1...])
     const recent3 = [...allSessionsSorted].reverse().slice(0, 3);
 
+    const show50Plus = document.getElementById('attendanceFilterToggle')?.checked;
+    
     // 활동성 기반 필터링: 최근 3회차 참여 기록이 있거나, 현재 회차에 참여 중인 회원만 선별
     const filteredMembers = members.filter(m => {
         // [수정] 경기를 한 번이라도 치른 선수만 노출 (사용자 요청)
         if (m.matchCount === 0) return false;
 
-        // 최근 3회차 참여 여부 확인
-        const isRecentlyActive = m.participationArr?.some(s => recent3.includes(s.toString()));
+        if (show50Plus) {
+            const totalSessions = allSessionsSorted.length || 1;
+            const attRate = ((m.participationArr?.length || 0) / totalSessions) * 100;
+            if (attRate < 50) return false;
+        }
 
         // 복귀 규칙: 현재 참여 중인 경우 (dormant였더라도) 활성으로 간주
         const isCurrentParticipant = (applicants && applicants.some(a => String(a.id) === String(m.id))) ||
             (currentSchedule && currentSchedule.some(match =>
                 [...match.t1, ...match.t2].some(p => String(p.id) === String(m.id))
             ));
-
-        return isRecentlyActive || isCurrentParticipant;
+            
+        // [수정] 시즌에 한 번이라도 참여했다면 랭킹 보드에 다 노출하되 3연속 불참 필터는 제거 (사용자 요청)
+        return true; 
     });
 
     const sorted = filteredMembers.sort((a, b) => {
@@ -1009,7 +1015,7 @@ export function renderRanking(context) {
         tbody.appendChild(tr);
     });
 
-    // 랭킹 보드 하단 안내 문구 추가
+    // 랭킹 보드 하단 안내 문구 추가 (3연속 불참자 필터 제거 안내로 수정)
     let footerNote = document.getElementById('rankingFooterNote');
     if (!footerNote) {
         footerNote = document.createElement('div');
@@ -1021,9 +1027,14 @@ export function renderRanking(context) {
         }
     }
     if (footerNote) {
-        footerNote.innerText = "※ 최근 3회차 연속 불참자는 순위에서 제외됩니다.";
+        footerNote.innerText = "※ 시즌에 한 번이라도 랭킹전에 참석한 모든 선수가 표시됩니다.";
     }
 }
+
+window.setBadgeViewMode = function(mode) {
+    window.badgeViewMode = mode;
+    if (window.updateUI) window.updateUI();
+};
 
 export function switchTab(id, context) {
     const { actions: { renderEloChart, renderPlayerTrend, renderAnalystReport, renderVideoGallery } } = context;
@@ -1089,20 +1100,40 @@ export function renderBadgeHall(context) {
     const hallGrid = document.getElementById('badgeGridHall');
     const compareGrid = document.getElementById('badgeGridCompare');
     
-    const badges = calculateBadges(members, matchHistory);
+    const mode = window.badgeViewMode || 'season';
+    const badges = calculateBadges(members, matchHistory, mode);
 
     // --- 1. 명예의 전당용 (최고의 도토리 + 외부 대회) ---
     if (hallGrid) {
+        const isSeasonMode = mode === 'season';
+        const topAcornTitle = isSeasonMode ? '이번 시즌 최고의 도토리' : '역대 최고의 도토리';
+        const topAcornDesc = isSeasonMode ? '이번 시즌 ELO 1위' : '역대 최고 MMR 기록자';
+        const peakMmrPlayers = !isSeasonMode 
+            ? (() => {
+                const maxPeak = Math.max(...members.map(m => Math.max(m.cumulativeStats?.peakMmr || 0, m.peakMmr || m.mmr || 0)), 0);
+                return maxPeak > 0 ? members.filter(m => Math.max(m.cumulativeStats?.peakMmr || 0, m.peakMmr || m.mmr || 0) === maxPeak).map(m => m.name) : badges.topAcorns;
+              })()
+            : badges.topAcorns;
+        const displayPlayers = isSeasonMode ? badges.topAcorns : peakMmrPlayers;
+
         const topAcornHTML = `
-            <div class="stat-card badge-card accent">
-                <div class="card-icon">💎</div>
-                <div class="card-content">
-                    <h3>ACE 최고의 도토리</h3>
-                    <p class="card-desc">현재 랭킹 1위 (ELO 최고)</p>
-                    <div class="player-list">
-                        ${badges.topAcorns.length > 0
-                            ? badges.topAcorns.map(name => `<span class="player-name highlight">${name}</span>`).join('')
+            <div class="stat-card badge-card accent" style="flex-direction: column; align-items: flex-start;">
+                <div style="display: flex; align-items: center; gap: 12px; width: 100%; margin-bottom: 12px;">
+                    <div class="card-icon">💎</div>
+                    <div class="card-content" style="flex: 1;">
+                        <h3>${topAcornTitle}</h3>
+                        <p class="card-desc">${topAcornDesc}</p>
+                    </div>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 12px; flex-wrap: wrap;">
+                    <div class="player-list" style="flex: 1;">
+                        ${displayPlayers.length > 0
+                            ? displayPlayers.map(name => `<span class="player-name highlight">${name}</span>`).join('')
                             : '<span class="empty-msg">대상자 없음</span>'}
+                    </div>
+                    <div class="view-toggle-group" style="display: inline-flex; flex-shrink: 0; font-size: 0.75rem;">
+                        <button class="toggle-btn ${isSeasonMode ? 'active' : ''}" style="padding: 4px 10px; font-size: 0.75rem;" onclick="window.setBadgeViewMode && window.setBadgeViewMode('season')">🌱 이번 시즌</button>
+                        <button class="toggle-btn ${!isSeasonMode ? 'active' : ''}" style="padding: 4px 10px; font-size: 0.75rem;" onclick="window.setBadgeViewMode && window.setBadgeViewMode('cumulative')">🏆 역대 누적</button>
                     </div>
                 </div>
             </div>
@@ -1187,6 +1218,54 @@ export function renderBadgeHall(context) {
                     <div class="player-list">
                         ${badges.ironMen.length > 0
                             ? badges.ironMen.map(name => `<span class="player-name">${name}</span>`).join('')
+                            : '<span class="empty-msg">대상자 없음</span>'}
+                    </div>
+                </div>
+            </div>
+            <div class="stat-card badge-card">
+                <div class="card-icon">🤝</div>
+                <div class="card-content">
+                    <h3>국민 파트너</h3>
+                    <p class="card-desc">가장 많은 사람과 한 팀을 이룬 자</p>
+                    <div class="player-list">
+                        ${badges.nationalPartners.names.length > 0
+                            ? badges.nationalPartners.names.map(name => `<span class="player-name">${name}</span>`).join('') + ` <small class="count-tag">${badges.nationalPartners.count}명</small>`
+                            : '<span class="empty-msg">대상자 없음</span>'}
+                    </div>
+                </div>
+            </div>
+            <div class="stat-card badge-card">
+                <div class="card-icon">🏹</div>
+                <div class="card-content">
+                    <h3>천적 제조기</h3>
+                    <p class="card-desc">특정 상대 승률 80% 이상 최다</p>
+                    <div class="player-list">
+                        ${badges.nemesisMakers.names.length > 0
+                            ? badges.nemesisMakers.names.map(name => `<span class="player-name">${name}</span>`).join('') + ` <small class="count-tag">${badges.nemesisMakers.count}명</small>`
+                            : '<span class="empty-msg">대상자 없음</span>'}
+                    </div>
+                </div>
+            </div>
+            <div class="stat-card badge-card">
+                <div class="card-icon">⚔️</div>
+                <div class="card-content">
+                    <h3>킹 슬레이어</h3>
+                    <p class="card-desc">MMR 높은 상대를 가장 많이 꺾은 자</p>
+                    <div class="player-list">
+                        ${badges.kingSlayers.names.length > 0
+                            ? badges.kingSlayers.names.map(name => `<span class="player-name">${name}</span>`).join('') + ` <small class="count-tag">${badges.kingSlayers.count}회</small>`
+                            : '<span class="empty-msg">대상자 없음</span>'}
+                    </div>
+                </div>
+            </div>
+            <div class="stat-card badge-card">
+                <div class="card-icon">📅</div>
+                <div class="card-content">
+                    <h3>출석왕</h3>
+                    <p class="card-desc">코트의 개근상 (최다 참석)</p>
+                    <div class="player-list">
+                        ${badges.attendanceKings.names.length > 0
+                            ? badges.attendanceKings.names.map(name => `<span class="player-name">${name}</span>`).join('') + ` <small class="count-tag">${badges.attendanceKings.count}회</small>`
                             : '<span class="empty-msg">대상자 없음</span>'}
                     </div>
                 </div>
