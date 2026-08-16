@@ -1129,7 +1129,7 @@ export function renderBadgeHall(context) {
                     <div class="card-icon">💎</div>
                     <div class="card-content" style="flex: 1;">
                         <h3>최고의 도토리</h3>
-                        <p class="card-desc">이번 시즌 ELO 1위</p>
+                        <p class="card-desc">누적 ELO 1위</p>
                     </div>
                 </div>
                 <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 12px; flex-wrap: wrap;">
