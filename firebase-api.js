@@ -505,7 +505,7 @@ export async function switchDatabase() {
                         const prevSummary = m.prevSeasonStats || {};
                         const prevCumulative = m.cumulativeStats || {
                             totalMatches: 0, totalWins: 0, totalBagels: 0, kingsSlayerCount: 0, uniquePartners: 0,
-                            consecutiveAttendance: 0, maxConsecutiveAttendance: 0, extremeMatchCount: 0, peakMmr: m.mmr || 1500
+                            consecutiveAttendance: 0, maxConsecutiveAttendance: 0, extremeMatchCount: 0, peakMmr: m.mmr || 1500, peakMmrDate: null
                         };
                         
                         const playerMatches = prevHistory.filter(h =>
@@ -517,6 +517,8 @@ export async function switchDatabase() {
                         let extremeMatches = 0;
                         let kingsSlayerCount = 0;
                         let peakMmr = Math.max(m.peakMmr || 0, prevCumulative.peakMmr || 0, m.mmr || 1500);
+                        // peakMmrDate: 현재 시즌에서 경신되었으면 현재 값 사용, 아니면 이전 누적값 유지
+                        let peakMmrDate = (m.peakMmr >= peakMmr && m.peakMmrDate) ? m.peakMmrDate : (prevCumulative.peakMmrDate || null);
                         let partnersSet = new Set();
                         let activeSessions = new Set();
 
@@ -565,7 +567,8 @@ export async function switchDatabase() {
                             consecutiveAttendance: 0, 
                             maxConsecutiveAttendance: Math.max(prevCumulative.maxConsecutiveAttendance || 0, activeSessions.size),
                             extremeMatchCount: prevCumulative.extremeMatchCount + extremeMatches,
-                            peakMmr: peakMmr
+                            peakMmr: peakMmr,
+                            peakMmrDate: peakMmrDate
                         };
 
                         // [추가] 이전 시즌들의 누적 요약(만약 있다면)을 현재 계산된 통계에 병합
@@ -600,7 +603,10 @@ export async function switchDatabase() {
                     prevSeasonStats: {},
                     cumulativeStats: {
                         totalMatches: 0, totalWins: 0, totalBagels: 0, kingsSlayerCount: 0, uniquePartners: 0,
-                        consecutiveAttendance: 0, maxConsecutiveAttendance: 0, extremeMatchCount: 0, peakMmr: 1500
+                        consecutiveAttendance: 0, maxConsecutiveAttendance: 0, extremeMatchCount: 0,
+                        // peakMmr/Date는 역대 최고 기록이므로 시즌 초기화 시에도 이월 보존
+                        peakMmr: m.cumulativeStats?.peakMmr || 1500,
+                        peakMmrDate: m.cumulativeStats?.peakMmrDate || null
                     },
                     matchCount: 0, wins: 0, losses: 0, draws: 0, scoreDiff: 0, participationArr: []
                 }));

@@ -87,7 +87,10 @@ export function recalculateAll(context) {
         members.forEach(m => {
             m.rating = ELO_INITIAL;
             m.mmr = (m.baseMmr !== undefined) ? m.baseMmr : ELO_INITIAL;
-            m.peakMmr = Math.max(m.cumulativeStats?.peakMmr || 0, m.baseMmr || ELO_INITIAL);
+            const prevPeak = m.cumulativeStats?.peakMmr || 0;
+            const baseMmr = m.baseMmr || ELO_INITIAL;
+            m.peakMmr = Math.max(prevPeak, baseMmr);
+            m.peakMmrDate = m.peakMmr === prevPeak ? (m.cumulativeStats?.peakMmrDate || null) : null;
             m.matchCount = 0; m.wins = 0; m.losses = 0; m.draws = 0; m.scoreDiff = 0;
             m.participationArr = []; m.prevRating = ELO_INITIAL;
             delete m.vRank;
@@ -154,7 +157,10 @@ export function recalculateAll(context) {
                     const member = members.find(m => m.name.trim() === (event.playerName || "").trim());
                     if (member) {
                         member.mmr += (Number(event.mmrBonus) || 0);
-                        member.peakMmr = Math.max(member.peakMmr || member.mmr, member.mmr);
+                        if (member.mmr > (member.peakMmr || 0)) {
+                            member.peakMmr = member.mmr;
+                            member.peakMmrDate = event.date || new Date().toISOString().split('T')[0];
+                        }
                     }
                     return;
                 } 
@@ -270,14 +276,21 @@ export function recalculateAll(context) {
                     }
                 });
 
+                const updatePeakMmr = (m) => {
+                    if (m.mmr > (m.peakMmr || 0)) {
+                        m.peakMmr = m.mmr;
+                        m.peakMmrDate = event.date || new Date().toISOString().split('T')[0];
+                    }
+                };
+
                 if (s1 > s2) {
-                    team1.forEach(m => { m.wins++; m.rating += change; m.mmr += change; m.scoreDiff += (s1 - s2); m.peakMmr = Math.max(m.peakMmr || m.mmr, m.mmr); });
-                    team2.forEach(m => { m.losses++; m.rating -= change; m.mmr -= change; m.scoreDiff += (s2 - s1); m.peakMmr = Math.max(m.peakMmr || m.mmr, m.mmr); });
+                    team1.forEach(m => { m.wins++; m.rating += change; m.mmr += change; m.scoreDiff += (s1 - s2); updatePeakMmr(m); });
+                    team2.forEach(m => { m.losses++; m.rating -= change; m.mmr -= change; m.scoreDiff += (s2 - s1); });
                 } else if (actual === 0) {
-                    team1.forEach(m => { m.losses++; m.rating += change; m.mmr += change; m.scoreDiff += (s1 - s2); m.peakMmr = Math.max(m.peakMmr || m.mmr, m.mmr); });
-                    team2.forEach(m => { m.wins++; m.rating -= change; m.mmr -= change; m.scoreDiff += (s2 - s1); m.peakMmr = Math.max(m.peakMmr || m.mmr, m.mmr); });
+                    team1.forEach(m => { m.losses++; m.rating += change; m.mmr += change; m.scoreDiff += (s1 - s2); updatePeakMmr(m); });
+                    team2.forEach(m => { m.wins++; m.rating -= change; m.mmr -= change; m.scoreDiff += (s2 - s1); });
                 } else {
-                    [...team1, ...team2].forEach(m => { m.draws++; m.peakMmr = Math.max(m.peakMmr || m.mmr, m.mmr); });
+                    [...team1, ...team2].forEach(m => { m.draws++; updatePeakMmr(m); });
                 }
             } catch (err) {
                 console.error(`[Engine] Error in loop idx ${idx} (Session ${event.sessionNum}):`, err, event);
