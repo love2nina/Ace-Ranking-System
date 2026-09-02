@@ -275,8 +275,6 @@ export const getPlayerInsights = (targetId, members, matchHistory) => {
         };
     });
 
-    const usedIds = new Set();
-
     // 1. 🏹 나의 천적: 나를 상대로 NET ELO를 가장 많이 깎아간 사람 (합산 ELO 변화량이 가장 낮음)
     const antagonists = Array.from(antagonistStats.entries()).map(([id, stats]) => {
         const member = members.find(m => m.id === id);
@@ -285,17 +283,15 @@ export const getPlayerInsights = (targetId, members, matchHistory) => {
     const nemesis = antagonists
         .filter(a => a.netEloChange < 0)
         .sort((a, b) => a.netEloChange - b.netEloChange)[0];
-    if (nemesis) usedIds.add(nemesis.id);
 
-    // 2. 🤝 환상의 파트너: 최소 3경기, 승률 50% 이상, 중복 제외, 승률 우선
+    // 2. 🤝 환상의 파트너: 최소 3경기, 승률 50% 이상, 승률 우선
     const bestPartner = partners
-        .filter(p => p.games >= PARTNER_MIN_GAMES && p.winRate >= 0.5 && !usedIds.has(p.id))
+        .filter(p => p.games >= PARTNER_MIN_GAMES && p.winRate >= 0.5)
         .sort((a, b) => b.winRate - a.winRate || b.eloGain - a.eloGain)[0];
-    if (bestPartner) usedIds.add(bestPartner.id);
 
-    // 3. 🚫 환장하는 파트너: 최소 3경기, 승률 50% 미만, 중복 제외, 패배 횟수 우선
+    // 3. 🚫 환장하는 파트너: 최소 3경기, 패율 50% 초과, 패배 횟수 우선
     const worstPartner = partners
-        .filter(p => p.games >= PARTNER_MIN_GAMES && p.winRate < 0.5 && !usedIds.has(p.id))
+        .filter(p => p.games >= PARTNER_MIN_GAMES && (p.losses / p.games) > 0.5)
         .sort((a, b) => b.losses - a.losses || a.eloGain - b.eloGain)[0];
 
     return {
