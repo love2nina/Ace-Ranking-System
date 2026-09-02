@@ -141,7 +141,7 @@ export function recalculateAll(context) {
                     if (currentSessionId !== null) {
                         console.log(`[Engine] Finalizing Snapshot for Session ${currentSessionId}`);
                         processedSessions.push(currentSessionId);
-                        finalizeSession(currentSessionId, members, sessionRankSnapshots, context.sessionEndRatings, processedSessions);
+                        finalizeSession(currentSessionId, members, sessionRankSnapshots, context.sessionEndRatings, processedSessions, context.enableAttendanceBonus);
                         // [v88] 직전 스냅샷 기준으로 previousRankingIds 추출 (비활성 멤버 제외된 결과 그대로 사용)
                         const prevSnapshot = sessionRankSnapshots[currentSessionId] || {};
                         previousRankingIds = Object.entries(prevSnapshot)
@@ -300,7 +300,7 @@ export function recalculateAll(context) {
         // 마지막 세션 종료 처리
         if (currentSessionId !== null) {
             processedSessions.push(currentSessionId);
-            finalizeSession(currentSessionId, members, sessionRankSnapshots, context.sessionEndRatings, processedSessions);
+            finalizeSession(currentSessionId, members, sessionRankSnapshots, context.sessionEndRatings, processedSessions, context.enableAttendanceBonus);
         }
 
         // 4. 최종 순위(rankMap) 업데이트
@@ -311,14 +311,17 @@ export function recalculateAll(context) {
     }
 }
 
-function finalizeSession(sId, members, snapshots, ratings, processedSessions = []) {
+function finalizeSession(sId, members, snapshots, ratings, processedSessions = [], enableAttendanceBonus = true) {
     // [v90] 회차 종료 시 해당 회차 참석자 전원에게 출석 보너스 부여
-    const attendanceBonus = Math.round(K_FACTOR / 2);
-    members.forEach(m => {
-        if (m.participationArr.includes(sId)) {
-            m.rating += attendanceBonus;
-        }
-    });
+    // enableAttendanceBonus 플래그로 DB별 출석 보너스 ON/OFF 제어
+    if (enableAttendanceBonus) {
+        const attendanceBonus = Math.round(K_FACTOR / 2);
+        members.forEach(m => {
+            if (m.participationArr.includes(sId)) {
+                m.rating += attendanceBonus;
+            }
+        });
+    }
 
     const activeRanked = members.filter(m => m.matchCount > 0);
     const sorted = [...activeRanked].sort((a, b) => (b.rating - a.rating) || (b.wins - a.wins) || String(a.name).localeCompare(String(b.name)));

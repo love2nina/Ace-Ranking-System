@@ -205,13 +205,27 @@ export const getPlayerInsights = (targetId, members, matchHistory) => {
     const antagonistStats = new Map(); // key: opponentId, value: { eloLost }
 
     // [시즌 고도화] 이전 시즌 요약 데이터(방안 C) 먼저 반영
-    // 이전 시즌 요약에는 '상대팀'으로서의 전적만 압축되어 있음 (천적 위주)
     Object.entries(prevStats).forEach(([oppId, stats]) => {
-        // 상대 분석 (천적) 초기화
+        // 상대 분석 (천적) 초기화 및 누적 합산
         const antag = antagonistStats.get(oppId) || { wins: 0, losses: 0, draws: 0, games: 0, netEloChange: 0 };
-        // 이전 시즌의 net ELO change 합산
         antag.netEloChange += stats.eloGain || 0;
+        antag.wins += stats.wins || 0;
+        antag.losses += stats.losses || 0;
+        antag.draws += stats.draws || 0;
+        antag.games += (stats.wins || 0) + (stats.losses || 0) + (stats.draws || 0);
         antagonistStats.set(oppId, antag);
+    });
+
+    const prevPartners = (targetMember && targetMember.prevPartnerStats) ? targetMember.prevPartnerStats : {};
+    Object.entries(prevPartners).forEach(([partnerId, stats]) => {
+        // 파트너 분석 누적 합산
+        const partner = partnerStats.get(partnerId) || { wins: 0, losses: 0, draws: 0, eloGain: 0, games: 0 };
+        partner.eloGain += stats.eloGain || 0;
+        partner.wins += stats.wins || 0;
+        partner.losses += stats.losses || 0;
+        partner.draws += stats.draws || 0;
+        partner.games += (stats.wins || 0) + (stats.losses || 0) + (stats.draws || 0);
+        partnerStats.set(partnerId, partner);
     });
 
     myMatches.forEach(match => {

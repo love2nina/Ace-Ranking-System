@@ -211,14 +211,20 @@ export function renderApplicants(context) {
     const targetStructure = split.join(',');
 
     if (!previewGroups || totalInPreview !== sortedApplicants.length || currentStructure !== targetStructure) {
+        // [v95] 조별 인원 변경 시 기존 선수 배치를 최대한 보존
+        // 기존 previewGroups가 있으면 그 배치 순서를 유지한 채 새 split으로 재분배
+        const sourceOrder = (previewGroups && totalInPreview === sortedApplicants.length)
+            ? previewGroups.flat()
+            : sortedApplicants;
+        
         previewGroups = [];
         let cur = 0;
         split.forEach(s => {
-            previewGroups.push(sortedApplicants.slice(cur, cur + s));
+            previewGroups.push(sourceOrder.slice(cur, cur + s));
             cur += s;
         });
         setPreviewGroups(previewGroups);
-        context.previewGroups = previewGroups; // [v47] 드래그 얩 드롭 컨텍스트 참조 지속성 보장
+        context.previewGroups = previewGroups; // [v47] 드래그 앤 드롭 컨텍스트 참조 지속성 보장
 
         const saveBtn = document.getElementById('savePreviewBtn');
         if (saveBtn && !customValue) saveBtn.style.display = 'none';
@@ -229,7 +235,7 @@ export function renderApplicants(context) {
             group.map(p => appMap.get(String(p.id)) || p).filter(p => appMap.has(String(p.id)))
         );
         setPreviewGroups(previewGroups);
-        context.previewGroups = previewGroups; // [v47] 드래그 얩 드롭 컨텍스트 참조 지속성 보장
+        context.previewGroups = previewGroups; // [v47] 드래그 앤 드롭 컨텍스트 참조 지속성 보장
 
         const newTotal = previewGroups.reduce((s, g) => s + g.length, 0);
         if (newTotal !== sortedApplicants.length) {
@@ -265,23 +271,26 @@ export function renderApplicants(context) {
 
                 if (fromGroupIdx === toGroupIdx) return;
 
-                const playerIdx = previewGroups[fromGroupIdx].findIndex(p => String(p.id) === playerId);
+                // [v95] 항상 최신 previewGroups를 참조하도록 context에서 직접 읽음
+                const latestGroups = context.previewGroups || previewGroups;
+                const playerIdx = latestGroups[fromGroupIdx].findIndex(p => String(p.id) === playerId);
                 if (playerIdx === -1) return;
-                const [player] = previewGroups[fromGroupIdx].splice(playerIdx, 1);
-                previewGroups[toGroupIdx].push(player);
+                const [player] = latestGroups[fromGroupIdx].splice(playerIdx, 1);
+                latestGroups[toGroupIdx].push(player);
 
                 const saveBtn = document.getElementById('savePreviewBtn');
                 if (saveBtn) saveBtn.style.display = 'block';
 
-                setPreviewGroups(previewGroups);
-                context.previewGroups = previewGroups; // [v47] 최신 조편성을 context에 업데이트하여 updateSplitInputFromPreview가 올바르게 작동하도록 함
+                // [v95] 상태를 먼저 갱신한 후 부분 렌더링만 수행 (전체 updateUI 대신)
+                setPreviewGroups(latestGroups);
+                context.previewGroups = latestGroups;
                 updateSplitInputFromPreview(context);
                 
-                // [v47] 브라우저 드래그 이벤트 루프 종료 후 DOM 업데이트를 수행하도록 지연
+                // [v95] DOM만 재구축 (updateUI 전체 호출 대신 selfRender로 부분 갱신)
+                // 이렇게 하면 renderApplicants가 다시 호출되어도 currentStructure === targetStructure이므로
+                // 기존 배치가 보존된 else 분기를 타게 됨
                 setTimeout(() => {
-                    if (context.actions?.updateUI) {
-                        context.actions.updateUI();
-                    }
+                    selfRender(context);
                     updateOptimizationInfo(context);
                 }, 10);
             });
@@ -405,8 +414,9 @@ export function validateCustomSplit(context) {
         const inputSplit = nums.join(',');
 
         if (currentPreviewSplit !== inputSplit) {
-            console.log(`[UI] Split changed: ${currentPreviewSplit} -> ${inputSplit}. Resetting preview.`);
-            if (context.actions?.setPreviewGroups) context.actions.setPreviewGroups(null);
+            console.log(`[UI] Split changed: ${currentPreviewSplit} -> ${inputSplit}. Preserving player arrangement.`);
+            // [v95] setPreviewGroups(null) 제거 — previewGroups를 유지해야 renderApplicants에서
+            // 기존 선수 배치를 보존한 채 새 split으로 재분배할 수 있음
             setTimeout(() => { if (context.actions?.updateUI) context.actions.updateUI(); }, 0);
         }
 

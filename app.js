@@ -73,6 +73,7 @@ let currentSessionState = { status: 'idle', sessionNum: 0, info: '', matchMode: 
 let systemSettings = { admin_pw: 'ace_dot' };
 
 let isAdmin = false;
+let enableAttendanceBonus = true; // [v94] DB별 출석 보너스 ON/OFF (Firestore 문서의 enableAttendanceBonus 필드로 제어)
 let rankMap = new Map();
 let sessionRankSnapshots = {};
 let sessionStartRatings = {};
@@ -129,6 +130,8 @@ async function init() {
             members = data.members || [];
             currentSchedule = data.currentSchedule || [];
             applicants = data.applicants || [];
+            // [v94] DB별 출석 보너스 플래그 읽기 (없으면 true: 신규/현재 시즌 기본값)
+            enableAttendanceBonus = data.enableAttendanceBonus !== false;
             // [v44] recalculateAll은 onHistoryLoaded에서만 호출 (중복 제거, 로딩 최적화)
             updateUI();
 
@@ -717,7 +720,8 @@ function recalculateAll() {
         sessionEndRatings,
         applicants,
         currentSchedule,
-        achievements: clonedAchievements
+        achievements: clonedAchievements,
+        enableAttendanceBonus // [v94] DB별 출석 보너스 플래그 전달
     });
 
     // 계산된 결과(elo_at_match 등)가 포함된 복제본을 다시 원본 전역 변수에 반영합니다.
@@ -904,62 +908,92 @@ function addPlayer() {
 }
 
 // --- 세션 종료 (Commit) ---
+let isCommitting = false; // [v95] 중복 클릭 방지 플래그
 async function commitSession() {
     if (!isAdmin) return;
+    if (isCommitting) {
+        console.warn("[App] commitSession already in progress, ignoring duplicate click.");
+        return;
+    }
     if (!confirm("모든 경기가 완료되었습니다. 결과를 확정하고 랭킹에 반영하시겠습니까?")) return;
 
-    // 1. 경기 데이터를 matchHistory 형식으로 변환하여 임시 배열 생성
-    const newMatches = currentSchedule.map(m => ({
-        id: Date.now() + Math.random(),
-        sessionNum: m.sessionNum,
-        date: new Date().toLocaleDateString(),
-        t1_ids: m.t1.map(p => p.id),
-        t1_names: m.t1.map(p => p.name),
-        t2_ids: m.t2.map(p => p.id),
-        t2_names: m.t2.map(p => p.name),
-        score1: m.s1,
-        score2: m.s2,
-        group: m.group,
-        groupRound: m.groupRound || 0
-    }));
-
-    // 2. 임시 배열을 메모리상의 matchHistory에 추가하고 로컬 재계산 실행
-    const newCount = newMatches.length;
-    matchHistory.push(...newMatches);
-    recalculateAll(); // newMatches가 반영된 상태로 elo_at_match가 재계산됨
-
-    // 3. 재계산된 elo_at_match가 포함된 최신 내역을 DB에 저장
-    const calculatedNewMatches = matchHistory.slice(-newCount);
-    for (const h of calculatedNewMatches) {
-        await fbAddHistoryItem(h);
+    // [v95] 중복 실행 방지: 플래그 설정 및 버튼 비활성화
+    isCommitting = true;
+    const updateEloBtn = document.getElementById('updateEloBtn');
+    if (updateEloBtn) {
+        updateEloBtn.disabled = true;
+        updateEloBtn.dataset.originalText = updateEloBtn.innerText;
+        updateEloBtn.innerText = '⏳ 처리 중...';
+        updateEloBtn.style.opacity = '0.6';
+        updateEloBtn.style.pointerEvents = 'none';
     }
 
-    // [v41] 신규 회원 자동 등재: members에 없는 참가자를 자동 저장
-    const currentMemberIds = new Set(members.map(m => String(m.id)));
-    let addedAny = false;
-    currentSchedule.forEach(m => {
-        [...m.t1, ...m.t2].forEach(p => {
-            if (p.id && !currentMemberIds.has(String(p.id))) {
-                members.push({ ...p, matchCount: 0, wins: 0, losses: 0, draws: 0, scoreDiff: 0 });
-                currentMemberIds.add(String(p.id));
-                addedAny = true;
-            }
+    try {
+        // 1. 경기 데이터를 matchHistory 형식으로 변환하여 임시 배열 생성
+        const newMatches = currentSchedule.map(m => ({
+            id: Date.now() + Math.random(),
+            sessionNum: m.sessionNum,
+            date: new Date().toLocaleDateString(),
+            t1_ids: m.t1.map(p => p.id),
+            t1_names: m.t1.map(p => p.name),
+            t2_ids: m.t2.map(p => p.id),
+            t2_names: m.t2.map(p => p.name),
+            score1: m.s1,
+            score2: m.s2,
+            group: m.group,
+            groupRound: m.groupRound || 0
+        }));
+
+        // 2. 임시 배열을 메모리상의 matchHistory에 추가하고 로컬 재계산 실행
+        const newCount = newMatches.length;
+        matchHistory.push(...newMatches);
+        recalculateAll(); // newMatches가 반영된 상태로 elo_at_match가 재계산됨
+
+        // 3. 재계산된 elo_at_match가 포함된 최신 내역을 DB에 저장
+        const calculatedNewMatches = matchHistory.slice(-newCount);
+        for (const h of calculatedNewMatches) {
+            await fbAddHistoryItem(h);
+        }
+
+        // [v41] 신규 회원 자동 등재: members에 없는 참가자를 자동 저장
+        const currentMemberIds = new Set(members.map(m => String(m.id)));
+        let addedAny = false;
+        currentSchedule.forEach(m => {
+            [...m.t1, ...m.t2].forEach(p => {
+                if (p.id && !currentMemberIds.has(String(p.id))) {
+                    members.push({ ...p, matchCount: 0, wins: 0, losses: 0, draws: 0, scoreDiff: 0 });
+                    currentMemberIds.add(String(p.id));
+                    addedAny = true;
+                }
+            });
         });
-    });
-    if (addedAny) {
-        await fbSaveToCloud({ members }, 'commitSession:autoMember');
-    }
+        if (addedAny) {
+            await fbSaveToCloud({ members }, 'commitSession:autoMember');
+        }
 
-    // 3. sessionRankSnapshots DB 저장
-    const sessionNum = currentSchedule[0]?.sessionNum || currentSessionState.sessionNum;
-    if (sessionNum && sessionRankSnapshots[sessionNum]) {
-        await fbSaveSessionSnapshot(sessionNum, sessionRankSnapshots[sessionNum]);
-    }
+        // 3. sessionRankSnapshots DB 저장
+        const sessionNum = currentSchedule[0]?.sessionNum || currentSessionState.sessionNum;
+        if (sessionNum && sessionRankSnapshots[sessionNum]) {
+            await fbSaveSessionSnapshot(sessionNum, sessionRankSnapshots[sessionNum]);
+        }
 
-    // 상태 초기화 및 최종 점수(members) 저장
-    await fbSaveToCloud({ members, currentSchedule: [], applicants: [] }, 'commitSession:final');
-    await fbSaveSessionState('idle', currentSessionState.sessionNum, "", currentSessionState.matchMode);
-    alert("결과가 성공적으로 반영되었습니다.");
+        // 상태 초기화 및 최종 점수(members) 저장
+        await fbSaveToCloud({ members, currentSchedule: [], applicants: [] }, 'commitSession:final');
+        await fbSaveSessionState('idle', currentSessionState.sessionNum, "", currentSessionState.matchMode);
+        alert("결과가 성공적으로 반영되었습니다.");
+    } catch (error) {
+        console.error("[App] commitSession failed:", error);
+        alert("결과 반영 중 오류가 발생했습니다. 다시 시도해 주세요.");
+    } finally {
+        // [v95] 처리 완료 후 버튼 복구
+        isCommitting = false;
+        if (updateEloBtn) {
+            updateEloBtn.disabled = false;
+            updateEloBtn.innerText = updateEloBtn.dataset.originalText || '🏆 랭킹전 종료 및 결과반영';
+            updateEloBtn.style.opacity = '';
+            updateEloBtn.style.pointerEvents = '';
+        }
+    }
 }
 
 async function openRegistration() {

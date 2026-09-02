@@ -497,12 +497,18 @@ export async function switchDatabase() {
                 if (prevSnap.exists()) {
                     const prevData = prevSnap.data();
                     const prevMembers = prevData.members || [];
-                    const prevHistory = prevData.matchHistory || [];
+                    
+                    // [Bugfix] 이전 시즌의 매치 기록은 'history' 서브컬렉션에서 가져와야 함 (기존 배열 필드는 더 이상 사용 안 함)
+                    const { collection, getDocs } = window.FB_SDK;
+                    const historySnap = await getDocs(collection(db, clusterPath, prevDbName, "history"));
+                    const prevHistory = historySnap.docs.map(d => d.data());
 
                     // 2. MMR 이관 및 요약본 생성
                     newMembers = prevMembers.map(m => {
                         const stats = {};
+                        const partnerStatsObj = {}; // [추가] 파트너 전적
                         const prevSummary = m.prevSeasonStats || {};
+                        const prevPartnerSummary = m.prevPartnerStats || {}; // [추가] 이전 시즌 파트너 전적
                         const prevCumulative = m.cumulativeStats || {
                             totalMatches: 0, totalWins: 0, totalBagels: 0, kingsSlayerCount: 0, uniquePartners: 0,
                             consecutiveAttendance: 0, maxConsecutiveAttendance: 0, extremeMatchCount: 0, peakMmr: m.mmr || 1500, peakMmrDate: null
@@ -544,7 +550,17 @@ export async function switchDatabase() {
                             }
 
                             myTeam.forEach(pid => {
-                                if (String(pid) !== String(m.id)) partnersSet.add(String(pid));
+                                if (String(pid) !== String(m.id)) {
+                                    partnersSet.add(String(pid));
+                                    
+                                    // 파트너 통계 수집
+                                    const pIdStr = String(pid);
+                                    if (!partnerStatsObj[pIdStr]) partnerStatsObj[pIdStr] = { wins: 0, losses: 0, draws: 0, eloGain: 0 };
+                                    if (won) partnerStatsObj[pIdStr].wins++;
+                                    if (lost) partnerStatsObj[pIdStr].losses++;
+                                    if (draw) partnerStatsObj[pIdStr].draws++;
+                                    partnerStatsObj[pIdStr].eloGain += eloChange;
+                                }
                             });
                             if (h.sessionNum) activeSessions.add(String(h.sessionNum));
 
@@ -581,6 +597,15 @@ export async function switchDatabase() {
                             stats[id].eloGain += (val.eloGain || 0);
                         });
 
+                        Object.entries(prevPartnerSummary).forEach(([pId, val]) => {
+                            const id = String(pId);
+                            if (!partnerStatsObj[id]) partnerStatsObj[id] = { wins: 0, losses: 0, draws: 0, eloGain: 0 };
+                            partnerStatsObj[id].wins += (val.wins || 0);
+                            partnerStatsObj[id].losses += (val.losses || 0);
+                            partnerStatsObj[id].draws += (val.draws || 0);
+                            partnerStatsObj[id].eloGain += (val.eloGain || 0);
+                        });
+
                         const carriedMmr = m.mmr || m.rating || 1500;
                         return {
                             ...m,
@@ -588,6 +613,7 @@ export async function switchDatabase() {
                             mmr: carriedMmr,
                             baseMmr: carriedMmr, // recalculateAll용 시즌 시작 기준값
                             prevSeasonStats: stats,
+                            prevPartnerStats: partnerStatsObj,
                             cumulativeStats: cumulativeStats,
                             matchCount: 0, wins: 0, losses: 0, draws: 0, scoreDiff: 0, participationArr: []
                         };
@@ -618,6 +644,7 @@ export async function switchDatabase() {
                 matchHistory: [],
                 sessionStatus: { status: 'idle', sessionNum: 0, matchMode: 'court' },
                 reports: {},
+                enableAttendanceBonus: true, // [v94] 신규 클러스터는 기본적으로 출석 보너스 활성화
                 createdAt: new Date().toISOString()
             });
 
