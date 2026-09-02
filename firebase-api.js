@@ -1024,3 +1024,112 @@ export async function loadSessionSnapshots() {
         return {};
     }
 }
+
+/**
+ * 트랜잭션을 사용하여 안전하게 참가자를 추가합니다. (동시성 문제 방지)
+ * @param {Object} newPlayer - 추가할 참가자 객체
+ */
+export async function fbAddApplicantWithTransaction(newPlayer) {
+    if (!window.FB_SDK) return;
+    const { doc, runTransaction, serverTimestamp } = window.FB_SDK;
+    const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
+    const docRef = doc(db, clusterPath, currentDbName);
+
+    try {
+        await runTransaction(db, async (transaction) => {
+            const sfDoc = await transaction.get(docRef);
+            if (!sfDoc.exists()) {
+                throw "Document does not exist!";
+            }
+            const data = sfDoc.data();
+            const currentApplicants = data.applicants || [];
+            
+            // 이미 신청했는지 다시 확인 (중복 방지)
+            if (currentApplicants.some(a => String(a.id) === String(newPlayer.id))) {
+                return;
+            }
+            
+            currentApplicants.push(newPlayer);
+            transaction.update(docRef, { 
+                applicants: currentApplicants,
+                updatedAt: serverTimestamp()
+            });
+        });
+        console.log(`[Firebase] Successfully added applicant via transaction: ${newPlayer.name}`);
+    } catch (e) {
+        console.error("[Firebase] Add Applicant Transaction failed: ", e);
+        throw e;
+    }
+}
+
+/**
+ * 트랜잭션을 사용하여 안전하게 참가자를 제거합니다. (동시성 문제 방지)
+ * @param {string} playerId - 제거할 참가자의 ID
+ */
+export async function fbRemoveApplicantWithTransaction(playerId) {
+    if (!window.FB_SDK) return;
+    const { doc, runTransaction, serverTimestamp } = window.FB_SDK;
+    const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
+    const docRef = doc(db, clusterPath, currentDbName);
+
+    try {
+        await runTransaction(db, async (transaction) => {
+            const sfDoc = await transaction.get(docRef);
+            if (!sfDoc.exists()) {
+                throw "Document does not exist!";
+            }
+            const data = sfDoc.data();
+            const currentApplicants = data.applicants || [];
+            const newApplicants = currentApplicants.filter(a => String(a.id) !== String(playerId));
+            
+            if (currentApplicants.length === newApplicants.length) {
+                return; // 변경 사항 없음
+            }
+            
+            transaction.update(docRef, { 
+                applicants: newApplicants,
+                updatedAt: serverTimestamp()
+            });
+        });
+        console.log(`[Firebase] Successfully removed applicant via transaction: ${playerId}`);
+    } catch (e) {
+        console.error("[Firebase] Remove Applicant Transaction failed: ", e);
+        throw e;
+    }
+}
+
+/**
+ * 트랜잭션을 사용하여 안전하게 지각(LateJoin) 상태를 토글합니다. (동시성 문제 방지)
+ * @param {string} playerId - 참가자의 ID
+ */
+export async function fbToggleLateJoinWithTransaction(playerId) {
+    if (!window.FB_SDK) return;
+    const { doc, runTransaction, serverTimestamp } = window.FB_SDK;
+    const clusterPath = currentClubId === 'Default' ? "clusters" : `clubs/${currentClubId}/clusters`;
+    const docRef = doc(db, clusterPath, currentDbName);
+
+    try {
+        await runTransaction(db, async (transaction) => {
+            const sfDoc = await transaction.get(docRef);
+            if (!sfDoc.exists()) {
+                throw "Document does not exist!";
+            }
+            const data = sfDoc.data();
+            const currentApplicants = data.applicants || [];
+            
+            const playerIndex = currentApplicants.findIndex(a => String(a.id) === String(playerId));
+            if (playerIndex === -1) return;
+            
+            currentApplicants[playerIndex].lateJoin = !currentApplicants[playerIndex].lateJoin;
+            
+            transaction.update(docRef, { 
+                applicants: currentApplicants,
+                updatedAt: serverTimestamp()
+            });
+        });
+        console.log(`[Firebase] Successfully toggled late join via transaction: ${playerId}`);
+    } catch (e) {
+        console.error("[Firebase] Toggle LateJoin Transaction failed: ", e);
+        throw e;
+    }
+}

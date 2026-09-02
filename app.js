@@ -25,7 +25,10 @@ import {
     deleteAchievement as fbDeleteAchievement,
     updateAchievement as fbUpdateAchievement,
     saveSessionSnapshot as fbSaveSessionSnapshot,
-    loadSessionSnapshots as fbLoadSessionSnapshots
+    loadSessionSnapshots as fbLoadSessionSnapshots,
+    fbAddApplicantWithTransaction,
+    fbRemoveApplicantWithTransaction,
+    fbToggleLateJoinWithTransaction
 } from './firebase-api.js?v=89';
 
 import {
@@ -463,7 +466,8 @@ window.toggleLateJoin = (id) => {
     const player = applicants.find(p => String(p.id) === String(id));
     if (player) {
         player.lateJoin = !player.lateJoin;
-        fbSaveToCloud({ applicants }, 'toggleLateJoin');
+        // fbSaveToCloud({ applicants }, 'toggleLateJoin');
+        fbToggleLateJoinWithTransaction(id);
         updateUI();
     }
 };
@@ -760,7 +764,8 @@ function recalculateAll() {
 }
 window.removeApplicant = (id) => {
     applicants = applicants.filter(p => String(p.id) !== String(id));
-    fbSaveToCloud({ applicants }, 'removeApplicant');
+    // fbSaveToCloud({ applicants }, 'removeApplicant');
+    fbRemoveApplicantWithTransaction(id);
     
     // [v45] 인원 변동 시 커스텀 분할 고정 해제 및 미리보기 리셋
     const customInput = document.getElementById('customSplitInput');
@@ -902,7 +907,9 @@ function addPlayer() {
     if (customInput) customInput.value = '';
     previewGroups = null; // 인원 변경 시 프리뷰 초기화
 
-    fbSaveToCloud({ applicants }, 'addPlayer');
+    // fbSaveToCloud({ applicants }, 'addPlayer');
+    fbAddApplicantWithTransaction(newPlayer);
+    
     input.value = '';
     input.focus();
 }
