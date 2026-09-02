@@ -266,7 +266,7 @@ export const getPlayerInsights = (targetId, members, matchHistory) => {
 
     // 결과 정렬 및 추출 (중복 제거 로직)
     const partners = Array.from(partnerStats.entries()).map(([id, stats]) => {
-        const member = members.find(m => m.id === id);
+        const member = members.find(m => String(m.id) === String(id));
         return {
             id,
             name: member ? member.name : '알 수 없음',
@@ -277,7 +277,7 @@ export const getPlayerInsights = (targetId, members, matchHistory) => {
 
     // 1. 🏹 나의 천적: 나를 상대로 NET ELO를 가장 많이 깎아간 사람 (합산 ELO 변화량이 가장 낮음)
     const antagonists = Array.from(antagonistStats.entries()).map(([id, stats]) => {
-        const member = members.find(m => m.id === id);
+        const member = members.find(m => String(m.id) === String(id));
         return { id, name: member ? member.name : '알 수 없음', ...stats };
     });
     const nemesis = antagonists
