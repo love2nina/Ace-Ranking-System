@@ -30,7 +30,7 @@ import {
     fbAddApplicantWithTransaction,
     fbRemoveApplicantWithTransaction,
     fbToggleLateJoinWithTransaction
-} from './firebase-api.js?v=91';
+} from './firebase-api.js?v=92';
 
 import {
     updateAdminUI as uiUpdateAdminUI,
@@ -55,7 +55,7 @@ import {
     renderHistoryEditModal as uiRenderHistoryEditModal,
     renderCurrentMatchEditModal as uiRenderCurrentMatchEditModal,
     renderExternalAchievements as uiRenderExternalAchievements
-} from './ui.js?v=91';
+} from './ui.js?v=92';
 
 import {
     ELO_INITIAL,
@@ -64,7 +64,7 @@ import {
     recalculateAll as engineRecalculateAll,
     applyNewMatches as engineApplyNewMatches,
     generateSchedule as engineGenerateSchedule
-} from './engine.js?v=91';
+} from './engine.js?v=92';
 
 // --- 전역 애플리케이션 상태 (State) ---
 let members = [];
@@ -641,16 +641,34 @@ function setupEventListeners() {
  */
 function updateRanks() {
     if (!members || members.length === 0) return;
-    // [v84] 비활성 회원 제외 필터 추가
     const activeMembers = members.filter(m => m.isActive !== false);
     const sorted = [...activeMembers].sort((a, b) => (b.rating || ELO_INITIAL) - (a.rating || ELO_INITIAL));
     
-    // [v87] 실시간 리스너에 의해 rankMap이 초기화될 때 기존 상승/하락(change) 값을 보존합니다.
+    // [버그수정] 페이지 로드 시에도 전 회차 대비 순위 변동을 정확히 계산
+    let prevSnapshot = null;
+    if (sessionRankSnapshots) {
+        const sessionIds = Object.keys(sessionRankSnapshots).map(Number).sort((a, b) => a - b);
+        const currentSessionNum = currentSessionState?.sessionNum;
+        let prevSessionId = null;
+        if (currentSessionNum) {
+            const prevSessions = sessionIds.filter(id => id < currentSessionNum);
+            if (prevSessions.length > 0) prevSessionId = prevSessions[prevSessions.length - 1];
+        } else if (sessionIds.length > 1) {
+            prevSessionId = sessionIds[sessionIds.length - 2];
+        }
+        if (prevSessionId !== null) {
+            prevSnapshot = sessionRankSnapshots[prevSessionId];
+        }
+    }
+    
     const tempMap = new Map();
     sorted.forEach((m, idx) => {
         const idStr = String(m.id);
-        const prevData = rankMap.get(idStr);
-        tempMap.set(idStr, { rank: idx + 1, change: prevData ? prevData.change : 0 });
+        let change = 0;
+        if (prevSnapshot && prevSnapshot[idStr]) {
+            change = prevSnapshot[idStr] - (idx + 1);
+        }
+        tempMap.set(idStr, { rank: idx + 1, change });
     });
     
     rankMap.clear();
