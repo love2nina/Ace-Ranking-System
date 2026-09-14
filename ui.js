@@ -1170,7 +1170,7 @@ export function renderBadgeHall(context) {
                         <div style="display:flex; align-items:center; gap:8px; padding:7px 10px; background:rgba(255,255,255,0.05); border-radius:8px; border-left: 3px solid ${medalColors[i]};">
                             <span style="font-size:1.1rem; line-height:1; flex-shrink:0;">${medalIcons[i]}</span>
                             <span style="font-weight:600; font-size:0.88rem; color:var(--text-primary); flex:1;">${m.name}</span>
-                            <span style="font-size:0.72rem; color:${medalColors[i]}; font-weight:600; white-space:nowrap;">MMR ${Math.round(m.mmr || 0)}</span>
+                            <span style="font-size:0.72rem; color:${medalColors[i]}; font-weight:600; white-space:nowrap;">${Math.round(m.mmr || 0)}</span>
                         </div>`).join('')}
                     </div>
                 </div>
