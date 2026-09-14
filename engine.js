@@ -1,6 +1,6 @@
-// ACE ??궧 ?쒖뒪??- ?듭떖 ?먮뇤 紐⑤뱢 (?붿쭊 濡쒖쭅)
-// ???뚯씪? ELO ?덉씠???ш퀎?? 肄뷀듃 諛곗젙 諛??섎룞 ?吏꾪몴 ?뚭퀬由ъ쬁怨?媛숈?
-// ?⑥뼱 鍮꾩쫰?덉뒪 濡쒖쭅(Pure Business Logic)留뚯쓣 ?ы븿?⑸땲??
+// ACE 랭킹 시스템 - 핵심 두뇌 모듈 (엔진 로직)
+// 이 파일은 ELO 레이팅 재계산, 코트 배정 및 수동 대진표 알고리즘과 같은
+// 퓨어 비즈니스 로직(Pure Business Logic)만을 포함합니다.
 
 export const ELO_INITIAL = 1500;
 export const K_FACTOR = 32;
@@ -62,7 +62,7 @@ export function recalculateAll(context) {
     const memberMap = new Map(members.map(m => [String(m.id), m]));
 
     try {
-        // 1. ?뚯썝 紐⑸줉 珥덇린??諛??덉뒪?좊━ 湲곕컲 ?좉퇋 硫ㅻ쾭 ?먮룞 ?깆옱
+        // 1. 회원 목록 초기화 및 히스토리 기반 신규 멤버 자동 등재
         const memberIdSet = new Set(members.map(m => String(m.id)));
         matchHistory.forEach(h => {
             const ids = [...(h.t1_ids || []), ...(h.t2_ids || [])];
@@ -79,9 +79,10 @@ export function recalculateAll(context) {
             });
         });
 
-        // 紐⑤뱺 硫ㅻ쾭 ?곹깭 由ъ뀑
-        // [v91] rating(?대쾲 ?쒖쫵 ?쒖쐞 吏??? 1500?쇰줈 珥덇린??        //       mmr(??? ?꾩쟻 ?ㅻ젰 吏??? ?댁쟾 ?쒖쫵 ?닿?媛?baseMmr) ?좎? - ?놁쑝硫?1500
-        //       peakMmr(??? 理쒓퀬??? ?댁쟾 ?쒖쫵 理쒓퀬?먭낵 ?닿? MMR 以??믪? 媛?湲곗??쇰줈 ?쒖옉
+        // 모든 멤버 상태 리셋
+        // [v91] rating(이번 시즌 순위 지표)은 1500으로 초기화
+        //       mmr(역대 누적 실력 지표)은 이전 시즌 이관값(baseMmr) 유지 - 없으면 1500
+        //       peakMmr(역대 최고점)은 이전 시즌 최고점과 이관 MMR 중 높은 값 기준으로 시작
         rankMap.clear();
         members.forEach(m => {
             m.rating = ELO_INITIAL;
@@ -95,7 +96,7 @@ export function recalculateAll(context) {
             delete m.vRank;
         });
 
-        // 2. ?듯빀 ??꾨씪???앹꽦 (寃쎄린 + ?낆긽 蹂대꼫??
+        // 2. 통합 타임라인 생성 (경기 + 입상 보너스)
         const events = [
             ...matchHistory.map(h => { h.eventType = 'match'; return h; }),
             ...achievements.map(a => { a.eventType = 'achievement'; return a; })
@@ -109,8 +110,9 @@ export function recalculateAll(context) {
             const sB = parseSession(b.sessionNum);
             if (sA !== sB) return sA - sB;
 
-            // [v89] ?숈씪 ?뚯감 ?댁뿉?쒕뒗 ?낆긽 蹂대꼫??achievement)瑜?寃쎄린(match)蹂대떎 癒쇱? 泥섎━?섏뿬
-            // ?대떦 ?뚯감 寃쎄린?ㅼ쓽 湲곕??밸쪧 怨꾩궛 ??蹂대꼫???먯닔媛 ?대? ?⑹궛???곹깭媛 ?섎룄濡???            const priorityA = a.eventType === 'achievement' ? 0 : 1;
+            // [v89] 동일 회차 내에서는 입상 보너스(achievement)를 경기(match)보다 먼저 처리하여
+            // 해당 회차 경기들의 기대승률 계산 시 보너스 점수가 이미 합산된 상태가 되도록 함
+            const priorityA = a.eventType === 'achievement' ? 0 : 1;
             const priorityB = b.eventType === 'achievement' ? 0 : 1;
             if (priorityA !== priorityB) return priorityA - priorityB;
 
@@ -121,8 +123,8 @@ export function recalculateAll(context) {
 
         console.log(`[Engine] Timeline created: ${events.length} events sorted by session/time.`);
 
-        // 3. ??꾨씪???쒖감 ?곗궛
-        // [v91] 留??ш퀎?????몄뀡蹂?罹먯떆瑜??꾩쟾 珥덇린??(stale 媛?諛⑹?)
+        // 3. 타임라인 순차 연산
+        // [v91] 매 재계산 시 세션별 캐시를 완전 초기화 (stale 값 방지)
         if (!context.sessionEndRatings) context.sessionEndRatings = {};
         else Object.keys(context.sessionEndRatings).forEach(k => delete context.sessionEndRatings[k]);
         if (!context.sessionStartMmrs) context.sessionStartMmrs = {};
@@ -140,17 +142,17 @@ export function recalculateAll(context) {
                         console.log(`[Engine] Finalizing Snapshot for Session ${currentSessionId}`);
                         processedSessions.push(currentSessionId);
                         finalizeSession(currentSessionId, members, sessionRankSnapshots, context.sessionEndRatings, processedSessions, context.enableAttendanceBonus);
-                        // [v88] 吏곸쟾 ?ㅻ깄??湲곗??쇰줈 previousRankingIds 異붿텧 (鍮꾪솢??硫ㅻ쾭 ?쒖쇅??寃곌낵 洹몃?濡??ъ슜)
+                        // [v88] 직전 스냅샷 기준으로 previousRankingIds 추출 (비활성 멤버 제외된 결과 그대로 사용)
                         const prevSnapshot = sessionRankSnapshots[currentSessionId] || {};
                         previousRankingIds = Object.entries(prevSnapshot)
                             .sort(([, rankA], [, rankB]) => rankA - rankB)
                             .map(([id]) => id);
                     }
                     currentSessionId = sId;
-                    // [v89] ?뚯감 蹂寃???利됱떆 罹≪쿂?섏? ?딄퀬, 泥?寃쎄린瑜?留뚮궇 ?뚭퉴吏 ?湲고빀?덈떎.
+                    // [v89] 회차 변경 시 즉시 캡처하지 않고, 첫 경기를 만날 때까지 대기합니다.
                 }
 
-                // ?낆긽 蹂대꼫???먮퀎
+                // 입상 보너스 판별
                 if (event.mmrBonus !== undefined || event.eventType === 'achievement') {
                     // [버그수정] 현재 재생성 중인 DB(시즌)의 입상 기록만 MMR에 합산 (이전 시즌 이중 합산 방지)
                     if (event.dbName && context.currentDbName && event.dbName !== context.currentDbName) {
@@ -167,12 +169,12 @@ export function recalculateAll(context) {
                     return;
                 } 
 
-                // 寃쎄린 ?곗씠???먮퀎
+                // 경기 데이터 판별
                 if (!(event.t1_ids || event.t1_names || event.t1 || event.eventType === 'match')) {
                     return;
                 }
 
-                // ?먯닔 ?뚯떛 媛뺥솕
+                // 점수 파싱 강화
                 const val1 = (event.score1 !== undefined && event.score1 !== null) ? event.score1 : 
                              (event.s1 !== undefined && event.s1 !== null) ? event.s1 : null;
                 const val2 = (event.score2 !== undefined && event.score2 !== null) ? event.score2 : 
@@ -183,7 +185,7 @@ export function recalculateAll(context) {
                     return;
                 }
 
-                // [v89] ?몄뀡??泥?寃쎄린瑜?留뚮궗???? 吏곸쟾源뚯? 泥섎━??紐⑤뱺 蹂대꼫?ㅺ? 諛섏쁺???쒖젏??MMR??'?쒖옉 MMR'濡?罹≪쿂
+                // [v89] 세션의 첫 경기를 만났을 때, 직전까지 처리된 모든 보너스가 반영된 시점의 MMR을 '시작 MMR'로 캡처
                 if (context.sessionStartMmrs && !context.sessionStartMmrs[sId]) {
                     context.sessionStartMmrs[sId] = members.reduce((acc, m) => { acc[m.id] = m.mmr; return acc; }, {});
                 }
@@ -195,7 +197,7 @@ export function recalculateAll(context) {
                     return;
                 }
 
-                // [v72] ?좎닔 留ㅼ묶 濡쒖쭅 洹밸???(ID 諛곗뿴 ?먮뒗 ?대쫫 諛곗뿴 ?대뵒?먯꽌??異붿텧)
+                // [v72] 선수 매칭 로직 극대화 (ID 배열 또는 이름 배열 어디에서든 추출)
                 const getMember = (id, name) => {
                     let m = id ? memberMap.get(String(id)) : null;
                     if (!m && name) {
@@ -205,7 +207,7 @@ export function recalculateAll(context) {
                     return m;
                 };
 
-                // ?ㅼ뼇???뺥깭???좎닔 紐⑸줉 ?꾨뱶 ?섏슜 (t1_ids, t1_names, t1(媛앹껜諛곗뿴) ??
+                // 다양한 형태의 선수 목록 필드 수용 (t1_ids, t1_names, t1(객체배열) 등)
                 let t1Base = event.t1_ids || [];
                 if (t1Base.length === 0 && event.t1_names) t1Base = event.t1_names;
                 if (t1Base.length === 0 && event.t1) t1Base = event.t1.map(p => p.id || p.name);
@@ -245,8 +247,8 @@ export function recalculateAll(context) {
                     return;
                 }
 
-                // [v78] 湲곕??밸쪧 怨꾩궛 湲곗?: ?ㅼ떆媛?蹂??MMR???꾨땶, ?대떦 ?몄뀡 ?쒖옉 ?쒖젏???ㅻ깄??MMR???ъ슜?⑸땲??
-                // ?대줈???숈씪 ?뚯감 ??紐⑤뱺 寃쎄린媛 ?숈씪???쒖옉 ?먯닔瑜?湲곗??쇰줈 ?밸쪧??怨꾩궛?⑸땲??
+                // [v78] 기대승률 계산 기준: 실시간 변동 MMR이 아닌, 해당 세션 시작 시점의 스냅샷 MMR을 사용합니다.
+                // 이로써 동일 회차 내 모든 경기가 동일한 시작 점수를 기준으로 승률이 계산됩니다.
                 const startMmrs = context.sessionStartMmrs[sId] || {};
                 const getStartMmr = (m) => (startMmrs[m.id] !== undefined ? startMmrs[m.id] : m.mmr);
 
@@ -259,14 +261,14 @@ export function recalculateAll(context) {
                 if (Math.abs(s1 - s2) >= 6) change *= 1.5;
                 change = Math.round(change);
 
-                // [v90] 異쒖꽍 蹂대꼫?? rating?먮쭔 遺??(?쒖닔 ?ㅻ젰 吏?쒖씤 mmr?먮뒗 誘몃컲??
+                // [v90] 출석 보너스: rating에만 부여 (순수 실력 지표인 mmr에는 미반영)
                 const attendanceBonus = Math.round(K_FACTOR / 2);
 
                 event.elo_at_match = {
                     expected: expected,
                     change1: change,
                     change2: -change,
-                    attendanceBonus: attendanceBonus, // 異붽?
+                    attendanceBonus: attendanceBonus, // 추가
                     mmr1_before: mmr1,
                     mmr2_before: mmr2
                 };
@@ -299,13 +301,13 @@ export function recalculateAll(context) {
             }
         });
 
-        // 留덉?留??몄뀡 醫낅즺 泥섎━
+        // 마지막 세션 종료 처리
         if (currentSessionId !== null) {
             processedSessions.push(currentSessionId);
             finalizeSession(currentSessionId, members, sessionRankSnapshots, context.sessionEndRatings, processedSessions, context.enableAttendanceBonus);
         }
 
-        // 4. 理쒖쥌 ?쒖쐞(rankMap) ?낅뜲?댄듃
+        // 4. 최종 순위(rankMap) 업데이트
         updateRankMap(members, rankMap, previousRankingIds, context);
 
     } catch (e) {
@@ -314,7 +316,8 @@ export function recalculateAll(context) {
 }
 
 function finalizeSession(sId, members, snapshots, ratings, processedSessions = [], enableAttendanceBonus = true) {
-    // [v90] ?뚯감 醫낅즺 ???대떦 ?뚯감 李몄꽍???꾩썝?먭쾶 異쒖꽍 蹂대꼫??遺??    // enableAttendanceBonus ?뚮옒洹몃줈 DB蹂?異쒖꽍 蹂대꼫??ON/OFF ?쒖뼱
+    // [v90] 회차 종료 시 해당 회차 참석자 전원에게 출석 보너스 부여
+    // enableAttendanceBonus 플래그로 DB별 출석 보너스 ON/OFF 제어
     if (enableAttendanceBonus) {
         const attendanceBonus = Math.round(K_FACTOR / 2);
         members.forEach(m => {
@@ -329,7 +332,7 @@ function finalizeSession(sId, members, snapshots, ratings, processedSessions = [
     
     snapshots[sId] = {};
     sorted.forEach((m, idx) => { 
-        snapshots[sId][String(m.id)] = idx + 1; // ID ??낆쓣 臾몄옄?대줈 媛뺤젣
+        snapshots[sId][String(m.id)] = idx + 1; // ID 타입을 문자열로 강제
     });
     ratings[sId] = members.reduce((acc, m) => { acc[String(m.id)] = m.rating; return acc; }, {});
 }
@@ -339,7 +342,7 @@ function updateRankMap(members, rankMap, previousRankingIds, context) {
     const currentRanking = members.filter(m => {
         if (m.matchCount > 0) return true;
         
-        // ?꾩쭅 寃쎄린瑜????곗뿀?붾씪???꾩옱 ?좎껌?먭굅???吏꾪몴???ы븿??寃쎌슦 ?쒖떆
+        // 아직 경기를 안 뛰었더라도 현재 신청자거나 대진표에 포함된 경우 표시
         const isCurrentParticipant = (context.applicants || []).some(a => String(a.id) === String(m.id)) ||
             (context.currentSchedule || []).some(match => [...(match.t1_ids || []), ...(match.t2_ids || [])].some(id => String(id) === String(m.id)));
         return isCurrentParticipant;
@@ -354,7 +357,8 @@ function updateRankMap(members, rankMap, previousRankingIds, context) {
 export function optimizeCourtRoundLayout(availablePool, numMatches, partners, opponents, matchMode = 'court', gameCounts) {
     let bestMatches = [];
     let bestScore = -Infinity;
-    let noImprovementCount = 0; // [v64] 議곌린 醫낅즺瑜??꾪븳 移댁슫??
+    let noImprovementCount = 0; // [v64] 조기 종료를 위한 카운터
+
     for (let i = 0; i < 2000; i++) {
         const shuffled = [...availablePool].sort(() => Math.random() - 0.5);
         let currentMatches = [];
@@ -365,13 +369,13 @@ export function optimizeCourtRoundLayout(availablePool, numMatches, partners, op
             const p = shuffled.slice(m * 4, m * 4 + 4);
             if (p.length < 4) { possible = false; break; }
 
-            // [v64] ?뚰듃??以묐났 ?ъ쟾 ?꾪꽣留? ?먯닔 怨꾩궛 ???좏슚??議고빀留?異붿텧
+            // [v64] 파트너 중복 사전 필터링: 점수 계산 전 유효한 조합만 추출
             const combinations = [
                 { t1: [p[0], p[1]], t2: [p[2], p[3]] },
                 { t1: [p[0], p[2]], t2: [p[1], p[3]] },
                 { t1: [p[0], p[3]], t2: [p[1], p[2]] }
             ].filter(c => {
-                // ?뚰듃??以묐났???섎굹?쇰룄 ?덉쑝硫??대떦 議고빀? ?먭린
+                // 파트너 중복이 하나라도 있으면 해당 조합은 폐기
                 return !partners[c.t1[0].id].has(c.t1[1].id) && !partners[c.t2[0].id].has(c.t2[1].id);
             });
 
@@ -391,15 +395,16 @@ export function optimizeCourtRoundLayout(availablePool, numMatches, partners, op
                     if (times > maxOppRepeat) maxOppRepeat = times;
                 }));
                 
-                // ?곷???以묐났 諛⑹? (v63: 3???댁긽 留뚮궓 湲덉? ?뺤콉 諛섏쁺)
+                // 상대편 중복 방지 (v63: 3회 이상 만남 금지 정책 반영)
                 if (matchMode === 'court') {
-                    if (maxOppRepeat >= 2) score -= 20000000; // 3踰덉㎏ 留뚮궓? 媛뺣젰 李⑤떒
-                    else if (maxOppRepeat === 1) score -= 10000; // 2踰덉㎏ 留뚮궓? 媛湲됱쟻 吏??                } else {
+                    if (maxOppRepeat >= 2) score -= 20000000; // 3번째 만남은 강력 차단
+                    else if (maxOppRepeat === 1) score -= 10000; // 2번째 만남은 가급적 지양
+                } else {
                     if (maxOppRepeat >= 2) score -= 20000000;
                     else score -= oppRepeat * 1000;
                 }
 
-                // ?ㅻ젰 洹좏삎 (ELO 李⑥씠 理쒖냼??
+                // 실력 균형 (ELO 차이 최소화)
                 const r1 = c.t1[0].rating || 1500;
                 const r2 = c.t1[1].rating || 1500;
                 const r3 = c.t2[0].rating || 1500;
@@ -418,7 +423,7 @@ export function optimizeCourtRoundLayout(availablePool, numMatches, partners, op
             currentMatches.push(bestChoice);
             currentTotalScore += bestMatchScore;
 
-            // 寃뚯엫 ?잛닔 ?뺥룊???좎?
+            // 게임 횟수 형평성 유지
             p.forEach(player => {
                 const lateJoinPenalty = (player.lateJoin && matchMode === 'court') ? 25000 : 0;
                 currentTotalScore -= ((gameCounts[player.id] || 0) * 50000 + lateJoinPenalty);
@@ -428,12 +433,12 @@ export function optimizeCourtRoundLayout(availablePool, numMatches, partners, op
         if (possible && currentTotalScore > bestScore) {
             bestScore = currentTotalScore;
             bestMatches = currentMatches;
-            noImprovementCount = 0; // 媛쒖꽑 ??移댁슫??由ъ뀑
+            noImprovementCount = 0; // 개선 시 카운터 리셋
         } else {
             noImprovementCount++;
         }
 
-        // [v64] 議곌린 醫낅즺 議곌굔: 200???곗냽 媛쒖꽑 ?놁쓣 ??以묐떒
+        // [v64] 조기 종료 조건: 200회 연속 개선 없을 시 중단
         if (noImprovementCount >= 200) break;
     }
     return bestMatches;
@@ -449,7 +454,7 @@ function generateCourtSchedule(context) {
     const info = currentSessionState.info || '';
     let courtConfig = null;
 
-    // [v65] Firebase?먯꽌 濡쒕뱶???숈쟻 肄뷀듃 ?ㅼ젙 ?곗꽑 ?곸슜
+    // [v65] Firebase에서 로드된 동적 코트 설정 우선 적용
     let targetLocationKey = locationKey;
     if (!targetLocationKey) {
         targetLocationKey = courtConfigs ? Object.keys(courtConfigs).find(key => info.includes(key)) : null;
@@ -461,12 +466,12 @@ function generateCourtSchedule(context) {
         (cfg.courts || []).forEach(c => { courtConfig[c.name] = c.maxRounds; });
     }
 
-    // ?숈쟻 ?ㅼ젙???놁쑝硫??섎뱶肄붾뵫 ?대갚 (?섏쐞 ?명솚??
+    // 동적 설정이 없으면 하드코딩 폴백 (하위 호환성)
     if (!courtConfig) {
-        if (info.includes('以묒븰怨듭썝')) {
-            courtConfig = { '肄뷀듃 1': 5, '肄뷀듃 2': 5, '肄뷀듃 3': 7 };
+        if (info.includes('중앙공원')) {
+            courtConfig = { '코트 1': 5, '코트 2': 5, '코트 3': 7 };
         } else if (info.includes('CS')) {
-            courtConfig = { '肄뷀듃 4': 7, '肄뷀듃 3': 7, '肄뷀듃 2': 5 };
+            courtConfig = { '코트 4': 7, '코트 3': 7, '코트 2': 5 };
         }
     }
 
@@ -480,11 +485,11 @@ function generateCourtSchedule(context) {
         numRounds = 6;
         const defaultCourts = Math.min(3, Math.floor(applicants.length / 4));
         for (let r = 1; r <= numRounds; r++) {
-            roundsToCourts[r] = Array.from({ length: defaultCourts }, (_, i) => `肄뷀듃 ${i + 1}`);
+            roundsToCourts[r] = Array.from({ length: defaultCourts }, (_, i) => `코트 ${i + 1}`);
         }
     }
 
-    // [v65] ?몃떦 理쒕? 寃뚯엫 ?? context?먯꽌 ?꾨떖諛쏄굅??湲곕낯媛?4
+    // [v65] 인당 최대 게임 수: context에서 전달받거나 기본값 4
     const maxGamesDefault = maxGamesPerPlayer || 4;
     const players = [...applicants];
     const gameCounts = {};
@@ -492,11 +497,12 @@ function generateCourtSchedule(context) {
     const partners = {};
     const opponents = {};
 
-    // [v63] ?곗냽 ?댁떇 諛⑹? 諛?寃뚯엫 李몄뿬 洹좏삎 濡쒖쭅 媛뺥솕
+    // [v63] 연속 휴식 방지 및 게임 참여 균형 로직 강화
     const lastPlayedRound = {};
     players.forEach(p => {
         gameCounts[p.id] = 0;
-        maxGamesMap[p.id] = maxGamesDefault; // [v65] 吏媛곸옄 ?ы븿 ?꾩썝 ?숈씪??理쒕? 寃뚯엫 ??        partners[p.id] = new Set();
+        maxGamesMap[p.id] = maxGamesDefault; // [v65] 지각자 포함 전원 동일한 최대 게임 수
+        partners[p.id] = new Set();
         opponents[p.id] = new Map();
         lastPlayedRound[p.id] = 0;
     });
@@ -507,35 +513,38 @@ function generateCourtSchedule(context) {
         const activeCourtsInRound = roundsToCourts[r] || [];
         if (activeCourtsInRound.length === 0) continue;
 
-        // [v63] 媛???몄썝 ? 援ъ꽦 ???곗냽 ?댁떇 諛⑹? 濡쒖쭅 ?곸슜
+        // [v63] 가용 인원 풀 구성 시 연속 휴식 방지 로직 적용
         const availablePool = [...players]
             .filter(p => {
                 if (gameCounts[p.id] >= maxGamesMap[p.id]) return false;
                 if (r === 1 && p.lateJoin) return false; 
                 return true;
             })
-            // [v65] ?뺣젹 ?곗꽑?쒖쐞:
-            // 1?쒖쐞: 2???곗냽 ?댁떇 諛⑹? (吏곸쟾 ?쇱슫???댁떇?먮? 理쒖긽??諛곗튂)
-            // 2?쒖쐞: ?곴쾶 ???щ엺 ?곗꽑 (寃뚯엫 ??洹좏삎)
-            // 3?쒖쐞: ?숈씪 寃뚯엫 ?섏씪 ??吏媛곸옄瑜??ㅻ줈 ???쒓컙 遺議????먯뿰?ㅻ읇寃?3寃뚯엫 ???            // 4?쒖쐞: ?쒕뜡
+            // [v65] 정렬 우선순위:
+            // 1순위: 2회 연속 휴식 방지 (직전 라운드 휴식자를 최상단 배치)
+            // 2순위: 적게 뛴 사람 우선 (게임 수 균형)
+            // 3순위: 동일 게임 수일 때 지각자를 뒤로 → 시간 부족 시 자연스럽게 3게임 대상
+            // 4순위: 랜덤
             .sort((a, b) => {
                 const aRested = lastPlayedRound[a.id] < r - 1;
                 const bRested = lastPlayedRound[b.id] < r - 1;
                 if (aRested && !bRested) return -1;
                 if (!aRested && bRested) return 1;
 
-                // [v65] 寃뚯엫 ???곸? ?щ엺 理쒖슦????吏媛곸옄? 鍮꾩?媛곸옄 紐⑤몢 怨듯룊?섍쾶 寃뚯엫 湲고쉶 遺??                if (gameCounts[a.id] !== gameCounts[b.id]) return gameCounts[a.id] - gameCounts[b.id];
+                // [v65] 게임 수 적은 사람 최우선 → 지각자와 비지각자 모두 공평하게 게임 기회 부여
+                if (gameCounts[a.id] !== gameCounts[b.id]) return gameCounts[a.id] - gameCounts[b.id];
                 
-                // [v65] 寃뚯엫 ?섍? 媛숈쓣 ?뚮쭔 吏媛곸옄瑜??ㅻ줈 諛곗튂
-                // ??留덉?留??쇱슫?쒖뿉???먮━ 遺議???吏媛곸옄媛 3寃뚯엫 ??곸씠 ??                if (a.lateJoin !== b.lateJoin) return a.lateJoin ? 1 : -1;
+                // [v65] 게임 수가 같을 때만 지각자를 뒤로 배치
+                // → 마지막 라운드에서 자리 부족 시 지각자가 3게임 대상이 됨
+                if (a.lateJoin !== b.lateJoin) return a.lateJoin ? 1 : -1;
                 
                 return Math.random() - 0.5;
             });
         const numMatches = Math.min(activeCourtsInRound.length, Math.floor(availablePool.length / 4));
         if (numMatches === 0) continue;
 
-        // [v63] ?ㅼ쭏?곸쑝濡?寃쎄린瑜????몄썝(numMatches * 4)留??뺣젹???쒖꽌?濡?異붿텧
-        // ?뺣젹 湲곗?(?대? ?꾩뿉???섑뻾): 2???곗냽 ?댁떇 諛⑹? > 寃쎄린???곸? ?щ엺 > ?쒕뜡
+        // [v63] 실질적으로 경기를 뛸 인원(numMatches * 4)만 정렬된 순서대로 추출
+        // 정렬 기준(이미 위에서 수행): 2회 연속 휴식 방지 > 경기수 적은 사람 > 랜덤
         const finalPoolForRound = availablePool.slice(0, numMatches * 4);
 
         const roundMatches = optimizeCourtRoundLayout(finalPoolForRound, numMatches, partners, opponents, 'court', gameCounts);
@@ -547,7 +556,7 @@ function generateCourtSchedule(context) {
             const allInMatch = [...match.team1, ...match.team2];
             allInMatch.forEach(p => {
                 gameCounts[p.id]++;
-                lastPlayedRound[p.id] = r; // 留덉?留??쒕룞 ?쇱슫??媛깆떊
+                lastPlayedRound[p.id] = r; // 마지막 활동 라운드 갱신
             });
 
             partners[match.team1[0].id].add(match.team1[1].id);
@@ -594,17 +603,17 @@ export function generateSchedule(context) {
 
     const sessionNum = currentSessionState.sessionNum || sessionNumInput;
 
-    if (!sessionNum) { alert('?뚯감 ?뺣낫媛 ?놁뒿?덈떎. ?뚯감瑜??쒖꽦?뷀븯嫄곕굹 ?낅젰?댁＜?몄슂.'); return null; }
+    if (!sessionNum) { alert('회차 정보가 없습니다. 회차를 활성화하거나 입력해주세요.'); return null; }
 
     let split;
     if (customSplitInput) {
         split = customSplitInput.split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n));
         const sum = split.reduce((a, b) => a + b, 0);
-        if (sum !== applicants.length) { alert('而ㅼ뒪? ?몄썝 ?⑷퀎媛 ?좎껌 ?몄썝怨??쇱튂?섏? ?딆뒿?덈떎.'); return null; }
+        if (sum !== applicants.length) { alert('커스텀 인원 합계가 신청 인원과 일치하지 않습니다.'); return null; }
     } else {
         split = getSplits(applicants.length);
     }
-    if (!split || split.length === 0) { alert('?몄썝 遺꾪븷???ㅽ뙣?덉뒿?덈떎. 議곕퀎 ?몄썝???뺤씤??二쇱꽭??'); return null; }
+    if (!split || split.length === 0) { alert('인원 분할에 실패했습니다. 조별 인원을 확인해 주세요.'); return null; }
 
     let groupsArr = [];
     if (previewGroups && previewGroups.length > 0) {
@@ -612,9 +621,9 @@ export function generateSchedule(context) {
         const expectedSizes = [...split].sort((a, b) => a - b);
         const isMatch = actualSizes.length === expectedSizes.length && actualSizes.every((v, i) => v === expectedSizes[i]);
         if (!isMatch) {
-            const actualStr = previewGroups.map((g, i) => `${String.fromCharCode(65 + i)}議? ${g.length}紐?).join(', ');
+            const actualStr = previewGroups.map((g, i) => `${String.fromCharCode(65 + i)}조: ${g.length}명`).join(', ');
             const expectedStr = split.join(', ');
-            alert(`議곕퀎 ?몄썝 諛곕텇??湲곗?怨?留욎? ?딆뒿?덈떎.\n\n?꾩옱: ${actualStr}\n湲곗?: ${expectedStr}遺꾪븷\n\n?좎닔瑜??쒕옒洹명븯??議??몄꽦??議곗젙??二쇱꽭??`);
+            alert(`조별 인원 배분이 기준과 맞지 않습니다.\n\n현재: ${actualStr}\n기준: ${expectedStr}분할\n\n선수를 드래그하여 조 편성을 조정해 주세요.`);
             return null;
         }
 
@@ -664,9 +673,9 @@ export function generateSchedule(context) {
         });
     }
 
-    // [v6.4.1] 吏媛곸옄 議?遺꾩궛 諛곗튂 ?몃텇?? 
-    // 議??몄썝??4紐낆씤??吏媛곸옄媛 ?ы븿??寃쎌슦, 1?쇱슫??留ㅼ묶??遺덇??ν븯誘濡??ㅼそ(Wait ?щ’)?쇰줈 諛곗튂?⑸땲??
-    // 5???댁긽??議곕뒗 吏媛곸옄媛 ?덉뼱???섎㉧吏 4紐낆씠 1?쇱슫?쒕? ?????덉쑝誘濡?諛곗젙 ?쒖꽌瑜?議곗젙?섏? ?딆뒿?덈떎.
+    // [v6.4.1] 지각자 조 분산 배치 세분화: 
+    // 조 인원이 4명인데 지각자가 포함된 경우, 1라운드 매칭이 불가능하므로 뒤쪽(Wait 슬롯)으로 배치합니다.
+    // 5인 이상의 조는 지각자가 있어도 나머지 4명이 1라운드를 뛸 수 있으므로 배정 순서를 조정하지 않습니다.
     groupsArr.sort((a, b) => {
         const aImpact = (a.length === 4 && a.some(p => p.lateJoin)) ? 1 : 0;
         const bImpact = (b.length === 4 && b.some(p => p.lateJoin)) ? 1 : 0;
@@ -695,7 +704,7 @@ export function generateSchedule(context) {
             targetGamesPerPlayer[p.id] = defaultTarget;
         });
 
-        // [v7.0] 寃곗젙濡좎쟻 ?꾩닔 ?먯깋???댁슜??議곕퀎由ш렇 ?吏??앹꽦
+        // [v7.0] 결정론적 전수 탐색을 이용한 조별리그 대진 생성
         let matchSchedule = generateGroupScheduleDeterministic(g, targetGamesPerPlayer);
 
         if (matchSchedule) {
@@ -716,11 +725,11 @@ export function generateSchedule(context) {
                 });
             });
         } else {
-            // [v7.3] ?앹꽦 ?ㅽ뙣 ???곸꽭 ?ъ쑀 ?덈궡 異붽?
+            // [v7.3] 생성 실패 시 상세 사유 안내 추가
             const is8 = g.length === 8;
             const msg = is8 
-                ? `[${gLabel}議? 8???吏꾪몴 ?앹꽦???ㅽ뙣?덉뒿?덈떎. ?대? ?쇰━ ?ㅻ쪟?????덉뒿?덈떎.`
-                : `[${gLabel}議? ?吏꾪몴 ?앹꽦???ㅽ뙣?덉뒿?덈떎.\n- ?ъ쑀: 吏媛곸옄 ?ㅼ젙 ?깆쑝濡??명빐 紐⑤뱺 ?좎닔媛 留뚯”?섎뒗 ?뚰듃??以묐났 諛⑹? ?吏꾩쓣 李얠쓣 ???놁뒿?덈떎.`;
+                ? `[${gLabel}조] 8인 대진표 생성에 실패했습니다. 내부 논리 오류일 수 있습니다.`
+                : `[${gLabel}조] 대진표 생성에 실패했습니다.\n- 사유: 지각자 설정 등으로 인해 모든 선수가 만족하는 파트너 중복 방지 대진을 찾을 수 없습니다.`;
             alert(msg);
             return null;
         }
@@ -735,14 +744,14 @@ export function generateSchedule(context) {
 }
 
 // ============================================================
-// [v7.0] 寃곗젙濡좎쟻 議곕퀎 ?吏꾪몴 ?앹꽦 ?뚭퀬由ъ쬁
-// ?숈씪 ?낅젰(?좎닔 援ъ꽦 + ELO) ????긽 ?숈씪 異쒕젰 蹂댁옣
+// [v7.0] 결정론적 조별 대진표 생성 알고리즘
+// 동일 입력(선수 구성 + ELO) → 항상 동일 출력 보장
 // ============================================================
 function generateGroupScheduleDeterministic(group, targetGamesPerPlayer) {
-  // ?? [v7.4] 8??議??꾩슜 ?뱀닔 ?뚭퀬由ъ쬁: ???섏쐞 洹몃９ 遺꾪븷 + 理쒖쥌 誘뱀뒪 ??
-  // ?ъ슜???쒖븞: ?곸쐞 4紐??섏쐞 4紐?媛곴컖 由ш렇 吏꾪뻾 ?? 留덉?留??쇱슫?쒖뿉??援먯감 留ㅼ묶
+  // ── [v7.4] 8인 조 전용 특수 알고리즘: 상/하위 그룹 분할 + 최종 믹스 ──
+  // 사용자 제안: 상위 4명/하위 4명 각각 리그 진행 후, 마지막 라운드에서 교차 매칭
   if (group.length === 8) {
-    // 1. ELO ?먯닔 湲곗? ?뺣젹
+    // 1. ELO 점수 기준 정렬
     const sorted = [...group].sort((a, b) => {
       if (b.rating !== a.rating) return b.rating - a.rating;
       return String(a.id).localeCompare(String(b.id));
@@ -751,13 +760,13 @@ function generateGroupScheduleDeterministic(group, targetGamesPerPlayer) {
     const top = sorted.slice(0, 4);
     const bot = sorted.slice(4, 8);
 
-    // 2. 1~3 ?쇱슫?? ?곸쐞 4紐낅겮由? ?섏쐞 4紐낅겮由?寃쎄린 (Round Robin)
-    // ?⑦꽩: [0,1 vs 2,3], [0,2 vs 1,3], [0,3 vs 1,2]
+    // 2. 1~3 라운드: 상위 4명끼리, 하위 4명끼리 경기 (Round Robin)
+    // 패턴: [0,1 vs 2,3], [0,2 vs 1,3], [0,3 vs 1,2]
     const rrPairs = [[0, 1, 2, 3], [0, 2, 1, 3], [0, 3, 1, 2]];
     const schedule = [];
 
     const getBestPairing = (p4) => {
-      // 4??議??댁뿉??ELO 李⑥씠媛 媛???곸? 2v2 ? 援ъ꽦??諛섑솚
+      // 4인 조 내에서 ELO 차이가 가장 적은 2v2 팀 구성을 반환
       const p = p4;
       const options = [
         { t1: [p[0], p[1]], t2: [p[2], p[3]], diff: Math.abs((p[0].rating+p[1].rating) - (p[2].rating+p[3].rating)) },
@@ -767,7 +776,7 @@ function generateGroupScheduleDeterministic(group, targetGamesPerPlayer) {
       return options.sort((a, b) => a.diff - b.diff)[0];
     };
 
-    // 1~3 ?쇱슫???앹꽦 (珥?6寃쎄린)
+    // 1~3 라운드 생성 (총 6경기)
     for (let r = 0; r < 3; r++) {
       const pIdx = rrPairs[r];
       const matchTopMembers = [top[pIdx[0]], top[pIdx[1]], top[pIdx[2]], top[pIdx[3]]];
@@ -776,11 +785,11 @@ function generateGroupScheduleDeterministic(group, targetGamesPerPlayer) {
       const mTop = getBestPairing(matchTopMembers);
       const mBot = getBestPairing(matchBotMembers);
       
-      schedule.push(mTop, mBot); // ?쇱슫?쒕퀎濡??곸쐞/?섏쐞 寃쎄린 ?섎굹??異붽?
+      schedule.push(mTop, mBot); // 라운드별로 상위/하위 경기 하나씩 추가
     }
 
-    // 3. 4 ?쇱슫?? ???섏쐞 誘뱀뒪 留ㅼ튂 (?뚰듃??以묐났 諛⑹?瑜??꾪빐 ?덈줈??議고빀)
-    // ?곸쐞-?섏쐞 ?욊린 ?꾪븳 寃곗젙濡좎쟻 議고빀: [S1, S2, H1, H2] & [S3, S4, H3, H4]
+    // 3. 4 라운드: 상/하위 믹스 매치 (파트너 중복 방지를 위해 새로운 조합)
+    // 상위-하위 섞기 위한 결정론적 조합: [S1, S2, H1, H2] & [S3, S4, H3, H4]
     const mix1Members = [top[0], top[1], bot[0], bot[1]];
     const mix2Members = [top[2], top[3], bot[2], bot[3]];
     
@@ -791,7 +800,7 @@ function generateGroupScheduleDeterministic(group, targetGamesPerPlayer) {
 
   const TARGET = targetGamesPerPlayer[group[0].id];
 
-  // ?? STEP 1: 怨좎쑀 寃쎄린 議고빀 ?앹꽦 (? ?쒖꽌 以묐났 ?쒓굅, 寃곗젙濡좎쟻 ?뺣젹) ??
+  // ── STEP 1: 고유 경기 조합 생성 (팀 순서 중복 제거, 결정론적 정렬) ──
   function buildUniqCombos(pool) {
     const combos = [], seen = new Set();
     for (let i = 0; i < pool.length; i++) {
@@ -825,7 +834,7 @@ function generateGroupScheduleDeterministic(group, targetGamesPerPlayer) {
         }
       }
     }
-    // 寃곗젙濡좎쟻 ?뺣젹: eloDiff????s1????id (DFS ?먯깋 ?쒖꽌??怨좎젙)
+    // 결정론적 정렬: eloDiff↑ → s1↓ → id (DFS 탐색 순서도 고정)
     return combos.sort((a, b) =>
       a.eloDiff !== b.eloDiff ? a.eloDiff - b.eloDiff :
       b.s1 !== a.s1 ? b.s1 - a.s1 :
@@ -833,20 +842,20 @@ function generateGroupScheduleDeterministic(group, targetGamesPerPlayer) {
     );
   }
 
-  // ?? STEP 2: 紐⑤뱺 ?쒖빟??留뚯”?섎뒗 ?꾩쟾 ?명듃 ?꾩닔 ?먯깋 ??
+  // ── STEP 2: 모든 제약을 만족하는 완전 세트 전수 탐색 ──
   function findAllSets(allCombos) {
     const sets = [];
     const numMatches = Math.floor(group.reduce((acc, p) => acc + TARGET, 0) / 4);
-    const MAX_SETS = group.length >= 7 ? 500 : Infinity; // 7紐??댁긽: 500?명듃 ?쒗븳
+    const MAX_SETS = group.length >= 7 ? 500 : Infinity; // 7명 이상: 500세트 제한
 
     function dfs(idx, chosen, gc, pt, op) {
-      if (sets.length >= MAX_SETS) return; // 議곌린 醫낅즺
+      if (sets.length >= MAX_SETS) return; // 조기 종료
       if (chosen.length === numMatches) {
         if (group.every(p => gc[p.id] === TARGET)) sets.push([...chosen]);
         return;
       }
       for (let i = idx; i < allCombos.length; i++) {
-        if (sets.length >= MAX_SETS) return; // 議곌린 醫낅즺
+        if (sets.length >= MAX_SETS) return; // 조기 종료
         const c = allCombos[i];
         const four = [...c.t1, ...c.t2];
 
@@ -860,8 +869,8 @@ function generateGroupScheduleDeterministic(group, targetGamesPerPlayer) {
         }));
         if (oppFail) continue;
 
-        // [v7.1] 8??議??꾩슜 ?꾩썝 異쒖쟾 ?쒖빟 議곌굔:
-        // ???쇱슫??2媛?寃쎄린) ?댁뿉???좎닔 以묐났???놁뼱????(8紐??꾩썝 寃쎄린)
+        // [v7.1] 8인 조 전용 전원 출전 제약 조건:
+        // 한 라운드(2개 경기) 내에서 선수 중복이 없어야 함 (8명 전원 경기)
         if (group.length === 8 && chosen.length % 2 === 1) {
           const prevMatch = chosen[chosen.length - 1];
           const prevPlayers = new Set([...prevMatch.t1, ...prevMatch.t2].map(p => p.id));
@@ -893,19 +902,20 @@ function generateGroupScheduleDeterministic(group, targetGamesPerPlayer) {
     return sets;
   }
 
-  // ?? STEP 3: ?명듃 ?먯닔??(寃곗젙濡좎쟻 4?④퀎 湲곗?) ??
+  // ── STEP 3: 세트 점수화 (결정론적 4단계 기준) ──
   function scoreSet(s) {
     const diffs = s.map(c => c.eloDiff).sort((a, b) => a - b);
     return {
-      totalDiff: diffs.reduce((a, b) => a + b, 0), // 1?쒖쐞: ELO李⑥씠 ?⑹궛 理쒖냼
-      maxDiff:   Math.max(...diffs),                // 2?쒖쐞: 理쒕? ?⑥씪寃쎄린 李⑥씠 理쒖냼
-      diffSeq:   diffs.join(','),                   // 3?쒖쐞: 李⑥씠 遺꾪룷 ?ъ쟾??      setKey:    s.map(c => c.id).sort().join('|')   // 4?쒖쐞: ?꾩쟾 ?숈젏 tie-break
+      totalDiff: diffs.reduce((a, b) => a + b, 0), // 1순위: ELO차이 합산 최소
+      maxDiff:   Math.max(...diffs),                // 2순위: 최대 단일경기 차이 최소
+      diffSeq:   diffs.join(','),                   // 3순위: 차이 분포 사전순
+      setKey:    s.map(c => c.id).sort().join('|')   // 4순위: 완전 동점 tie-break
     };
   }
 
-  // ?? STEP 4: ?쇱슫??諛곗젙 (?곗냽 ?댁떇 諛⑹? + 吏媛곸옄 R1 ?쒖쇅, DFS 湲곕컲) ??
+  // ── STEP 4: 라운드 배정 (연속 휴식 방지 + 지각자 R1 제외, DFS 기반) ──
   function assignRounds(set) {
-    // 4紐?議??꾩썝 異쒖쟾, ?댁떇???놁쓬)???⑥닚 ?뺣젹濡?異⑸텇
+    // 4명 조(전원 출전, 휴식자 없음)는 단순 정렬로 충분
     if (group.length === 4) {
       return [...set].sort((a, b) => {
         const aLate = [...a.t1, ...a.t2].some(p => p.lateJoin);
@@ -916,7 +926,7 @@ function generateGroupScheduleDeterministic(group, targetGamesPerPlayer) {
       });
     }
 
-    // 5紐??댁긽: DFS 湲곕컲 ?쇱슫??諛곗젙 (?곗냽 ?댁떇 諛⑹? ?섎뱶 ?쒖빟)
+    // 5명 이상: DFS 기반 라운드 배정 (연속 휴식 방지 하드 제약)
     const n = set.length;
     const used = new Array(n).fill(false);
     const result = new Array(n).fill(null);
@@ -926,7 +936,7 @@ function generateGroupScheduleDeterministic(group, targetGamesPerPlayer) {
     function tryAssign(round) {
       if (round > n) return true;
 
-      // ?꾨낫瑜?寃곗젙濡좎쟻 ?쒖꽌濡??뺣젹: 吏媛곸옄 寃쎄린 R1 ?쒖쇅 ??ELO李⑥씠 ?묒? ????id
+      // 후보를 결정론적 순서로 정렬: 지각자 경기 R1 제외 → ELO차이 작은 순 → id
       const candidates = set
         .map((c, i) => ({ c, i }))
         .filter(({ i }) => !used[i])
@@ -940,8 +950,9 @@ function generateGroupScheduleDeterministic(group, targetGamesPerPlayer) {
         });
 
       for (const { c, i } of candidates) {
-        // [v7.5] ?곗냽 ?댁떇 泥댄겕 (5~7紐?議곗뿉 ?곸슜)
-        // 7紐?議곕룄 ?쇱슫??諛곗튂瑜?理쒖쟻?뷀븯硫??곗냽 ?댁떇 諛⑹? 媛??        if (group.length <= 7) {
+        // [v7.5] 연속 휴식 체크 (5~7명 조에 적용)
+        // 7명 조도 라운드 배치를 최적화하면 연속 휴식 방지 가능
+        if (group.length <= 7) {
           const playing = new Set([...c.t1, ...c.t2].map(p => p.id));
           let restFail = false;
           for (const p of group) {
@@ -952,7 +963,7 @@ function generateGroupScheduleDeterministic(group, targetGamesPerPlayer) {
           if (restFail) continue;
         }
 
-        // ??留ㅼ튂瑜?round??諛곗젙
+        // 이 매치를 round에 배정
         used[i] = true;
         result[round - 1] = c;
         const prev = {};
@@ -960,7 +971,7 @@ function generateGroupScheduleDeterministic(group, targetGamesPerPlayer) {
 
         if (tryAssign(round + 1)) return true;
 
-        // 諛깊듃?섑궧
+        // 백트래킹
         used[i] = false;
         result[round - 1] = null;
         [...c.t1, ...c.t2].forEach(p => { lastPlayed[p.id] = prev[p.id]; });
@@ -971,23 +982,23 @@ function generateGroupScheduleDeterministic(group, targetGamesPerPlayer) {
     if (tryAssign(1)) {
       return result;
     }
-    // [v7.5] 7紐?議? DFS ?ㅽ뙣 ??null 諛섑솚 ???ㅻⅨ ?명듃 ?쒕룄 ?먮뒗 MATCH_PATTERNS ?대갚 ?좊룄
+    // [v7.5] 7명 조: DFS 실패 시 null 반환 → 다른 세트 시도 또는 MATCH_PATTERNS 폴백 유도
     if (group.length >= 7) {
       return null;
     }
-    // 5~6紐?議??대갚: ?⑥닚 ?뺣젹 (?곗냽 ?댁떇 媛?ν븯吏留??吏??먯껜???좏슚)
+    // 5~6명 조 폴백: 단순 정렬 (연속 휴식 가능하지만 대진 자체는 유효)
     return [...set].sort((a, b) => {
       if (a.eloDiff !== b.eloDiff) return a.eloDiff - b.eloDiff;
       return a.id.localeCompare(b.id);
     });
   }
 
-  // ?? ?ㅽ뻾 ??
+  // ── 실행 ──
   const allCombos = buildUniqCombos(group);
   const allSets   = findAllSets(allCombos);
 
   if (allSets.length > 0) {
-    // [v7.5] 紐⑤뱺 ?명듃瑜??먯닔?쒖쑝濡??뺣젹???? ?쇱슫??諛곗젙(?곗냽 ?댁떇 諛⑹?)???깃났?섎뒗 泥?踰덉㎏ ?명듃瑜?梨꾪깮
+    // [v7.5] 모든 세트를 점수순으로 정렬한 뒤, 라운드 배정(연속 휴식 방지)이 성공하는 첫 번째 세트를 채택
     const sortedSets = allSets
       .map(s => ({ set: s, score: scoreSet(s) }))
       .sort((a, b) => {
@@ -1010,10 +1021,10 @@ function generateGroupScheduleDeterministic(group, targetGamesPerPlayer) {
     }
   }
 
-  // [v7.5] DFS ?쇱슫??諛곗젙 ?ㅽ뙣 ??湲곗〈 異붿쿇 ?⑦꽩(MATCH_PATTERNS) ?대갚
+  // [v7.5] DFS 라운드 배정 실패 시 기존 추천 패턴(MATCH_PATTERNS) 폴백
 const pattern = MATCH_PATTERNS[group.length];
 if (pattern) {
-  console.log(`[Engine] DFS ?쇱슫??諛곗젙 ?ㅽ뙣 ??MATCH_PATTERNS[${group.length}] ?대갚 ?ъ슜`);
+  console.log(`[Engine] DFS 라운드 배정 실패 → MATCH_PATTERNS[${group.length}] 폴백 사용`);
   const sorted = [...group].sort((a, b) => {
     if ((b.rating || 1500) !== (a.rating || 1500)) return (b.rating || 1500) - (a.rating || 1500);
     return String(a.id).localeCompare(String(b.id));
@@ -1156,4 +1167,3 @@ export function applyNewMatches(context) {
         updateRankMap(members, rankMap, previousRankingIds, { matchHistory: newMatches, applicants, currentSchedule });
     }
 }
-
