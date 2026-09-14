@@ -13,6 +13,7 @@ import {
     deleteVideo as fbDeleteVideo,
     switchDatabase as fbSwitchDatabase,
     loadDatabase as fbLoadDatabase,
+    getCurrentDbName,
     fetchDbList,
     saveReport as fbSaveReport,
     saveMatchScoreWithTransaction as fbSaveMatchScoreWithTransaction,
@@ -208,6 +209,12 @@ async function init() {
                 if (targets.includes(ach.playerName) && (ach.sessionNum === undefined || ach.sessionNum === null)) {
                     console.log(`[Migration] Patching sessionNum 10 for ${ach.playerName}`);
                     await fbUpdateAchievement(ach.id, { sessionNum: 10 });
+                }
+                
+                // [Migration] 기존 외부대회 기록에 dbName 식별자 부여 (중복 합산 방지)
+                if (!ach.dbName) {
+                    console.log(`[Migration] Patching dbName '2026 상반기' for ${ach.playerName}`);
+                    await fbUpdateAchievement(ach.id, { dbName: '2026 상반기' });
                 }
             }
         }
@@ -726,7 +733,8 @@ function recalculateAll() {
         applicants,
         currentSchedule,
         achievements: clonedAchievements,
-        enableAttendanceBonus // [v94] DB별 출석 보너스 플래그 전달
+        enableAttendanceBonus, // [v94] DB별 출석 보너스 플래그 전달
+        currentDbName: getCurrentDbName()
     });
 
     // 계산된 결과(elo_at_match 등)가 포함된 복제본을 다시 원본 전역 변수에 반영합니다.
@@ -1375,7 +1383,8 @@ async function processAddAchievement() {
         sessionNum: isNaN(sessionNum) ? null : sessionNum,
         mmrBonus: bonus, 
         compName: compName,
-        result: result
+        result: result,
+        dbName: getCurrentDbName() // [버그수정] 중복 합산 방지를 위해 현재 시즌 명시
     };
     
     // 1. 현재 메모리의 회원 MMR에 즉시 반영 (Snapshot Update)
