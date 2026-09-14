@@ -30,7 +30,7 @@ import {
     fbAddApplicantWithTransaction,
     fbRemoveApplicantWithTransaction,
     fbToggleLateJoinWithTransaction
-} from './firebase-api.js?v=90';
+} from './firebase-api.js?v=91';
 
 import {
     updateAdminUI as uiUpdateAdminUI,
@@ -55,7 +55,7 @@ import {
     renderHistoryEditModal as uiRenderHistoryEditModal,
     renderCurrentMatchEditModal as uiRenderCurrentMatchEditModal,
     renderExternalAchievements as uiRenderExternalAchievements
-} from './ui.js?v=90';
+} from './ui.js?v=91';
 
 import {
     ELO_INITIAL,
@@ -64,7 +64,7 @@ import {
     recalculateAll as engineRecalculateAll,
     applyNewMatches as engineApplyNewMatches,
     generateSchedule as engineGenerateSchedule
-} from './engine.js?v=90';
+} from './engine.js?v=91';
 
 // --- 전역 애플리케이션 상태 (State) ---
 let members = [];
@@ -204,19 +204,7 @@ async function init() {
 
         // [v89] 요청하신 특정 선수들의 기존 데이터에 회차가 없을 경우 10회차로 자동 보정 (관리자 전용 일회성 로직)
         if (isAdmin && achievements.length > 0) {
-            const targets = ["곽정엽", "김신", "이석희"];
-            for (const ach of achievements) {
-                if (targets.includes(ach.playerName) && (ach.sessionNum === undefined || ach.sessionNum === null)) {
-                    console.log(`[Migration] Patching sessionNum 10 for ${ach.playerName}`);
-                    await fbUpdateAchievement(ach.id, { sessionNum: 10 });
-                }
-                
-                // [Migration] 기존 외부대회 기록에 dbName 식별자 부여 (중복 합산 방지)
-                if (!ach.dbName) {
-                    console.log(`[Migration] Patching dbName '2026 상반기' for ${ach.playerName}`);
-                    await fbUpdateAchievement(ach.id, { dbName: '2026 상반기' });
-                }
-            }
+            runAchievementMigration();
         }
 
         // [v89] 입상 기록 변경 시에도 순위 스냅샷을 갱신합니다. -> 최적화로 인해 제거
@@ -1296,6 +1284,7 @@ function tryAdminLogin() {
         if (pwInput) pwInput.value = '';
         if (status) status.innerText = '';
         updateUI();
+        runAchievementMigration(); // [버그수정] 로그인 성공 직후 마이그레이션 실행
     } else {
         if (status) {
             status.innerText = "비밀번호가 올바르지 않습니다.";
@@ -1304,6 +1293,38 @@ function tryAdminLogin() {
         if (pwInput) {
             pwInput.select(); // 틀렸을 때 바로 수정할 수 있게 선택 상태로 만듦
         }
+    }
+}
+
+// [버그수정] 마이그레이션 로직 분리 (관리자 로그인 직후 실행을 위함)
+async function runAchievementMigration() {
+    if (!isAdmin || !achievements || achievements.length === 0) return;
+    
+    const targets = ["곽정엽", "김신", "이석희"];
+    let migrationCount = 0;
+    
+    for (const ach of achievements) {
+        let updates = {};
+        
+        if (targets.includes(ach.playerName) && (ach.sessionNum === undefined || ach.sessionNum === null)) {
+            updates.sessionNum = 10;
+        }
+        
+        // [Migration] 기존 외부대회 기록에 dbName 식별자 부여 (중복 합산 방지)
+        if (!ach.dbName) {
+            updates.dbName = '2026 상반기';
+        }
+        
+        if (Object.keys(updates).length > 0) {
+            console.log(`[Migration] Patching ${JSON.stringify(updates)} for ${ach.playerName}`);
+            await fbUpdateAchievement(ach.id, updates);
+            migrationCount++;
+        }
+    }
+    
+    if (migrationCount > 0) {
+        console.log(`[Migration] ${migrationCount}개의 기록에 대해 마이그레이션을 완료했습니다.`);
+        alert(`과거 입상 기록 마이그레이션(${migrationCount}건)이 완료되었습니다.\n시스템 설정에서 '시스템 재계산'을 실행해 주세요.`);
     }
 }
 
