@@ -1152,8 +1152,30 @@ export function renderBadgeHall(context) {
 
     // --- 1. 명예의 전당용 (최고의 도토리 + 외부 대회) ---
     if (hallGrid) {
-        // [사용자 요청] '최고의 도토리' 임시 숨김 처리
-        const topAcornHTML = ``;
+        // [v92] '최고의 도토리' - MMR 기준 Top 3 포디움 형태로 표시
+        const activeMembers = members.filter(m => m.isActive !== false && m.matchCount > 0);
+        const top3 = [...activeMembers].sort((a, b) => (b.mmr || 0) - (a.mmr || 0)).slice(0, 3);
+        const medalIcons = ['🥇', '🥈', '🥉'];
+        const medalColors = ['#FFD700', '#C0C0C0', '#CD7F32'];
+        const medalLabels = ['1위', '2위', '3위'];
+
+        const topAcornHTML = top3.length > 0 ? `
+            <div class="stat-card badge-card" style="grid-column: 1 / -1;">
+                <div class="card-icon">🏅</div>
+                <div class="card-content" style="width:100%">
+                    <h3>최고의 도토리</h3>
+                    <p class="card-desc">MMR 최상위 랭커</p>
+                    <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin-top:12px;">
+                        ${top3.map((m, i) => `
+                        <div style="display:flex; flex-direction:column; align-items:center; gap:6px; background: rgba(255,255,255,0.05); border-radius:12px; padding:12px 18px; border: 1px solid ${medalColors[i]}44; min-width: 90px;">
+                            <span style="font-size:2rem; line-height:1;">${medalIcons[i]}</span>
+                            <span style="font-size:0.7rem; color:${medalColors[i]}; font-weight:700; letter-spacing:0.05em;">${medalLabels[i]}</span>
+                            <span class="player-name" style="font-size:0.95rem; font-weight:bold; color:var(--text-primary);">${m.name}</span>
+                            <span style="font-size:0.75rem; color:var(--text-secondary);">MMR ${Math.round(m.mmr || 0)}</span>
+                        </div>`).join('')}
+                    </div>
+                </div>
+            </div>` : ``;
 
         let externalHTML = '';
         if (achievements && achievements.length > 0) {
