@@ -4,7 +4,8 @@
  */
 
 const WIN_STREAK_THRESHOLD = 3;
-const PARTNER_MIN_GAMES = 3;
+const PARTNER_MIN_GAMES = 5;
+const NEMESIS_MIN_GAMES = 3;
 
 /**
  * 1. 뱃지 현황 계산
@@ -281,7 +282,7 @@ export const getPlayerInsights = (targetId, members, matchHistory) => {
         return { id, name: member ? member.name : '알 수 없음', ...stats };
     });
     const nemesis = antagonists
-        .filter(a => a.netEloChange < 0)
+        .filter(a => a.games >= NEMESIS_MIN_GAMES && a.netEloChange < 0)
         .sort((a, b) => a.netEloChange - b.netEloChange)[0];
 
     // 2. 🤝 환상의 파트너: 최소 3경기, 승률 50% 이상, 승률 우선

@@ -1047,3 +1047,119 @@ if (pattern) {
 
   return null;
 }
+
+export function applyNewMatches(context) {
+    const { members, newMatches, rankMap, sessionRankSnapshots, enableAttendanceBonus, applicants, currentSchedule } = context;
+    const memberMap = new Map(members.map(m => [String(m.id), m]));
+    
+    const sId = (newMatches.length > 0 && newMatches[0].sessionNum !== undefined && newMatches[0].sessionNum !== null) 
+                ? newMatches[0].sessionNum.toString() : "999";
+
+    const startMmrs = members.reduce((acc, m) => { acc[m.id] = m.mmr; return acc; }, {});
+
+    newMatches.forEach((event, i) => {
+        let t1Base = event.t1_ids || [];
+        if (t1Base.length === 0 && event.t1_names) t1Base = event.t1_names;
+        if (t1Base.length === 0 && event.t1) t1Base = event.t1.map(p => p.id || p.name);
+
+        let t2Base = event.t2_ids || [];
+        if (t2Base.length === 0 && event.t2_names) t2Base = event.t2_names;
+        if (t2Base.length === 0 && event.t2) t2Base = event.t2.map(p => p.id || p.name);
+
+        const getMember = (id, name) => {
+            let m = id ? memberMap.get(String(id)) : null;
+            if (!m && name) {
+                const cleanName = name.trim();
+                m = members.find(x => x.name.trim() === cleanName);
+            }
+            return m;
+        };
+
+        const team1 = t1Base.map((item, idx) => {
+            const id = event.t1_ids ? event.t1_ids[idx] : null;
+            const name = event.t1_names ? event.t1_names[idx] : (typeof item === 'string' ? item : null);
+            let m = getMember(id, name);
+            if (!m && name) {
+                m = { id: id || `tmp_${Date.now()}_${idx}`, name: name, rating: ELO_INITIAL, mmr: ELO_INITIAL, matchCount: 0, wins: 0, losses: 0, draws: 0, scoreDiff: 0, participationArr: [] };
+                members.push(m);
+                memberMap.set(String(m.id), m);
+            }
+            return m;
+        }).filter(Boolean);
+
+        const team2 = t2Base.map((item, idx) => {
+            const id = event.t2_ids ? event.t2_ids[idx] : null;
+            const name = event.t2_names ? event.t2_names[idx] : (typeof item === 'string' ? item : null);
+            let m = getMember(id, name);
+            if (!m && name) {
+                m = { id: id || `tmp_${Date.now()}_${idx}`, name: name, rating: ELO_INITIAL, mmr: ELO_INITIAL, matchCount: 0, wins: 0, losses: 0, draws: 0, scoreDiff: 0, participationArr: [] };
+                members.push(m);
+                memberMap.set(String(m.id), m);
+            }
+            return m;
+        }).filter(Boolean);
+
+        if (team1.length === 0 || team2.length === 0) return;
+
+        const getStartMmr = (m) => (startMmrs[m.id] !== undefined ? startMmrs[m.id] : m.mmr);
+        const mmr1 = team1.reduce((sum, m) => sum + getStartMmr(m), 0) / team1.length;
+        const mmr2 = team2.reduce((sum, m) => sum + getStartMmr(m), 0) / team2.length;
+        const expected = 1 / (1 + Math.pow(10, (mmr2 - mmr1) / 400));
+        
+        const val1 = (event.score1 !== undefined && event.score1 !== null) ? event.score1 : event.s1;
+        const val2 = (event.score2 !== undefined && event.score2 !== null) ? event.score2 : event.s2;
+        const s1 = parseInt(val1);
+        const s2 = parseInt(val2);
+        const actual = s1 > s2 ? 1 : (s1 < s2 ? 0 : 0.5);
+        
+        let change = K_FACTOR * (actual - expected);
+        if (Math.abs(s1 - s2) >= 6) change *= 1.5;
+        change = Math.round(change);
+
+        const attendanceBonus = Math.round(K_FACTOR / 2);
+        
+        event.elo_at_match = {
+            expected: expected,
+            change1: change,
+            change2: -change,
+            attendanceBonus: attendanceBonus,
+            mmr1_before: mmr1,
+            mmr2_before: mmr2
+        };
+
+        [...team1, ...team2].forEach(m => {
+            m.matchCount = (m.matchCount || 0) + 1;
+            if (!m.participationArr) m.participationArr = [];
+            if (!m.participationArr.includes(sId)) {
+                m.participationArr.push(sId);
+            }
+        });
+
+        const updatePeakMmr = (m) => {
+            if (m.mmr > (m.peakMmr || 0)) {
+                m.peakMmr = m.mmr;
+                m.peakMmrDate = event.date || new Date().toISOString().split('T')[0];
+            }
+        };
+
+        if (s1 > s2) {
+            team1.forEach(m => { m.wins++; m.rating += change; m.mmr += change; m.scoreDiff += (s1 - s2); updatePeakMmr(m); });
+            team2.forEach(m => { m.losses++; m.rating -= change; m.mmr -= change; m.scoreDiff += (s2 - s1); });
+        } else if (actual === 0) {
+            team1.forEach(m => { m.losses++; m.rating += change; m.mmr += change; m.scoreDiff += (s1 - s2); updatePeakMmr(m); });
+            team2.forEach(m => { m.wins++; m.rating -= change; m.mmr -= change; m.scoreDiff += (s2 - s1); });
+        } else {
+            [...team1, ...team2].forEach(m => { m.draws++; updatePeakMmr(m); });
+        }
+    });
+
+    if (newMatches.length > 0) {
+        const prevSnapshot = sessionRankSnapshots[sId] || {}; 
+        const previousRankingIds = Object.entries(prevSnapshot)
+            .sort(([, rankA], [, rankB]) => rankA - rankB)
+            .map(([id]) => id);
+
+        finalizeSession(sId, members, sessionRankSnapshots, {}, [], enableAttendanceBonus);
+        updateRankMap(members, rankMap, previousRankingIds, { matchHistory: newMatches, applicants, currentSchedule });
+    }
+}

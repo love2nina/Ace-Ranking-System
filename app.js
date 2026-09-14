@@ -61,6 +61,7 @@ import {
     GAME_COUNTS,
     getSplits,
     recalculateAll as engineRecalculateAll,
+    applyNewMatches as engineApplyNewMatches,
     generateSchedule as engineGenerateSchedule
 } from './engine.js?v=89';
 
@@ -951,10 +952,14 @@ async function commitSession() {
             groupRound: m.groupRound || 0
         }));
 
-        // 2. 임시 배열을 메모리상의 matchHistory에 추가하고 로컬 재계산 실행
+        // 2. 신규 경기에 대해 점진적 업데이트 실행 (전체 재계산 대체)
         const newCount = newMatches.length;
+        engineApplyNewMatches({
+            members, newMatches, rankMap, sessionRankSnapshots, enableAttendanceBonus, applicants, currentSchedule
+        });
+        
+        // 업데이트된 신규 경기를 메모리상의 matchHistory에 추가
         matchHistory.push(...newMatches);
-        recalculateAll(); // newMatches가 반영된 상태로 elo_at_match가 재계산됨
 
         // 3. 재계산된 elo_at_match가 포함된 최신 내역을 DB에 저장
         const calculatedNewMatches = matchHistory.slice(-newCount);
@@ -1539,7 +1544,7 @@ async function saveEdit() {
         }
 
         closeEditModal();
-        recalculateAll(); // 로컬 캐시 즉시 갱신
+        updateRanks(); // 로컬 캐시 즉시 갱신 (전체 재계산 생략)
         updateUI();
     } catch (e) {
         console.error("Save Edit Error:", e);

@@ -150,9 +150,24 @@ export function renderApplicants(context) {
         return;
     }
 
+    let prevSnapshot = null;
+    if (context.sessionRankSnapshots) {
+        const nums = Object.keys(context.sessionRankSnapshots)
+            .map(n => parseInt(n))
+            .filter(n => n < currentSessionState.sessionNum)
+            .sort((a, b) => b - a);
+        if (nums.length > 0) {
+            prevSnapshot = context.sessionRankSnapshots[nums[0]];
+        }
+    }
+
+    const getApplicantRank = (id) => {
+        return (prevSnapshot && prevSnapshot[String(id)]) ? prevSnapshot[String(id)] : 9999;
+    };
+
     const sortedApplicants = [...applicants].sort((a, b) => {
-        const rankA = rankMap.get(String(a.id))?.rank || 9999;
-        const rankB = rankMap.get(String(b.id))?.rank || 9999;
+        const rankA = getApplicantRank(a.id);
+        const rankB = getApplicantRank(b.id);
         if (rankA !== rankB) return rankA - rankB;
 
         const rA = a.rating || 1500;
@@ -167,10 +182,9 @@ export function renderApplicants(context) {
         sortedApplicants.forEach(a => {
             const div = document.createElement('div'); div.className = 'player-tag';
             if (a.lateJoin) div.classList.add('late-join');
-            const info = rankMap.get(String(a.id));
-            const member = context.members && context.members.find(m => String(m.id) === String(a.id));
-            const hasMatches = member && member.matchCount > 0;
-            const rankLabel = (info && hasMatches) ? `<span style="font-size:0.8em; color:var(--text-secondary)">(${info.rank})</span>` : `<span style="font-size:0.8em; color:var(--accent-color)">(New)</span>`;
+            
+            const pRank = getApplicantRank(a.id);
+            const rankLabel = (pRank !== 9999) ? `<span style="font-size:0.8em; color:var(--text-secondary)">(${pRank})</span>` : `<span style="font-size:0.8em; color:var(--accent-color)">(New)</span>`;
             
             let lateBtn = '';
             if (isAdmin) {
@@ -1025,9 +1039,14 @@ export function renderRanking(context) {
         const isFirstTime = p.participationArr && p.participationArr.length === 1 &&
             p.participationArr[0].toString() === (latestSessionId || '').toString();
 
-        if (isFirstTime) rankChangeIcon = `<span class="rank-new">NEW</span>`;
-        else if (rInfo && rInfo.change > 0) rankChangeIcon = `<span class="rank-up">▲${rInfo.change}</span>`;
-        else if (rInfo && rInfo.change < 0) rankChangeIcon = `<span class="rank-down">▼${Math.abs(rInfo.change)}</span>`;
+        if (show50Plus) {
+            rankChangeIcon = '';
+        } else {
+            if (isFirstTime) rankChangeIcon = `<span class="rank-new">NEW</span>`;
+            else if (rInfo && rInfo.change > 0) rankChangeIcon = `<span class="rank-up">▲${rInfo.change}</span>`;
+            else if (rInfo && rInfo.change < 0) rankChangeIcon = `<span class="rank-down">▼${Math.abs(rInfo.change)}</span>`;
+            else rankChangeIcon = `<span class="rank-same" style="color:var(--text-secondary)">-</span>`;
+        }
 
         const winRateValue = p.matchCount > 0 ? Math.round((p.wins / p.matchCount) * 100) : 0;
 
@@ -1133,24 +1152,8 @@ export function renderBadgeHall(context) {
 
     // --- 1. 명예의 전당용 (최고의 도토리 + 외부 대회) ---
     if (hallGrid) {
-        const topAcornHTML = `
-            <div class="stat-card badge-card accent" style="flex-direction: column; align-items: flex-start;">
-                <div style="display: flex; align-items: center; gap: 12px; width: 100%; margin-bottom: 12px;">
-                    <div class="card-icon">💎</div>
-                    <div class="card-content" style="flex: 1;">
-                        <h3>최고의 도토리</h3>
-                        <p class="card-desc">외부대회 포함 종합 랭킹 1위</p>
-                    </div>
-                </div>
-                <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 12px; flex-wrap: wrap;">
-                    <div class="player-list" style="flex: 1;">
-                        ${badges.topAcorns.length > 0
-                            ? badges.topAcorns.map(name => `<span class="player-name highlight">${name}</span>`).join('')
-                            : '<span class="empty-msg">대상자 없음</span>'}
-                    </div>
-                </div>
-            </div>
-        `;
+        // [사용자 요청] '최고의 도토리' 임시 숨김 처리
+        const topAcornHTML = ``;
 
         let externalHTML = '';
         if (achievements && achievements.length > 0) {

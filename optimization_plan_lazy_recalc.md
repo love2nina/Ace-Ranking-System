@@ -1,14 +1,15 @@
 # ⚡ ACE 랭킹 시스템 — 로딩 부하 최적화 계획
 
 > 작성일: 2026-06-22  
+> 최종 업데이트: 2026-09-14  
 > 목표: 앱 로드 시마다 발생하는 전체 타임라인 재계산 제거  
-> 상태: **미구현 (설계 완료)**
+> 상태: **✅ 코드 구현 완료 — 사전 작업(관리자 재계산 1회) 확인 필요**
 
 ---
 
 ## 📌 문제 정의
 
-### 현재 로드 흐름 (문제 있음)
+### 개선 전 로드 흐름 (문제 있었던 구조)
 
 ```
 앱 실행
@@ -20,7 +21,22 @@
        └─ recalculateAll() ← ⚠️ 또 전체 재계산
 ```
 
-**결과**: 회차가 늘수록 로딩 시간이 선형으로 증가. 현재 약 10회차 이상 누적 시 명확한 지연 발생.
+**결과**: 회차가 늘수록 로딩 시간이 선형으로 증가. 약 10회차 이상 누적 시 명확한 지연 발생.
+
+### ✅ 개선 후 현재 로드 흐름 (구현 완료)
+
+```
+앱 실행
+  └─ initFirebase(callbacks)
+  └─ fbLoadSessionSnapshots() ← 회차별 순위 스냅샷 로드 (일회성)
+  └─ onHistoryLoaded (Firestore history 수신)
+       └─ updateRanks() ← 가벼운 순위 맵 갱신만 수행
+       └─ updateUI()
+  └─ fbSubscribeToAchievements (입상 기록 수신)
+       └─ updateUI() ← 재계산 없음 (보너스는 등록 시 즉시 반영)
+```
+
+**결과**: 로드 시 recalculateAll() 호출 횟수 2회 → 0회. 회차 수 증가에 따른 로딩 지연 없음.
 
 ---
 
@@ -271,21 +287,24 @@ if (isT1) currentRating += Number(h.elo_at_match?.change1 || 0);
 
 ## 📋 구현 체크리스트
 
-### 사전 작업
-- [ ] 관리자 계정으로 "시스템 재계산" 1회 실행 (모든 경기에 `elo_at_match` 저장)
-- [ ] 실행 후 Firestore 콘솔에서 history 문서에 `elo_at_match` 필드 존재 확인
+### 사전 작업 (수동 — 관리자 1회 실행 필요)
+- [ ] **⚠️ 관리자 계정으로 "시스템 재계산" 1회 실행** (구버전 경기에 `elo_at_match` 소급 저장)
+- [ ] Firestore 콘솔에서 history 문서에 `elo_at_match` 필드 존재 확인
 
-### 코드 수정
-- [ ] `app.js` — `onHistoryLoaded`에서 `recalculateAll()` 제거
-- [ ] `app.js` — `fbSubscribeToAchievements`에서 `recalculateAll()` 제거
-- [ ] `app.js` — `commitSession()`에서 `recalculateAll()` **먼저** 실행 후 `fbAddHistoryItem()` 호출하도록 순서 변경
-- [ ] `app.js` — `commitSession()`에서 `sessionRankSnapshots` DB 저장 추가 (Option A)
-- [ ] `firebase-api.js` — `saveSessionSnapshot()` 함수 추가
-- [ ] `firebase-api.js` — `loadSessionSnapshots()` 함수 추가
-- [ ] `app.js` — `init()`에서 `loadSessionSnapshots()` 호출 추가
-- [ ] `app.js` — 히스토리 수정 후 "시스템 재계산 필요" 안내 추가
+> **이 작업이 완료되지 않으면** 구버전 경기 기록에 `elo_at_match`가 없어
+> 개인 성장 추이 차트 및 일부 통계가 0으로 표시될 수 있습니다.
 
-### 검증
+### 코드 수정 (✅ 전부 구현 완료 — 2026-09-14 검증)
+- [x] `app.js` L147 — `onHistoryLoaded`에서 `recalculateAll()` 제거
+- [x] `app.js` L214 — `fbSubscribeToAchievements`에서 `recalculateAll()` 제거
+- [x] `app.js` L957 — `commitSession()`에서 `recalculateAll()` 먼저 실행 후 `fbAddHistoryItem()` 호출하도록 순서 변경
+- [x] `app.js` L981 — `commitSession()`에서 `sessionRankSnapshots` DB 저장 추가 (Option A)
+- [x] `firebase-api.js` L997 — `saveSessionSnapshot()` 함수 추가
+- [x] `firebase-api.js` L1012 — `loadSessionSnapshots()` 함수 추가
+- [x] `app.js` L191 — `init()`에서 `loadSessionSnapshots()` 호출 추가
+- [x] `app.js` L1510 — 히스토리 수정 후 "시스템 재계산 필요" 안내 alert 추가
+
+### 검증 (사전 작업 완료 후 확인)
 - [ ] 앱 로드 후 종합 랭킹 점수가 DB 저장값과 동일한지 확인
 - [ ] 개인 성장 추이 차트가 재계산 없이 올바르게 표시되는지 확인
 - [ ] 히스토리 선수별 뷰에서 당시 순위가 표시되는지 확인
