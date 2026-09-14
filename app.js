@@ -30,7 +30,7 @@ import {
     fbAddApplicantWithTransaction,
     fbRemoveApplicantWithTransaction,
     fbToggleLateJoinWithTransaction
-} from './firebase-api.js?v=93';
+} from './firebase-api.js?v=94';
 
 import {
     updateAdminUI as uiUpdateAdminUI,
@@ -55,7 +55,7 @@ import {
     renderHistoryEditModal as uiRenderHistoryEditModal,
     renderCurrentMatchEditModal as uiRenderCurrentMatchEditModal,
     renderExternalAchievements as uiRenderExternalAchievements
-} from './ui.js?v=93';
+} from './ui.js?v=94';
 
 import {
     ELO_INITIAL,
@@ -64,7 +64,7 @@ import {
     recalculateAll as engineRecalculateAll,
     applyNewMatches as engineApplyNewMatches,
     generateSchedule as engineGenerateSchedule
-} from './engine.js?v=93';
+} from './engine.js?v=94';
 
 // --- 전역 애플리케이션 상태 (State) ---
 let members = [];

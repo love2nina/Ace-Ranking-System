@@ -1165,13 +1165,12 @@ export function renderBadgeHall(context) {
                 <div class="card-content" style="width:100%">
                     <h3>최고의 도토리</h3>
                     <p class="card-desc">MMR 최상위 랭커</p>
-                    <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin-top:12px;">
+                    <div style="display:flex; flex-direction:column; gap:10px; margin-top:12px;">
                         ${top3.map((m, i) => `
-                        <div style="display:flex; flex-direction:column; align-items:center; gap:6px; background: rgba(255,255,255,0.05); border-radius:12px; padding:12px 18px; border: 1px solid ${medalColors[i]}44; min-width: 90px;">
-                            <span style="font-size:2rem; line-height:1;">${medalIcons[i]}</span>
-                            <span style="font-size:0.7rem; color:${medalColors[i]}; font-weight:700; letter-spacing:0.05em;">${medalLabels[i]}</span>
-                            <span class="player-name" style="font-size:0.95rem; font-weight:bold; color:var(--text-primary);">${m.name}</span>
-                            <span style="font-size:0.75rem; color:var(--text-secondary);">MMR ${Math.round(m.mmr || 0)}</span>
+                        <div style="display:flex; align-items:center; gap:12px; padding:10px 14px; background:rgba(255,255,255,0.05); border-radius:10px; border-left: 3px solid ${medalColors[i]};">
+                            <span style="font-size:1.6rem; line-height:1; flex-shrink:0;">${medalIcons[i]}</span>
+                            <span style="font-weight:700; font-size:1rem; color:var(--text-primary); flex:1;">${m.name}</span>
+                            <span style="font-size:0.8rem; color:${medalColors[i]}; font-weight:600; white-space:nowrap;">MMR ${Math.round(m.mmr || 0)}</span>
                         </div>`).join('')}
                     </div>
                 </div>
