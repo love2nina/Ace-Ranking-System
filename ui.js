@@ -1665,11 +1665,7 @@ export function renderAnalystReport(context) {
         `;
     }
 
-    // 관리자 입력창 회차 동기화
-    if (isAdmin) {
-        const postInput = document.getElementById('reportPostSessionNum');
-        if (postInput && !postInput.value) postInput.value = targetSession;
-    }
+    // 관리자 입력창 회차 동기화 (기능 삭제됨)
 }
 
 function parseMarkdown(text) {

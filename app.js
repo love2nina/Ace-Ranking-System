@@ -1396,15 +1396,19 @@ async function handleCopyAIData() {
 
 
 async function handleSaveReport() {
-    const sessionNum = document.getElementById('reportPostSessionNum')?.value;
+    const sessionNum = currentSessionState.sessionNum;
     const content = document.getElementById('reportPostContent')?.value;
-    if (!sessionNum || !content) {
-        alert("회차와 내용을 모두 입력해주세요.");
+    if (!sessionNum) {
+        alert("현재 진행 중인 회차 정보가 없습니다.");
+        return;
+    }
+    if (!content) {
+        alert("리포트 내용을 입력해주세요.");
         return;
     }
     await fbSaveReport(sessionNum, content);
     document.getElementById('reportPostContent').value = '';
-    alert("리포트가 저장되었습니다.");
+    alert(`${sessionNum}회차 리포트가 저장되었습니다.`);
 }
 
 
