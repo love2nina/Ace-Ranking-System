@@ -168,7 +168,7 @@ export function subscribeToCluster(dbName) {
         let isEmpty = !data || (Array.isArray(data.members) && data.members.length === 0);
 
         if (isEmpty && currentDbName.toLowerCase() === 'default') {
-            if (_callbacks.onEmptyDefault) await _callbacks.onEmptyDefault();
+            handleMigration();
         } else if (snapshot.exists()) {
             _dataLoadedForDb = currentDbName; // 데이터 로드 성공 기록
             if (_callbacks.onDataLoaded) _callbacks.onDataLoaded(data);
@@ -259,6 +259,7 @@ export async function handleMigration() {
             if (_callbacks.afterMigration) _callbacks.afterMigration();
         } else {
             if (_callbacks.onEmptyCluster) await _callbacks.onEmptyCluster();
+            else if (_callbacks.onEmptyClusterSafe) _callbacks.onEmptyClusterSafe();
         }
     } catch (e) {
         console.error("[Migration] Error:", e);
