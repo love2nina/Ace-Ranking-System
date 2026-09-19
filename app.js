@@ -1225,25 +1225,88 @@ async function handleCopyAIData() {
         groupStats[gLabel].totalScores += (m.score1 + m.score2);
     });
 
-    // --- 3. 시즌 누적 빅데이터: statsService.js의 기존 함수 재사용 (이전 시즌 포함) ---
-    // calculateBadges: 클러치 등 뱃지 통계 (cumulative 모드 = 이전 시즌 누적 포함)
-    const cumulativeBadges = calculateBadges(members, matchHistory, 'cumulative');
+    // --- 3. 오늘 실제로 같은 조였던 페어의 역대 누적 데이터만 추출 ---
+    // 이 방식은 오늘 경기에서 실제로 만난 관계만 AI에게 전달하여
+    // 오늘과 무관한 선수가 언급되는 문제를 원천 차단합니다.
 
-    // getPlayerInsights: 이번 회차 참가 선수들의 환상의 파트너 / 천적 통계
-    // prevPartnerStats + prevSeasonStats(이전 시즌)가 자동으로 합산됨
-    const sessionPlayerIds = [...new Set(sessionMatches.flatMap(m => [...(m.t1_ids || []), ...(m.t2_ids || [])]))];
-    const playerInsightsMap = {};
-    sessionPlayerIds.forEach(pid => {
-        const insight = getPlayerInsights(pid, members, matchHistory);
-        if (!insight) return;
-        const member = members.find(m => String(m.id) === String(pid));
-        if (!member) return;
-        playerInsightsMap[member.name] = {
-            bestPartner: insight.bestPartner ? { name: insight.bestPartner.name, games: insight.bestPartner.games, wins: insight.bestPartner.wins, winRate: parseFloat(insight.bestPartner.winRate.toFixed(2)) } : null,
-            worstPartner: insight.worstPartner ? { name: insight.worstPartner.name, games: insight.worstPartner.games, wins: insight.worstPartner.wins } : null,
-            nemesis: insight.nemesis ? { name: insight.nemesis.name, games: insight.nemesis.games, wins: insight.nemesis.wins, losses: insight.nemesis.losses } : null
+    // (A) 오늘 파트너 페어 목록 (같은 팀으로 뛴 조합) 수집
+    const todayPartnerPairsMap = {}; // key: "idA_idB", value: { names, wins, draws, losses }
+    sessionMatches.forEach(m => {
+        const processTeam = (ids, names, teamWon, teamDrew) => {
+            if (ids.length < 2) return;
+            const [id0, id1] = ids.map(String);
+            const key = [id0, id1].sort().join('_');
+            if (!todayPartnerPairsMap[key]) {
+                todayPartnerPairsMap[key] = { names: [names[0], names[1]], wins: 0, draws: 0, losses: 0 };
+            }
+            if (teamWon) todayPartnerPairsMap[key].wins++;
+            else if (teamDrew) todayPartnerPairsMap[key].draws++;
+            else todayPartnerPairsMap[key].losses++;
+        };
+        const t1Won = m.score1 > m.score2;
+        const drew = m.score1 === m.score2;
+        processTeam(m.t1_ids, m.t1_names, t1Won, drew);
+        processTeam(m.t2_ids, m.t2_names, !t1Won && !drew, drew);
+    });
+
+    // (B) 각 파트너 페어의 역대 누적 통계를 getPlayerInsights로 조회
+    const todayPairings = Object.values(todayPartnerPairsMap).map(pair => {
+        const [nameA, nameB] = pair.names;
+        const memberA = members.find(m => m.name === nameA);
+        if (!memberA) return { pair: pair.names, todayResult: { wins: pair.wins, draws: pair.draws, losses: pair.losses }, allTimeHistory: null };
+
+        // getPlayerInsights는 이전 시즌 누적 포함 역대 파트너 통계를 계산해줌
+        const insight = getPlayerInsights(memberA.id, members, matchHistory);
+        const memberB = members.find(m => m.name === nameB);
+        const allTimePartner = insight && memberB
+            ? (() => {
+                // insight의 파트너 맵에서 B의 역대 전적만 추출
+                const partnerMap = new Map();
+                // prevPartnerStats 반영
+                const prev = memberA.prevPartnerStats || {};
+                Object.entries(prev).forEach(([pid, s]) => {
+                    partnerMap.set(String(pid), { wins: s.wins||0, losses: s.losses||0, draws: s.draws||0, games: (s.wins||0)+(s.losses||0)+(s.draws||0) });
+                });
+                // 현재 시즌 matchHistory 반영
+                matchHistory.forEach(h => {
+                    const aInT1 = (h.t1_ids||[]).map(String).includes(String(memberA.id));
+                    const aInT2 = (h.t2_ids||[]).map(String).includes(String(memberA.id));
+                    if (!aInT1 && !aInT2) return;
+                    const myTeamIds = aInT1 ? h.t1_ids : h.t2_ids;
+                    const bInTeam = myTeamIds.map(String).includes(String(memberB.id));
+                    if (!bInTeam) return;
+                    const won = aInT1 ? h.score1 > h.score2 : h.score2 > h.score1;
+                    const drew = h.score1 === h.score2;
+                    const key = String(memberB.id);
+                    const s = partnerMap.get(key) || { wins:0, losses:0, draws:0, games:0 };
+                    if (won) s.wins++; else if (drew) s.draws++; else s.losses++;
+                    s.games++;
+                    partnerMap.set(key, s);
+                });
+                const bStats = partnerMap.get(String(memberB.id));
+                if (!bStats || bStats.games < 2) return null;
+                return { totalGames: bStats.games, wins: bStats.wins, draws: bStats.draws, losses: bStats.losses, winRate: parseFloat((bStats.wins / bStats.games).toFixed(2)) };
+              })()
+            : null;
+
+        return {
+            pair: pair.names,
+            todayResult: { wins: pair.wins, draws: pair.draws, losses: pair.losses },
+            allTimeHistory: allTimePartner  // null이면 역대 데이터 부족 (오늘이 첫 조합)
         };
     });
+
+    // (C) 뱃지는 오늘 참가 선수 범위로 제한 (연승 등은 오늘 참가자에만 해당되는 게 의미 있음)
+    const cumulativeBadges = calculateBadges(members, matchHistory, 'cumulative');
+    const sessionPlayerIds = [...new Set(sessionMatches.flatMap(m => [...(m.t1_ids||[]), ...(m.t2_ids||[])]))];
+    const sessionPlayerNames = new Set(
+        sessionPlayerIds.map(pid => { const m = members.find(m => String(m.id) === String(pid)); return m ? m.name : null; }).filter(Boolean)
+    );
+    const todayRelevantBadges = {
+        hotStreaks: cumulativeBadges.hotStreaks.filter(n => sessionPlayerNames.has(n)),
+        ironMen: cumulativeBadges.ironMen.filter(n => sessionPlayerNames.has(n)),
+        kingSlayers: cumulativeBadges.kingSlayers.filter(n => sessionPlayerNames.has(n))
+    };
 
     const reportData = {
         sessionNum: sessionNum,
@@ -1258,15 +1321,10 @@ async function handleCopyAIData() {
         }),
         upsets: upsets,
         groupStats: groupStats,
-        // 이전 시즌 포함 올타임 누적 빅데이터
-        playerInsights_AllTime: playerInsightsMap,
-        badges_AllTime: {
-            hotStreaks: cumulativeBadges.hotStreaks,
-            ironMen: cumulativeBadges.ironMen,
-            kingSlayers: cumulativeBadges.kingSlayers,
-            nationalPartners: cumulativeBadges.nationalPartners,
-            nemesisMakers: cumulativeBadges.nemesisMakers
-        },
+        // 오늘 실제로 같은 조였던 페어의 역대 누적 기록 (무관한 선수 원천 차단)
+        todayPairings: todayPairings,
+        // 오늘 참가자 범위로 제한된 뱃지
+        todayBadges: todayRelevantBadges,
         topRankers: [...members].sort((a, b) => b.rating - a.rating).slice(0, 5).map(m => ({ name: m.name, rating: Math.round(m.rating) }))
     };
 
