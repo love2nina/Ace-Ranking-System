@@ -1,7 +1,7 @@
 // service-worker.js — ACE 랭킹 시스템 PWA 캐시 관리
 // [v62] Firebase SDK + 정적 파일 캐시로 완전 오프라인/standalone 지원
 
-const CACHE_NAME = 'ace-ranking-v90';
+const CACHE_NAME = 'ace-ranking-v101';
 const STATIC_ASSETS = [
     './',
     './index.html',
@@ -59,7 +59,7 @@ self.addEventListener('fetch', (event) => {
     const url = new URL(event.request.url);
 
     // Firebase API 요청은 가로채지 않음 (Firestore 자체 캐시 사용)
-    if (url.hostname.includes('firestore.googleapis.com') || 
+    if (url.hostname.includes('firestore.googleapis.com') ||
         url.hostname.includes('firebaseio.com') ||
         url.hostname.includes('identitytoolkit.googleapis.com')) {
         return;
@@ -70,14 +70,14 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
-    const fetchReq = event.request.method === 'GET' 
+    const fetchReq = event.request.method === 'GET'
         ? new Request(event.request.url, {
             method: event.request.method,
             headers: event.request.headers,
             mode: event.request.mode === 'navigate' ? 'navigate' : 'cors',
             credentials: event.request.credentials,
             cache: 'no-cache'
-        }) 
+        })
         : event.request;
 
     event.respondWith(

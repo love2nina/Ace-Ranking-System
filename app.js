@@ -1047,12 +1047,17 @@ async function openRegistration() {
 // --- AI 리포트 생성 (v23 핵심: 서사 및 템플릿 고착화) ---
 // --- AI 리포트 생성 (v24 및 Advanced Analytics 대응) ---
 async function handleCopyAIData() {
-    const sessionNum = document.getElementById('reportPostSessionNum')?.value || currentSessionState.sessionNum;
-    if (!sessionNum) return;
+    // 항상 matchHistory에서 가장 최신 회차를 자동으로 추출
+    const allSessionNums = [...new Set(matchHistory.map(h => Number(h.sessionNum)))].filter(Boolean);
+    if (allSessionNums.length === 0) {
+        alert('경기 기록이 없습니다.');
+        return;
+    }
+    const sessionNum = Math.max(...allSessionNums);
 
     const sessionMatches = matchHistory.filter(h => String(h.sessionNum) === String(sessionNum));
     if (sessionMatches.length === 0) {
-        alert("해당 회차의 경기 기록이 없습니다.");
+        alert('해당 회차의 경기 기록이 없습니다.');
         return;
     }
 
