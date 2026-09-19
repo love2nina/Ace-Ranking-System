@@ -1163,12 +1163,12 @@ export function renderBadgeHall(context) {
                 <div class="card-content" style="width:100%">
                     <h3>최고의 도토리</h3>
                     <p class="card-desc">MMR 최상위 랭커</p>
-                    <div class="player-list" style="margin-top:10px;">
+                    <div class="player-list" style="margin-top:10px; align-items: flex-start;">
                         ${top4.map((m, i) => `
-                        <span class="player-name" style="display: inline-block; border: 1px solid ${medalColors[i]}; text-align: center; line-height: 1.3; padding: 4px 8px;">
-                            ${m.name}<br>
+                        <div style="display: flex; flex-direction: column; align-items: center; gap: 2px;">
+                            <span class="player-name" style="border: 1px solid ${medalColors[i]}; margin: 0;">${m.name}</span>
                             <span style="font-size: 0.75rem; color: ${medalColors[i]}; font-weight: bold;">${Math.round(m.mmr || 0)}</span>
-                        </span>`).join('')}
+                        </div>`).join('')}
                     </div>
                 </div>
             </div>` : ``;
