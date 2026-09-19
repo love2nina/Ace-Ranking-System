@@ -1166,7 +1166,7 @@ export function renderBadgeHall(context) {
                     <div class="player-list" style="margin-top:10px; align-items: flex-start;">
                         ${top4.map((m, i) => `
                         <div style="display: flex; flex-direction: column; align-items: center; gap: 2px;">
-                            <span class="player-name" style="border: 1px solid ${medalColors[i]}; margin: 0;">${m.name}</span>
+                            <span class="player-name" style="margin: 0;">${m.name}</span>
                             <span style="font-size: 0.75rem; color: ${medalColors[i]}; font-weight: bold;">${Math.round(m.mmr || 0)}</span>
                         </div>`).join('')}
                     </div>
