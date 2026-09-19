@@ -158,7 +158,7 @@ async function init() {
         },
         onReportsLoaded: (reportsData) => {
             reports = reportsData;
-            
+
             if (document.querySelector('.tab-content#tab-caster.active')) {
                 window.renderAnalystReport();
             }
@@ -214,7 +214,7 @@ async function init() {
 
         // [v89] 입상 기록 변경 시에도 순위 스냅샷을 갱신합니다. -> 최적화로 인해 제거
         // 입상 보너스는 등록 시 members.mmr에 즉시 반영되므로 재계산 불필요
-        updateUI(); 
+        updateUI();
     });
 
     setupEventListeners();
@@ -360,21 +360,21 @@ window.exportHistoryToCSV = () => {
                 typeof arr[1] === 'object' ? arr[1].name : (arr[1] || "")
             ];
         };
-        
+
         const [t1p1, t1p2] = getNames(m.t1_names || m.t1);
         const [t2p1, t2p2] = getNames(m.t2_names || m.t2);
-        
+
         // 점수 필드 대응 (score1 vs s1)
         const s1 = (m.score1 !== undefined && m.score1 !== null) ? m.score1 : (m.s1 !== undefined ? m.s1 : "");
         const s2 = (m.score2 !== undefined && m.score2 !== null) ? m.score2 : (m.s2 !== undefined ? m.s2 : "");
-        
+
         // 날짜 처리 (Firestore Timestamp vs Number vs String)
         let dateStr = m.date || "";
         if (!dateStr && m.timestamp) {
             try {
                 const d = m.timestamp.toDate ? m.timestamp.toDate() : new Date(m.timestamp);
                 if (!isNaN(d.getTime())) dateStr = d.toLocaleDateString();
-            } catch(e) {}
+            } catch (e) { }
         }
 
         let win = "무승부";
@@ -382,7 +382,7 @@ window.exportHistoryToCSV = () => {
             if (Number(s1) > Number(s2)) win = "팀1";
             else if (Number(s2) > Number(s1)) win = "팀2";
         }
-        
+
         return [
             m.sessionNum,
             dateStr,
@@ -390,7 +390,7 @@ window.exportHistoryToCSV = () => {
             s1, s2, win
         ].map(cell => `"${String(cell || "").replace(/"/g, '""')}"`).join(",");
     });
-    
+
     const csvContent = "\uFEFF" + header.join(",") + "\n" + rows.join("\n");
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -423,7 +423,7 @@ window.exportHistoryToCSV = () => {
         const statsLink = document.createElement("a");
         statsLink.href = statsUrl;
         statsLink.download = `ACE_개인통계_${new Date().toISOString().split('T')[0]}.csv`;
-        
+
         // 브라우저가 다중 다운로드를 차단하지 않도록 0.5초 지연 후 실행
         setTimeout(() => {
             statsLink.click();
@@ -566,18 +566,18 @@ function setupEventListeners() {
         customSplitInput.oninput = () => {
             // updateUI 전체를 호출하면 포커스가 잃어버리므로, 정보 업데이트만 부분 호출
             const context = {
-                currentSessionState, applicants, previewGroups, GAME_COUNTS, 
+                currentSessionState, applicants, previewGroups, GAME_COUNTS,
                 getSplits,
-                actions: { 
-                    selfRender: () => {}, 
-                    setPreviewGroups: (val) => { previewGroups = val; }, 
+                actions: {
+                    selfRender: () => { },
+                    setPreviewGroups: (val) => { previewGroups = val; },
                     updateUI: () => updateUI(),
                     renderApplicants: () => {
                         // [v65-Fix] 부분 렌더링 시 자기 자신을 다시 호출(selfRender)할 수 있도록 컨텍스트 구성
                         const partialCtx = {
                             applicants, previewGroups, isAdmin, currentSessionState,
                             members, matchHistory, rankMap, getSplits, GAME_COUNTS,
-                            actions: { 
+                            actions: {
                                 setPreviewGroups: (v) => { previewGroups = v; },
                                 updateOptimizationInfo: (c) => uiUpdateOptimizationInfo(c || partialCtx),
                                 renderApplicants: () => uiRenderApplicants(partialCtx)
@@ -612,7 +612,7 @@ function setupEventListeners() {
     // [v65] 코트 설정 이벤트 바인딩
     const addCourtBtn = document.getElementById('addCourtBtn');
     if (addCourtBtn) addCourtBtn.onclick = () => addCourtRow();
-    
+
     const saveCourtConfigBtn = document.getElementById('saveCourtConfigBtn');
     if (saveCourtConfigBtn) saveCourtConfigBtn.onclick = () => saveCourtConfigFromUI();
 
@@ -648,7 +648,7 @@ function updateRanks() {
     if (!members || members.length === 0) return;
     const activeMembers = members.filter(m => m.isActive !== false);
     const sorted = [...activeMembers].sort((a, b) => (b.rating || ELO_INITIAL) - (a.rating || ELO_INITIAL));
-    
+
     // [버그수정] 페이지 로드 시에도 전 회차 대비 순위 변동을 정확히 계산
     let prevSnapshot = null;
     if (sessionRankSnapshots) {
@@ -665,7 +665,7 @@ function updateRanks() {
             prevSnapshot = sessionRankSnapshots[prevSessionId];
         }
     }
-    
+
     const tempMap = new Map();
     sorted.forEach((m, idx) => {
         const idStr = String(m.id);
@@ -675,7 +675,7 @@ function updateRanks() {
         }
         tempMap.set(idStr, { rank: idx + 1, change });
     });
-    
+
     rankMap.clear();
     tempMap.forEach((val, key) => rankMap.set(key, val));
 }
@@ -733,12 +733,12 @@ function recalculateAll() {
     const clonedHistory = matchHistory.map(h => ({ ...h, eventType: 'match' }));
     const clonedAchievements = achievements.map(a => ({ ...a, eventType: 'achievement' }));
 
-    engineRecalculateAll({ 
-        members, 
-        matchHistory: clonedHistory, 
-        rankMap, 
-        sessionRankSnapshots, 
-        sessionStartRatings, 
+    engineRecalculateAll({
+        members,
+        matchHistory: clonedHistory,
+        rankMap,
+        sessionRankSnapshots,
+        sessionStartRatings,
         sessionStartMmrs,
         sessionEndRatings,
         applicants,
@@ -756,7 +756,7 @@ function recalculateAll() {
 
     // [v66] 데이터 일관성 보장: members에서 계산된 최신 점수를 applicants 및 currentSchedule에도 동기화
     const memberMap = new Map(members.map(m => [String(m.id), m]));
-    
+
     applicants.forEach(a => {
         const m = memberMap.get(String(a.id));
         if (m) {
@@ -786,12 +786,12 @@ window.removeApplicant = (id) => {
     applicants = applicants.filter(p => String(p.id) !== String(id));
     // fbSaveToCloud({ applicants }, 'removeApplicant');
     fbRemoveApplicantWithTransaction(id);
-    
+
     // [v45] 인원 변동 시 커스텀 분할 고정 해제 및 미리보기 리셋
     const customInput = document.getElementById('customSplitInput');
     if (customInput) customInput.value = '';
     previewGroups = null;
-    
+
     updateUI();
 };
 window.updateLiveScore = (id, team, val) => {
@@ -837,7 +837,7 @@ function generateSchedule() {
     if (result) {
         tempSchedule = result.tempSchedule;
         activeGroupTab = result.activeGroupTab;
-        
+
         // [v50] 대진표가 생성되지 않은 경우 (인원 부족 등) 알림 추가
         if (!tempSchedule || tempSchedule.length === 0) {
             alert("대진표를 생성할 수 없습니다. 인원 배분이나 참가자 수를 확인해 주세요.");
@@ -858,7 +858,7 @@ async function finalizeSchedule() {
         window.alert("확정할 대진표 데이터가 없습니다. 먼저 대진표를 생성해 주세요.");
         return;
     }
-    
+
     // 관리자 권한 최종 확인
     const savedPw = localStorage.getItem('ace_admin_pw');
     const effectiveIsAdmin = isAdmin || (savedPw === systemSettings.admin_pw);
@@ -866,7 +866,7 @@ async function finalizeSchedule() {
         window.alert("관리자 권한이 없습니다. 다시 로그인해 주세요.");
         return;
     }
-    
+
     if (!window.confirm("대진표를 확정하고 랭킹전을 시작하시겠습니까?")) return;
 
     try {
@@ -882,14 +882,14 @@ async function finalizeSchedule() {
         // 상탯값 초기화
         tempSchedule = null;
         previewGroups = null;
-        
+
         const area = document.getElementById('schedulePreviewArea');
         if (area) area.style.display = 'none';
-        
+
         // 확정 성공 시 대진표 탭으로 자동 이동 및 알림
         if (window.switchTab) window.switchTab('match');
         window.alert("대진표가 성공적으로 확정되었습니다!");
-        
+
     } catch (e) {
         console.error("Finalize Schedule Error:", e);
         window.alert("대진표 확정 중 오류가 발생했습니다: " + e.message);
@@ -921,7 +921,7 @@ function addPlayer() {
     const newPlayer = member ? { ...member } : { id: Date.now().toString(), name: name, rating: ELO_INITIAL };
 
     applicants.push(newPlayer);
-    
+
     // [v45] 인원 변동 시 커스텀 분할 고정 해제 및 미리보기 리셋
     const customInput = document.getElementById('customSplitInput');
     if (customInput) customInput.value = '';
@@ -929,7 +929,7 @@ function addPlayer() {
 
     // fbSaveToCloud({ applicants }, 'addPlayer');
     fbAddApplicantWithTransaction(newPlayer);
-    
+
     input.value = '';
     input.focus();
 }
@@ -976,7 +976,7 @@ async function commitSession() {
         engineApplyNewMatches({
             members, newMatches, rankMap, sessionRankSnapshots, enableAttendanceBonus, applicants, currentSchedule
         });
-        
+
         // 업데이트된 신규 경기를 메모리상의 matchHistory에 추가
         matchHistory.push(...newMatches);
 
@@ -1095,7 +1095,7 @@ async function handleCopyAIData() {
             if (win) todayPerformance[id].wins++;
             else if (draw) todayPerformance[id].draws++;
             else todayPerformance[id].losses++;
-            
+
             todayPerformance[id].ratingChange += isT1 ? (m.elo_at_match?.change1 || 0) : (m.elo_at_match?.change2 || 0);
             todayPerformance[id].scoreDiffSum += isT1 ? (m.score1 - m.score2) : (m.score2 - m.score1);
         });
@@ -1154,7 +1154,7 @@ async function handleCopyAIData() {
     Object.keys(todayPerformance).forEach(pid => {
         const s = playerStatsMap[pid];
         const totalPlayed = s.total_wins + s.total_draws + s.total_losses;
-        
+
         todayPerformance[pid].season_stats = {
             total_wins: s.total_wins,
             total_draws: s.total_draws,
@@ -1270,25 +1270,37 @@ async function handleCopyAIData() {
         topRankers: [...members].sort((a, b) => b.rating - a.rating).slice(0, 5).map(m => ({ name: m.name, rating: Math.round(m.rating) }))
     };
 
-    // 클립보드 복사 외에 파일 다운로드 기능도 제공
-    try {
-        const textData = JSON.stringify(reportData, null, 2);
-        await navigator.clipboard.writeText(textData);
-        alert("분석용 통합 데이터(JSON)가 클립보드에 복사되었습니다!\n(환상의 짝꿍, 클러치 승부사 등 누적 데이터 포함)");
-        
-        // 다운로드 실행
-        const blob = new Blob([textData], { type: 'application/json;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `AI_Analysis_Data_${sessionNum}회차.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-    } catch (err) {
-        console.error("Copy/Download Error:", err);
-        alert("복사/다운로드에 실패했습니다.");
+    // --- 경기 데이터(JSON)만 클립보드에 복사 (textarea 폴백 포함) ---
+    const textData = JSON.stringify(reportData, null, 2);
+
+    let copied = false;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        try {
+            await navigator.clipboard.writeText(textData);
+            copied = true;
+        } catch (e) {
+            console.warn('[App] navigator.clipboard 실패, textarea 폴백 사용:', e);
+        }
+    }
+    if (!copied) {
+        // 폴백: 임시 textarea로 복사 (PWA·카카오 인앱브라우저 대응)
+        const ta = document.createElement('textarea');
+        ta.value = textData;
+        ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0;';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        copied = document.execCommand('copy');
+        document.body.removeChild(ta);
+    }
+
+    if (copied) {
+        alert(`✅ ${sessionNum}회차 경기 데이터가 클립보드에 복사되었습니다!\n제미나이에 붙여넣기 하세요.`);
+    } else {
+        alert('클립보드 복사에 실패했습니다. 브라우저 설정을 확인해 주세요.');
     }
 }
+
 
 async function handleSaveReport() {
     const sessionNum = document.getElementById('reportPostSessionNum')?.value;
@@ -1340,7 +1352,7 @@ function tryAdminLogin() {
     if (pw === systemSettings.admin_pw) {
         isAdmin = true;
         // [v63] 보안을 위해 브라우저 저장소의 비밀번호를 영구 보관하지 않습니다.
-        localStorage.removeItem('ace_admin_pw'); 
+        localStorage.removeItem('ace_admin_pw');
         const modal = document.getElementById('adminModal');
         modal.classList.add('hidden');
         modal.style.display = 'none';
@@ -1362,29 +1374,29 @@ function tryAdminLogin() {
 // [버그수정] 마이그레이션 로직 분리 (관리자 로그인 직후 실행을 위함)
 async function runAchievementMigration() {
     if (!isAdmin || !achievements || achievements.length === 0) return;
-    
+
     const targets = ["곽정엽", "김신", "이석희"];
     let migrationCount = 0;
-    
+
     for (const ach of achievements) {
         let updates = {};
-        
+
         if (targets.includes(ach.playerName) && (ach.sessionNum === undefined || ach.sessionNum === null)) {
             updates.sessionNum = 10;
         }
-        
+
         // [Migration] 기존 외부대회 기록에 dbName 식별자 부여 (중복 합산 방지)
         if (!ach.dbName) {
             updates.dbName = '2026 상반기';
         }
-        
+
         if (Object.keys(updates).length > 0) {
             console.log(`[Migration] Patching ${JSON.stringify(updates)} for ${ach.playerName}`);
             await fbUpdateAchievement(ach.id, updates);
             migrationCount++;
         }
     }
-    
+
     if (migrationCount > 0) {
         console.log(`[Migration] ${migrationCount}개의 기록에 대해 마이그레이션을 완료했습니다.`);
         alert(`과거 입상 기록 마이그레이션(${migrationCount}건)이 완료되었습니다.\n시스템 설정에서 '시스템 재계산'을 실행해 주세요.`);
@@ -1462,15 +1474,15 @@ async function processAddAchievement() {
 
     if (!name || isNaN(bonus)) { alert("이름과 보너스 점수를 입력하세요."); return; }
 
-    const data = { 
-        playerName: name, 
+    const data = {
+        playerName: name,
         sessionNum: isNaN(sessionNum) ? null : sessionNum,
-        mmrBonus: bonus, 
+        mmrBonus: bonus,
         compName: compName,
         result: result,
         dbName: getCurrentDbName() // [버그수정] 중복 합산 방지를 위해 현재 시즌 명시
     };
-    
+
     // 1. 현재 메모리의 회원 MMR에 즉시 반영 (Snapshot Update)
     const member = members.find(m => m.name.trim() === name);
     if (member) {
@@ -1481,7 +1493,7 @@ async function processAddAchievement() {
 
     // 2. 입상 기록 저장
     await fbAddAchievement(data);
-    
+
     alert(`'${name}' 선수에게 ${bonus}점이 즉시 부여되었습니다. (회차: ${isNaN(sessionNum) ? '미지정' : sessionNum})`);
     document.getElementById('achievePlayerName').value = '';
     document.getElementById('achieveSession').value = '';
@@ -1495,7 +1507,7 @@ async function processAddAchievement() {
  */
 window.deleteAchievement = async (id) => {
     if (!confirm("이 입상 기록을 삭제하시겠습니까? (부여된 점수도 회수됩니다)")) return;
-    
+
     const target = achievements.find(a => a.id === id);
     if (target) {
         const member = members.find(m => m.name.trim() === target.playerName.trim());
@@ -1512,23 +1524,23 @@ window.deleteAchievement = async (id) => {
  */
 async function runFullSystemRecalculate() {
     if (!confirm("시스템의 모든 경기 기록을 처음부터 다시 계산하여 현재 MMR 및 히스토리 점수를 교정하시겠습니까?\n이 작업은 데이터 양에 따라 시간이 다소 소요될 수 있습니다.")) return;
-    
+
     // 1. 엔진 실행 (전체 히스토리 기반 재계산 수행)
     // [v83] 기존 순위 스냅샷 데이터를 초기화한 후 재계산을 시작합니다.
     for (let key in sessionRankSnapshots) delete sessionRankSnapshots[key];
     recalculateAll(); // 이 시점에 전역 sessionRankSnapshots는 10개 회차 정보를 완벽히 갖춤
-    
+
     const historySnapshot = matchHistory.map(h => ({ ...h }));
 
     // 2. 선수 총점(스냅샷) 저장 (이때 DB 업데이트로 인해 onMembersLoaded, onReportsLoaded가 트리거될 수 있음)
     await fbSaveToCloud({ members, applicants }, 'fullSystemRecalculate:members');
-    
+
     // 3. 개별 경기 기록(elo_at_match 포함) 일괄 업데이트
     console.log(`[Maintenance] Syncing ${historySnapshot.length} history items from protected snapshot...`);
     for (const h of historySnapshot) {
         await fbAddHistoryItem(h);
     }
-    
+
     // [v80] 리스너가 백그라운드에서 데이터를 덮어쓰더라도, 최종 계산된 스냅샷으로 강제 갱신
     setTimeout(() => {
         matchHistory.length = 0;
@@ -1595,14 +1607,14 @@ async function saveEdit() {
             const p4 = resolvePlayer(n4, hMatch.t2_ids[1]);
 
             console.log(`[App] Saving History Edit with ID Sync:`, { p1, p2, p3, p4, s1, s2 });
-            
-            await fbUpdateHistoryItem(editingMatchId, { 
+
+            await fbUpdateHistoryItem(editingMatchId, {
                 t1_ids: [p1.id, p2.id],
                 t1_names: [p1.name, p2.name],
                 t2_ids: [p3.id, p4.id],
                 t2_names: [p3.name, p4.name],
-                score1: s1, 
-                score2: s2 
+                score1: s1,
+                score2: s2
             });
             membersUpdated = true;
             alert("히스토리 기록이 수정되었습니다. 정확한 순위 반영을 위해 '시스템 재계산'을 실행해 주세요.");
