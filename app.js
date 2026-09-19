@@ -1220,6 +1220,48 @@ async function handleCopyAIData() {
         groupStats[gLabel].totalScores += (m.score1 + m.score2);
     });
 
+    // --- 3. 시즌 누적 파트너 및 클러치 통계 (빅데이터) ---
+    const partnerStats = {};
+    const clutchWins = {};
+
+    sortedHistory.forEach(m => {
+        if (m.t1_names && m.t2_names && m.score1 !== m.score2) {
+            const addStat = (names, won, scoreDiff) => {
+                if (names.length !== 2) return;
+                const key = names.sort().join(' & ');
+                if (!partnerStats[key]) partnerStats[key] = { matches: 0, wins: 0, scoreDiff: 0 };
+                partnerStats[key].matches++;
+                if (won) partnerStats[key].wins++;
+                partnerStats[key].scoreDiff += scoreDiff;
+            };
+            addStat(m.t1_names, m.score1 > m.score2, m.score1 - m.score2);
+            addStat(m.t2_names, m.score2 > m.score1, m.score2 - m.score1);
+        }
+        
+        const diff = Math.abs(m.score1 - m.score2);
+        if (diff === 1) {
+            const winners = m.score1 > m.score2 ? (m.t1_names || []) : (m.t2_names || []);
+            winners.forEach(name => {
+                clutchWins[name] = (clutchWins[name] || 0) + 1;
+            });
+        }
+    });
+
+    const minMatches = 3;
+    const bestPartners = Object.entries(partnerStats)
+        .filter(([_, stat]) => stat.matches >= minMatches)
+        .sort((a, b) => (b[1].wins / b[1].matches) - (a[1].wins / a[1].matches) || b[1].scoreDiff - a[1].scoreDiff)
+        .slice(0, 3).map(([k, v]) => ({ duo: k, matches: v.matches, wins: v.wins, scoreDiff: v.scoreDiff }));
+
+    const worstPartners = Object.entries(partnerStats)
+        .filter(([_, stat]) => stat.matches >= minMatches)
+        .sort((a, b) => (a[1].wins / a[1].matches) - (b[1].wins / b[1].matches) || a[1].scoreDiff - b[1].scoreDiff)
+        .slice(0, 3).map(([k, v]) => ({ duo: k, matches: v.matches, wins: v.wins, scoreDiff: v.scoreDiff }));
+
+    const topClutchPlayers = Object.entries(clutchWins)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3).map(([name, wins]) => ({ name, clutchWins: wins }));
+
     const reportData = {
         sessionNum: sessionNum,
         totalMatches: sessionMatches.length,
@@ -1233,15 +1275,29 @@ async function handleCopyAIData() {
         }),
         upsets: upsets,
         groupStats: groupStats,
+        bestPartners_AllTime: bestPartners,
+        worstPartners_AllTime: worstPartners,
+        clutchPlayers_AllTime: topClutchPlayers,
         topRankers: members.sort((a, b) => b.rating - a.rating).slice(0, 5).map(m => ({ name: m.name, rating: Math.round(m.rating) }))
     };
 
+    // 클립보드 복사 외에 파일 다운로드 기능도 제공
     try {
-        await navigator.clipboard.writeText(JSON.stringify(reportData, null, 2));
-        alert("분석용 통합 데이터(JSON)가 클립보드에 복사되었습니다!\n상세 대진 정보와 시즌 누적 통계가 포함되었습니다.");
+        const textData = JSON.stringify(reportData, null, 2);
+        await navigator.clipboard.writeText(textData);
+        alert("분석용 통합 데이터(JSON)가 클립보드에 복사되었습니다!\n(환상의 짝꿍, 클러치 승부사 등 누적 데이터 포함)");
+        
+        // 다운로드 실행
+        const blob = new Blob([textData], { type: 'application/json;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `AI_Analysis_Data_${sessionNum}회차.json`;
+        a.click();
+        URL.revokeObjectURL(url);
     } catch (err) {
-        console.error("Clipboard Error:", err);
-        alert("클립보드 복사에 실패했습니다.");
+        console.error("Copy/Download Error:", err);
+        alert("복사/다운로드에 실패했습니다.");
     }
 }
 
