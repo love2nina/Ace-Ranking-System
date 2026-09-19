@@ -13,7 +13,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="ACE 랭킹">
     <meta name="theme-color" content="#38bdf8">
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=90">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- Vercel Analytics -->
     <script>
@@ -33,6 +33,11 @@
         </div>
     </div>
     <div class="container">
+        <!-- PWA Update Banner -->
+        <div id="pwaUpdateBanner" style="display: none; background: #3b82f6; color: white; padding: 12px; text-align: center; border-radius: 8px; margin-bottom: 15px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.3); font-size: 0.95rem;" onclick="window.location.reload(true)">
+            ✨ 시스템이 업데이트되었습니다. 여기를 눌러 새로고침하세요!
+        </div>
+        
         <!-- 상단 헤더 및 관리자 제어바 -->
         <header class="main-header">
             <div class="header-branding">
@@ -714,14 +719,26 @@
             if (retryBtn) retryBtn.style.display = 'block';
         }
     </script>
-    <script type="module" src="app.js?v=96"></script>
+    <script type="module" src="app.js?v=97"></script>
 
     <!-- [v60] Service Worker 등록 -->
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('./service-worker.js')
-                    .then(reg => console.log('[SW] Registered:', reg.scope))
+                    .then(reg => {
+                        console.log('[SW] Registered:', reg.scope);
+                        reg.addEventListener('updatefound', () => {
+                            const newWorker = reg.installing;
+                            newWorker.addEventListener('statechange', () => {
+                                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                    // 새 업데이트 대기 중
+                                    const banner = document.getElementById('pwaUpdateBanner');
+                                    if(banner) banner.style.display = 'block';
+                                }
+                            });
+                        });
+                    })
                     .catch(err => console.warn('[SW] Registration failed:', err));
             });
         }

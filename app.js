@@ -1005,7 +1005,7 @@ async function commitSession() {
 
         // 상태 초기화 및 최종 점수(members) 저장
         await fbSaveToCloud({ members, currentSchedule: [], applicants: [] }, 'commitSession:final');
-        await fbSaveSessionState('idle', currentSessionState.sessionNum, "", currentSessionState.matchMode);
+        await fbSaveSessionState('idle', sessionNum, "", currentSessionState.matchMode);
         alert("결과가 성공적으로 반영되었습니다.");
     } catch (error) {
         console.error("[App] commitSession failed:", error);
