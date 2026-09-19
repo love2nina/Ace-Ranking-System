@@ -1214,13 +1214,43 @@ async function handleCopyAIData() {
             const { expected } = m.elo_at_match;
             const t1_won = m.score1 > m.score2;
             const t2_won = m.score2 > m.score1;
-            if ((t1_won && expected < 0.45) || (t2_won && expected > 0.55)) {
+            const is_draw = m.score1 === m.score2;
+            
+            // 기존 승패 조건
+            const upsetByT1Win = t1_won && expected < 0.45;
+            const upsetByT2Win = t2_won && expected > 0.55;
+            
+            // 무승부 조건: 한쪽이 매우 유리했는데 비긴 경우 (예: 기대승률 35% 미만인 팀이 비기거나, 65% 초과인 팀이 비긴 경우)
+            // 여기서는 기존 승패 기준과 유사하게 45%, 55%를 기준으로 삼을 수도 있지만,
+            // 보통 무승부 업셋은 기대승률 차이가 더 클 때 발생하므로 기존보다 조금 더 엄격한 기준(예: <0.40 또는 >0.60)을 쓰거나 동일하게 씁니다.
+            // 일단 사용자 요청에 따라 무승부 조건도 추가합니다. (기대승률 45% 미만인 팀이 비기면 선전한 것으로 간주)
+            const upsetByDrawT1 = is_draw && expected < 0.45; 
+            const upsetByDrawT2 = is_draw && expected > 0.55;
+
+            if (upsetByT1Win || upsetByT2Win || upsetByDrawT1 || upsetByDrawT2) {
+                let upsetType = "win";
+                let mainTeam, subTeam, expRate;
+                
+                if (upsetByT1Win) {
+                    mainTeam = m.t1_names; subTeam = m.t2_names; expRate = Math.round(expected * 100);
+                } else if (upsetByT2Win) {
+                    mainTeam = m.t2_names; subTeam = m.t1_names; expRate = Math.round((1 - expected) * 100);
+                } else if (upsetByDrawT1) {
+                    upsetType = "draw";
+                    mainTeam = m.t1_names; subTeam = m.t2_names; expRate = Math.round(expected * 100);
+                } else if (upsetByDrawT2) {
+                    upsetType = "draw";
+                    mainTeam = m.t2_names; subTeam = m.t1_names; expRate = Math.round((1 - expected) * 100);
+                }
+
                 upsets.push({
-                    matchId: m.id, group: m.group,
-                    winner: t1_won ? m.t1_names : m.t2_names,
-                    loser: t1_won ? m.t2_names : m.t1_names,
+                    matchId: m.id, 
+                    group: m.group,
+                    winner: mainTeam, // 무승부일 경우 '선전한 팀'이 winner 위치에 들어감
+                    loser: subTeam,
                     score: `${m.score1}:${m.score2}`,
-                    expectedWinRate: t1_won ? Math.round(expected * 100) : Math.round((1 - expected) * 100)
+                    expectedWinRate: expRate,
+                    type: upsetType
                 });
             }
         }
