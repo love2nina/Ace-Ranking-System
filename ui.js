@@ -1152,26 +1152,23 @@ export function renderBadgeHall(context) {
 
     // --- 1. 명예의 전당용 (최고의 도토리 + 외부 대회) ---
     if (hallGrid) {
-        // [v92] '최고의 도토리' - MMR 기준 Top 3 포디움 형태로 표시
+        // [v92] '최고의 도토리' - MMR 기준 Top 4 포디움 형태로 표시
         const activeMembers = members.filter(m => m.isActive !== false && m.matchCount > 0);
-        const top3 = [...activeMembers].sort((a, b) => (b.mmr || 0) - (a.mmr || 0)).slice(0, 3);
-        const medalIcons = ['🥇', '🥈', '🥉'];
-        const medalColors = ['#FFD700', '#C0C0C0', '#CD7F32'];
-        const medalLabels = ['1위', '2위', '3위'];
+        const top4 = [...activeMembers].sort((a, b) => (b.mmr || 0) - (a.mmr || 0)).slice(0, 4);
+        const medalColors = ['#FFD700', '#C0C0C0', '#CD7F32', '#CD7F32'];
 
-        const topAcornHTML = top3.length > 0 ? `
+        const topAcornHTML = top4.length > 0 ? `
             <div class="stat-card badge-card" style="grid-column: 1 / -1;">
                 <div class="card-icon">🏅</div>
                 <div class="card-content" style="width:100%">
                     <h3>최고의 도토리</h3>
                     <p class="card-desc">MMR 최상위 랭커</p>
-                    <div style="display:flex; flex-direction:column; gap:7px; margin-top:10px;">
-                        ${top3.map((m, i) => `
-                        <div style="display:flex; align-items:center; gap:8px; padding:7px 10px; background:rgba(255,255,255,0.05); border-radius:8px; border-left: 3px solid ${medalColors[i]};">
-                            <span style="font-size:1.1rem; line-height:1; flex-shrink:0;">${medalIcons[i]}</span>
-                            <span style="font-weight:600; font-size:0.88rem; color:var(--text-primary); flex:1;">${m.name}</span>
-                            <span style="font-size:0.72rem; color:${medalColors[i]}; font-weight:600; white-space:nowrap;">${Math.round(m.mmr || 0)}</span>
-                        </div>`).join('')}
+                    <div class="player-list" style="margin-top:10px;">
+                        ${top4.map((m, i) => `
+                        <span class="player-name" style="border: 2px solid ${medalColors[i]}; display:inline-flex; flex-direction:column; align-items:center; padding: 4px 10px; gap: 2px;">
+                            <span>${m.name}</span>
+                            <span style="font-size: 0.7rem; color: ${medalColors[i]}; opacity: 0.9;">${Math.round(m.mmr || 0)}</span>
+                        </span>`).join('')}
                     </div>
                 </div>
             </div>` : ``;
