@@ -1303,9 +1303,9 @@ async function handleCopyAIData() {
         sessionPlayerIds.map(pid => { const m = members.find(m => String(m.id) === String(pid)); return m ? m.name : null; }).filter(Boolean)
     );
     const todayRelevantBadges = {
-        hotStreaks: cumulativeBadges.hotStreaks.filter(n => sessionPlayerNames.has(n)),
-        ironMen: cumulativeBadges.ironMen.filter(n => sessionPlayerNames.has(n)),
-        kingSlayers: cumulativeBadges.kingSlayers.filter(n => sessionPlayerNames.has(n))
+        hotStreaks: (cumulativeBadges.hotStreaks || []).filter(n => sessionPlayerNames.has(n)),
+        ironMen: (cumulativeBadges.ironMen || []).filter(n => sessionPlayerNames.has(n)),
+        kingSlayers: (cumulativeBadges.kingSlayers?.names || []).filter(n => sessionPlayerNames.has(n))
     };
 
     const reportData = {
