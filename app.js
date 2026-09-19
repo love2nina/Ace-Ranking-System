@@ -66,6 +66,11 @@ import {
     generateSchedule as engineGenerateSchedule
 } from './engine.js?v=96';
 
+import {
+    calculateBadges,
+    getPlayerInsights
+} from './statsService.js?v=96';
+
 // --- 전역 애플리케이션 상태 (State) ---
 let members = [];
 let matchHistory = [];
@@ -1220,47 +1225,25 @@ async function handleCopyAIData() {
         groupStats[gLabel].totalScores += (m.score1 + m.score2);
     });
 
-    // --- 3. 시즌 누적 파트너 및 클러치 통계 (빅데이터) ---
-    const partnerStats = {};
-    const clutchWins = {};
+    // --- 3. 시즌 누적 빅데이터: statsService.js의 기존 함수 재사용 (이전 시즌 포함) ---
+    // calculateBadges: 클러치 등 뱃지 통계 (cumulative 모드 = 이전 시즌 누적 포함)
+    const cumulativeBadges = calculateBadges(members, matchHistory, 'cumulative');
 
-    sortedHistory.forEach(m => {
-        if (m.t1_names && m.t2_names && m.score1 !== m.score2) {
-            const addStat = (names, won, scoreDiff) => {
-                if (names.length !== 2) return;
-                const key = names.sort().join(' & ');
-                if (!partnerStats[key]) partnerStats[key] = { matches: 0, wins: 0, scoreDiff: 0 };
-                partnerStats[key].matches++;
-                if (won) partnerStats[key].wins++;
-                partnerStats[key].scoreDiff += scoreDiff;
-            };
-            addStat(m.t1_names, m.score1 > m.score2, m.score1 - m.score2);
-            addStat(m.t2_names, m.score2 > m.score1, m.score2 - m.score1);
-        }
-        
-        const diff = Math.abs(m.score1 - m.score2);
-        if (diff === 1) {
-            const winners = m.score1 > m.score2 ? (m.t1_names || []) : (m.t2_names || []);
-            winners.forEach(name => {
-                clutchWins[name] = (clutchWins[name] || 0) + 1;
-            });
-        }
+    // getPlayerInsights: 이번 회차 참가 선수들의 환상의 파트너 / 천적 통계
+    // prevPartnerStats + prevSeasonStats(이전 시즌)가 자동으로 합산됨
+    const sessionPlayerIds = [...new Set(sessionMatches.flatMap(m => [...(m.t1_ids || []), ...(m.t2_ids || [])]))];
+    const playerInsightsMap = {};
+    sessionPlayerIds.forEach(pid => {
+        const insight = getPlayerInsights(pid, members, matchHistory);
+        if (!insight) return;
+        const member = members.find(m => String(m.id) === String(pid));
+        if (!member) return;
+        playerInsightsMap[member.name] = {
+            bestPartner: insight.bestPartner ? { name: insight.bestPartner.name, games: insight.bestPartner.games, wins: insight.bestPartner.wins, winRate: parseFloat(insight.bestPartner.winRate.toFixed(2)) } : null,
+            worstPartner: insight.worstPartner ? { name: insight.worstPartner.name, games: insight.worstPartner.games, wins: insight.worstPartner.wins } : null,
+            nemesis: insight.nemesis ? { name: insight.nemesis.name, games: insight.nemesis.games, wins: insight.nemesis.wins, losses: insight.nemesis.losses } : null
+        };
     });
-
-    const minMatches = 3;
-    const bestPartners = Object.entries(partnerStats)
-        .filter(([_, stat]) => stat.matches >= minMatches)
-        .sort((a, b) => (b[1].wins / b[1].matches) - (a[1].wins / a[1].matches) || b[1].scoreDiff - a[1].scoreDiff)
-        .slice(0, 3).map(([k, v]) => ({ duo: k, matches: v.matches, wins: v.wins, scoreDiff: v.scoreDiff }));
-
-    const worstPartners = Object.entries(partnerStats)
-        .filter(([_, stat]) => stat.matches >= minMatches)
-        .sort((a, b) => (a[1].wins / a[1].matches) - (b[1].wins / b[1].matches) || a[1].scoreDiff - b[1].scoreDiff)
-        .slice(0, 3).map(([k, v]) => ({ duo: k, matches: v.matches, wins: v.wins, scoreDiff: v.scoreDiff }));
-
-    const topClutchPlayers = Object.entries(clutchWins)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 3).map(([name, wins]) => ({ name, clutchWins: wins }));
 
     const reportData = {
         sessionNum: sessionNum,
@@ -1275,10 +1258,16 @@ async function handleCopyAIData() {
         }),
         upsets: upsets,
         groupStats: groupStats,
-        bestPartners_AllTime: bestPartners,
-        worstPartners_AllTime: worstPartners,
-        clutchPlayers_AllTime: topClutchPlayers,
-        topRankers: members.sort((a, b) => b.rating - a.rating).slice(0, 5).map(m => ({ name: m.name, rating: Math.round(m.rating) }))
+        // 이전 시즌 포함 올타임 누적 빅데이터
+        playerInsights_AllTime: playerInsightsMap,
+        badges_AllTime: {
+            hotStreaks: cumulativeBadges.hotStreaks,
+            ironMen: cumulativeBadges.ironMen,
+            kingSlayers: cumulativeBadges.kingSlayers,
+            nationalPartners: cumulativeBadges.nationalPartners,
+            nemesisMakers: cumulativeBadges.nemesisMakers
+        },
+        topRankers: [...members].sort((a, b) => b.rating - a.rating).slice(0, 5).map(m => ({ name: m.name, rating: Math.round(m.rating) }))
     };
 
     // 클립보드 복사 외에 파일 다운로드 기능도 제공
