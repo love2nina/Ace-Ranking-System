@@ -1162,7 +1162,7 @@ export function renderBadgeHall(context) {
                 <div class="card-icon">🏅</div>
                 <div class="card-content" style="width:100%">
                     <h3>최고의 도토리</h3>
-                    <p class="card-desc">MMR 최상위 랭커</p>
+                    <p class="card-desc">평촌ACE 최고실력자 4인방</p>
                     <div class="player-list" style="margin-top:10px; align-items: flex-start;">
                         ${top4.map((m, i) => `
                         <div style="display: flex; flex-direction: column; align-items: center; gap: 2px;">
