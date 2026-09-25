@@ -1,6 +1,6 @@
 {
   "name": "도토리 키재기 - ACE 랭킹",
-  "short_name": "ACE 랭킹",
+  "short_name": "도토리 키재기",
   "description": "평촌 ACE 테니스 클럽 랭킹 관리 시스템",
   "start_url": "./index.html",
   "display": "standalone",
@@ -9,7 +9,7 @@
   "orientation": "portrait-primary",
   "icons": [
     {
-      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏆</text></svg>",
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎾</text></svg>",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"
