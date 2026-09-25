@@ -1158,7 +1158,16 @@ export function applyNewMatches(context) {
     });
 
     if (newMatches.length > 0) {
-        const prevSnapshot = sessionRankSnapshots[sId] || {}; 
+        // [버그수정] previousRankingIds는 현재 확정 회차(N)가 아닌 N-1 스냅샷 기준이어야 함.
+        // 기존: sessionRankSnapshots[sId] → sId=N이라 신규 회차는 비어있어 변동값 항상 0
+        // 수정: N보다 작은 가장 최근 스냅샷(N-1)을 명시적으로 탐색
+        const currentSIdNum = parseInt(sId);
+        const allSnapshotKeys = Object.keys(sessionRankSnapshots)
+            .map(Number).sort((a, b) => a - b);
+        const prevSIdNum = allSnapshotKeys.filter(k => k < currentSIdNum).pop(); // N-1
+        const prevSnapshot = (prevSIdNum !== undefined)
+            ? (sessionRankSnapshots[String(prevSIdNum)] || {})
+            : {};
         const previousRankingIds = Object.entries(prevSnapshot)
             .sort(([, rankA], [, rankB]) => rankA - rankB)
             .map(([id]) => id);

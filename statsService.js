@@ -229,7 +229,7 @@ export const getPlayerInsights = (targetId, members, matchHistory) => {
         partnerStats.set(partnerId, partner);
     });
 
-    myMatches.forEach(match => {
+    myMatches.forEach((match, index) => {
         const isT1 = match.t1_ids.map(id => id.toString()).includes(targetId.toString());
         const myTeamIds = isT1 ? match.t1_ids : match.t2_ids;
         const opTeamIds = isT1 ? match.t2_ids : match.t1_ids;
@@ -244,23 +244,25 @@ export const getPlayerInsights = (targetId, members, matchHistory) => {
         // 파트너 분석
         myTeamIds.forEach(id => {
             if (id.toString() === targetId.toString()) return;
-            const stats = partnerStats.get(id.toString()) || { wins: 0, losses: 0, draws: 0, eloGain: 0, games: 0 };
+            const stats = partnerStats.get(id.toString()) || { wins: 0, losses: 0, draws: 0, eloGain: 0, games: 0, lastEncounter: -1 };
             if (isWin) stats.wins++;
             if (isLoss) stats.losses++;
             if (isDraw) stats.draws++;
             stats.eloGain += eloChange;
             stats.games++;
+            stats.lastEncounter = index;
             partnerStats.set(id.toString(), stats);
         });
 
         // 상대 분석 (천적)
         opTeamIds.forEach(id => {
-            const stats = antagonistStats.get(id.toString()) || { wins: 0, losses: 0, draws: 0, games: 0, netEloChange: 0 };
+            const stats = antagonistStats.get(id.toString()) || { wins: 0, losses: 0, draws: 0, games: 0, netEloChange: 0, lastEncounter: -1 };
             if (isWin) stats.wins++;
             if (isLoss) stats.losses++;
             if (isDraw) stats.draws++;
             stats.games++;
             stats.netEloChange += eloChange;
+            stats.lastEncounter = index;
             antagonistStats.set(id.toString(), stats);
         });
     });
@@ -276,11 +278,18 @@ export const getPlayerInsights = (targetId, members, matchHistory) => {
         };
     });
 
-    // 1. 🏹 나의 천적: 나를 상대로 NET ELO를 가장 많이 깎아간 사람 (합산 ELO 변화량이 가장 낮음)
     const antagonists = Array.from(antagonistStats.entries()).map(([id, stats]) => {
         const member = members.find(m => String(m.id) === String(id));
-        return { id, name: member ? member.name : '알 수 없음', ...stats };
+        // 내가 이긴 횟수가 stats.wins이므로, 승률 = stats.wins / stats.games
+        return { 
+            id, 
+            name: member ? member.name : '알 수 없음', 
+            winRate: stats.wins / (stats.games || 1),
+            ...stats 
+        };
     });
+
+    // 1. 🏹 나의 천적: 나를 상대로 NET ELO를 가장 많이 깎아간 사람 (합산 ELO 변화량이 가장 낮음)
     const nemesis = antagonists
         .filter(a => a.games >= NEMESIS_MIN_GAMES && a.netEloChange < 0)
         .sort((a, b) => a.netEloChange - b.netEloChange)[0];
@@ -295,9 +304,21 @@ export const getPlayerInsights = (targetId, members, matchHistory) => {
         .filter(p => p.games >= PARTNER_MIN_GAMES && (p.losses / p.games) > 0.5)
         .sort((a, b) => b.losses - a.losses || a.eloGain - b.eloGain)[0];
 
+    // 4. 🥇 깐부 (가장 많이 파트너를 한 선수): 최소 6경기 이상, 함께한 경기 수 내림차순 -> 승률 내림차순 -> 최근 경기 내림차순
+    const gganbu = partners
+        .filter(p => p.games >= 6)
+        .sort((a, b) => b.games - a.games || b.winRate - a.winRate || b.lastEncounter - a.lastEncounter)[0];
+
+    // 5. ⚔️ 호적수 (가장 많이 싸운 선수): 최소 6경기 이상, 맞붙은 경기 수 내림차순 -> 내 승률 오름차순(내가 질 확률 높음) -> 최근 경기 내림차순
+    const rival = antagonists
+        .filter(a => a.games >= 6)
+        .sort((a, b) => b.games - a.games || a.winRate - b.winRate || b.lastEncounter - a.lastEncounter)[0];
+
     return {
         bestPartner,
         worstPartner,
-        nemesis
+        nemesis,
+        gganbu,
+        rival
     };
 };

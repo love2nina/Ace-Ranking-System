@@ -30,7 +30,7 @@ import {
     fbAddApplicantWithTransaction,
     fbRemoveApplicantWithTransaction,
     fbToggleLateJoinWithTransaction
-} from './firebase-api.js?v=99';
+} from './firebase-api.js?v=100';
 
 import {
     updateAdminUI as uiUpdateAdminUI,
@@ -227,6 +227,43 @@ async function init() {
 window.retryFirebaseInit = () => {
     window.location.reload();
 };
+
+// [v96] iOS PWA 실시간 업데이트 복구 핸들러
+// Firebase WebSocket(onSnapshot)은 iOS 백그라운드 전환 시 강제 종료될 수 있음.
+// 포그라운드 복귀, BFCache 복원, 네트워크 재연결 시 Firebase 구독을 재초기화.
+{
+    let _reconnectTimer = null;
+    const _scheduleReconnect = (reason) => {
+        if (_reconnectTimer) return; // 중복 호출 방지 (debounce)
+        _reconnectTimer = setTimeout(() => {
+            _reconnectTimer = null;
+            const dbName = getCurrentDbName(); // firebase-api.js에서 export된 getter 사용
+            if (!dbName) return;
+            console.log(`[PWA] Firebase 재연결 실행 (사유: ${reason}, DB: ${dbName})`);
+            subscribeToCluster(dbName);
+        }, 500);
+    };
+
+    // 포그라운드 복귀 (홈 화면 → 앱, 화면 잠금 해제 등)
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            _scheduleReconnect('visibilitychange');
+        }
+    });
+
+    // BFCache에서 복원된 경우 (iOS Safari 뒤로가기 등)
+    window.addEventListener('pageshow', (event) => {
+        if (event.persisted) {
+            _scheduleReconnect('pageshow-bfcache');
+        }
+    });
+
+    // 네트워크 재연결 (WiFi ↔ LTE 전환, 오프라인 → 온라인)
+    window.addEventListener('online', () => {
+        _scheduleReconnect('network-online');
+    });
+}
+
 
 // --- 윈도우 익스포트 (UI 제어용) ---
 window.switchTab = (id) => {
@@ -642,25 +679,51 @@ function setupEventListeners() {
 }
 
 /**
- * [v80] 현재 점수를 기준으로 실시간 순위를 매깁니다. (전체 재계산 없이 순위만 갱신)
+ * [v96] 현재 점수를 기준으로 실시간 순위를 매깁니다. (전체 재계산 없이 순위만 갱신)
+ * [버그수정] 순위 변동 기준을 세션 상태(status)에 따라 올바르게 분기:
+ *   - idle   (결과 확정 후 / 신규 회차 오픈 전):
+ *       sessionIds[-1]=N(최신완료), sessionIds[-2]=N-1
+ *       → 현재 레이팅(N 반영) vs N-1 스냅샷 = N 회차 변동 표시 ✅
+ *   - recruiting / playing (신규 회차 N이 오픈됐으나 아직 미완료):
+ *       completedSessions[-1]=N-1, completedSessions[-2]=N-2
+ *       → 현재 레이팅(N-1 반영) vs N-2 스냅샷 = N-1 회차 변동 표시 ✅
  */
 function updateRanks() {
     if (!members || members.length === 0) return;
     const activeMembers = members.filter(m => m.isActive !== false);
     const sorted = [...activeMembers].sort((a, b) => (b.rating || ELO_INITIAL) - (a.rating || ELO_INITIAL));
 
-    // [버그수정] 페이지 로드 시에도 전 회차 대비 순위 변동을 정확히 계산
     let prevSnapshot = null;
     if (sessionRankSnapshots) {
         const sessionIds = Object.keys(sessionRankSnapshots).map(Number).sort((a, b) => a - b);
         const currentSessionNum = currentSessionState?.sessionNum;
+        const status = currentSessionState?.status;
         let prevSessionId = null;
-        if (currentSessionNum) {
-            const prevSessions = sessionIds.filter(id => id < currentSessionNum);
-            if (prevSessions.length > 0) prevSessionId = prevSessions[prevSessions.length - 1];
-        } else if (sessionIds.length > 1) {
-            prevSessionId = sessionIds[sessionIds.length - 2];
+
+        if (status === 'idle') {
+            // 대기 상태: 가장 최근 완료 회차(N)와 그 이전(N-1)을 비교
+            // N 완료 후 레이팅 vs N-1 스냅샷 = "N회차에서 순위 변동" 표시
+            if (sessionIds.length >= 2) {
+                prevSessionId = sessionIds[sessionIds.length - 2]; // N-1 스냅샷
+            }
+        } else {
+            // recruiting 또는 playing: 현재 회차(currentSessionNum=N)는 아직 미완료
+            // 완료된 최신 회차는 N-1. 현재 레이팅(N-1 반영) vs N-2 스냅샷 = "N-1회차 변동" 표시
+            if (currentSessionNum) {
+                const completedSessions = sessionIds.filter(id => id < currentSessionNum);
+                // completedSessions[-1] = N-1 (현재 레이팅 기준), completedSessions[-2] = N-2 (비교 기준)
+                if (completedSessions.length >= 2) {
+                    prevSessionId = completedSessions[completedSessions.length - 2]; // N-2 스냅샷
+                }
+                // N-2가 없으면 (회차가 1개뿐): prevSessionId = null → 변동 없음
+            } else {
+                // currentSessionNum 없는 예외상황 → 최신 두 스냅샷으로 fallback
+                if (sessionIds.length >= 2) {
+                    prevSessionId = sessionIds[sessionIds.length - 2];
+                }
+            }
         }
+
         if (prevSessionId !== null) {
             prevSnapshot = sessionRankSnapshots[prevSessionId];
         }
@@ -670,7 +733,7 @@ function updateRanks() {
     sorted.forEach((m, idx) => {
         const idStr = String(m.id);
         let change = 0;
-        if (prevSnapshot && prevSnapshot[idStr]) {
+        if (prevSnapshot && prevSnapshot[idStr] !== undefined) {
             change = prevSnapshot[idStr] - (idx + 1);
         }
         tempMap.set(idStr, { rank: idx + 1, change });
@@ -679,6 +742,7 @@ function updateRanks() {
     rankMap.clear();
     tempMap.forEach((val, key) => rankMap.set(key, val));
 }
+
 
 // --- 코어 UI 동기화 ---
 function updateUI() {

@@ -173,31 +173,42 @@ export function subscribeToCluster(dbName) {
             _dataLoadedForDb = currentDbName; // 데이터 로드 성공 기록
             if (_callbacks.onDataLoaded) _callbacks.onDataLoaded(data);
 
-            // 1.1 하위 히스토리 컬렉션 추가 구독 (순차적 로딩)
-            const { collection, query, orderBy } = window.FB_SDK;
-            const historyRef = collection(db, clusterPath, currentDbName, "history");
-            const historyQuery = query(historyRef, orderBy("timestamp", "desc")); // 최신순
-
-            if (historyUnsubscribe) historyUnsubscribe();
-            historyUnsubscribe = onSnapshot(historyQuery, (hSnapshot) => {
-                const historyList = hSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                if (_callbacks.onHistoryLoaded) _callbacks.onHistoryLoaded(historyList);
-            }, (hError) => {
-                console.warn("[Firebase] History migration check or loading issue:", hError);
-            });
-
-            // 1.2 분석 리포트 서브컬렉션 구독 (지연/순차 로드)
-            const reportsRef = collection(db, clusterPath, currentDbName, "reports");
-            if (reportsUnsubscribe) reportsUnsubscribe();
-            reportsUnsubscribe = onSnapshot(reportsRef, (rSnapshot) => {
-                const reportsData = {};
-                rSnapshot.docs.forEach(doc => {
-                    reportsData[doc.id] = doc.data().content;
+            // 1.1 하위 히스토리 컬렉션 추가 구독 (최초 1회만 등록)
+            // [버그수정] 클러스터 문서(메인)가 변경될 때마다(참가신청, 점수저장 등)
+            // 히스토리 리스너를 해제·재등록하면 수신 공백이 생겨 실시간 업데이트가 끊김.
+            // → 리스너가 이미 살아있으면 재등록하지 않아 공백을 제거.
+            // → DB 전환 시에는 subscribeToCluster() 상단에서 명시적으로 해제하므로 안전.
+            if (!historyUnsubscribe) {
+                const { collection, query, orderBy } = window.FB_SDK;
+                const historyRef = collection(db, clusterPath, currentDbName, "history");
+                const historyQuery = query(historyRef, orderBy("timestamp", "desc")); // 최신순
+                historyUnsubscribe = onSnapshot(historyQuery, (hSnapshot) => {
+                    const historyList = hSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    if (_callbacks.onHistoryLoaded) _callbacks.onHistoryLoaded(historyList);
+                }, (hError) => {
+                    console.warn("[Firebase] History listener error:", hError);
+                    // 오류 발생 시 리스너를 초기화하여 다음 클러스터 스냅샷에서 재등록 가능하게 함
+                    historyUnsubscribe = null;
                 });
-                if (_callbacks.onReportsLoaded) _callbacks.onReportsLoaded(reportsData);
-            }, (rError) => {
-                console.warn("[Firebase] Reports loading issue:", rError);
-            });
+                console.log(`[Firebase] History listener registered for DB: ${currentDbName}`);
+            }
+
+            // 1.2 분석 리포트 서브컬렉션 구독 (최초 1회만 등록)
+            if (!reportsUnsubscribe) {
+                const { collection: col2 } = window.FB_SDK;
+                const reportsRef = col2(db, clusterPath, currentDbName, "reports");
+                reportsUnsubscribe = onSnapshot(reportsRef, (rSnapshot) => {
+                    const reportsData = {};
+                    rSnapshot.docs.forEach(doc => {
+                        reportsData[doc.id] = doc.data().content;
+                    });
+                    if (_callbacks.onReportsLoaded) _callbacks.onReportsLoaded(reportsData);
+                }, (rError) => {
+                    console.warn("[Firebase] Reports listener error:", rError);
+                    reportsUnsubscribe = null;
+                });
+                console.log(`[Firebase] Reports listener registered for DB: ${currentDbName}`);
+            }
         } else {
             // ⚠️ 문서가 존재하지 않는 경우: 빈 데이터를 자동 저장하지 않음 (데이터 소실 방지)
             console.warn(`[Firebase] Document does not exist for DB: ${currentDbName}. Skipping auto-save to prevent data loss.`);

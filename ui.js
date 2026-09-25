@@ -1367,59 +1367,40 @@ export function renderPlayerInsights(playerId, context) {
         return;
     }
 
-    const { nemesis, bestPartner, worstPartner } = insights;
-
-    const nemesisHTML = `
-        <div class="stat-card insight-card danger">
-            <div class="card-header">
-                <span class="card-label">주의대상 (천적)</span>
-                <span class="card-emoji">🏹</span>
-            </div>
-            <div class="card-body">
-                <h3>나의 천적</h3>
-                <div class="target-name">${nemesis ? nemesis.name : '---'}</div>
-            </div>
-            <div class="card-footer" style="font-size: 0.85rem; line-height: 1.4; color: var(--text-secondary);">
-                ${nemesis ? `<span style="font-weight:bold; color:var(--text-color)">${nemesis.wins || 0}승 ${nemesis.draws || 0}무 ${nemesis.losses || 0}패</span> (<span style="color:var(--danger); font-weight:bold">-${Math.abs(Math.round(nemesis.netEloChange))} ELO</span>)` : '기록 없음'}
-            </div>
-        </div>
-    `;
+    const { nemesis, bestPartner, worstPartner, gganbu, rival } = insights;
 
     const getSymbol = (val) => val > 0 ? '+' : (val < 0 ? '-' : '');
     const formatElo = (val) => `${getSymbol(val)}${Math.abs(Math.round(val))} ELO`;
 
-    const bestPartnerHTML = `
-        <div class="stat-card insight-card success">
+    const createStatCard = (label, emoji, title, data, cssClass, isAntagonist = false) => `
+        <div class="stat-card insight-card ${cssClass}">
             <div class="card-header">
-                <span class="card-label">최고승률 파트너</span>
-                <span class="card-emoji">🤝</span>
+                <span class="card-label">${label}</span>
+                <span class="card-emoji">${emoji}</span>
             </div>
             <div class="card-body">
-                <h3>환상의 파트너</h3>
-                <div class="target-name">${bestPartner ? bestPartner.name : '---'}</div>
+                <h3>${title}</h3>
+                <div class="target-name">${data ? data.name : '---'}</div>
             </div>
             <div class="card-footer" style="font-size: 0.85rem; line-height: 1.4; color: var(--text-secondary);">
-                ${bestPartner ? `<span style="font-weight:bold; color:var(--text-color)">${bestPartner.wins || 0}승 ${bestPartner.draws || 0}무 ${bestPartner.losses || 0}패</span> (<span style="color:var(--success); font-weight:bold">${formatElo(bestPartner.eloGain)}</span>)` : '조건에 맞는 파트너 부족'}
+                ${data ? `<span style="font-weight:bold; color:var(--text-color)">${data.wins || 0}승 ${data.draws || 0}무 ${data.losses || 0}패</span> (<span style="color:var(--${isAntagonist ? 'danger' : 'success'}); font-weight:bold">${isAntagonist ? '-' + Math.abs(Math.round(data.netEloChange || 0)) + ' ELO' : formatElo(data.eloGain || 0)}</span>)` : '조건에 맞는 대상 없음'}
             </div>
         </div>
     `;
 
-    const worstPartnerHTML = `
-        <div class="stat-card insight-card warning">
-            <div class="card-header">
-                <span class="card-label">웃픈조합 파트너</span>
-                <span class="card-emoji">🚫</span>
-            </div>
-            <div class="card-body">
-                <h3>환장하는 파트너</h3>
-                <div class="target-name">${worstPartner ? worstPartner.name : '---'}</div>
-            </div>
-            <div class="card-footer" style="font-size: 0.85rem; line-height: 1.4; color: var(--text-secondary);">
-                ${worstPartner ? `<span style="font-weight:bold; color:var(--text-color)">${worstPartner.wins || 0}승 ${worstPartner.draws || 0}무 ${worstPartner.losses || 0}패</span> (<span style="color:var(--danger); font-weight:bold">${formatElo(worstPartner.eloGain)}</span>)` : '조건에 맞는 파트너 부족'}
-            </div>
-        </div>
-    `;
+    // 최다 전적 섹션 (빈도 기준) - 나중에 데이터가 많이 쌓이면 주석 해제하여 활성화
+    // const volumeHeaderHTML = `<div style="width: 100%; margin-top: 10px; margin-bottom: 5px;"><h3 style="color: var(--text-primary); font-size: 1rem; border-bottom: 1px solid var(--border-color); padding-bottom: 5px;">⚔️ 최다 전적 (판수 기준)</h3></div>`;
+    // const gganbuHTML = createStatCard('최다 파트너', '🥇', '영혼의 깐부', gganbu, 'success');
+    // const rivalHTML = createStatCard('최다 맞대결', '🔥', '나의 호적수', rival, 'danger', true);
 
+    // 승률 랭킹 섹션 (효율 기준) - 추후 최다 전적 섹션 활성화 시 함께 주석 해제
+    // const efficiencyHeaderHTML = `<div style="width: 100%; margin-top: 20px; margin-bottom: 5px;"><h3 style="color: var(--text-primary); font-size: 1rem; border-bottom: 1px solid var(--border-color); padding-bottom: 5px;">🎯 승률 랭킹 (효율 기준)</h3></div>`;
+    
+    const nemesisHTML = createStatCard('주의대상 (천적)', '🏹', '나의 천적', nemesis, 'danger', true);
+    const bestPartnerHTML = createStatCard('최고승률 파트너', '🤝', '환상의 파트너', bestPartner, 'success');
+    const worstPartnerHTML = createStatCard('웃픈조합 파트너', '🚫', '환장하는 파트너', worstPartner, 'warning');
+
+    // 임시로 기존 항목 3개만 렌더링 (추후 volumeHeaderHTML + gganbuHTML + rivalHTML + efficiencyHeaderHTML 주석 해제 후 여기에 추가)
     insightContainer.innerHTML = nemesisHTML + bestPartnerHTML + worstPartnerHTML;
 }
 
